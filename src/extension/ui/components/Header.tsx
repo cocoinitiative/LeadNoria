@@ -48,7 +48,7 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="text-[10px] font-normal text-slate-500">• Discover. Verify. Connect.</span>
             </h1>
             <p className="text-[10px] text-slate-400 mt-0.5 leading-none">
-              Business lead research from real public signals.
+              Meta Ad Library research from public commercial signals.
             </p>
           </div>
         </div>

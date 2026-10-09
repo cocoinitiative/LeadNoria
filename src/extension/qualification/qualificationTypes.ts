@@ -16,9 +16,25 @@ import type {
 } from '../extraction/types.ts';
 import type { ContactEvidenceStrength, ContactEnrichmentResult } from '../enrichment/contactTypes.ts';
 import type { EntityRelevanceResult } from '../relevance/types.ts';
-import type { MapsVerificationIntegrationResult } from '../relevance/mapsWebsiteIntegration.ts';
 import type { ResolvedEntityGroup } from '../resolution/types.ts';
 import type { NormalizedCandidate } from '../extraction/types.ts';
+
+export interface MapsVerificationIntegrationResult {
+  entityId: string;
+  relevanceState: string;
+  websiteState: string;
+  verificationState: string;
+  verificationEvidence: any[];
+  verificationReasons: string[];
+  verificationTimestamp: string;
+  sourceContributions: any[];
+  derivedFrom: any[];
+  policyEligibility: string;
+  persistenceEligibility: string;
+  exportEligibility: string;
+  canonicalWebsiteIdentity?: string;
+  redirectHistory?: string[];
+}
 
 // ==========================================
 // 1. Qualification States & Criterion Outcomes

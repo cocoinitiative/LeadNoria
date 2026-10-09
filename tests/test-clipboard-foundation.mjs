@@ -1,12 +1,11 @@
 /**
  * LeadNoria — Spreadsheet Clipboard & Copy All Domain
- * Comprehensive Foundation Test Suite
+ * Comprehensive Foundation Test Suite (Meta Ad Library Only)
  *
  * Verifies:
  * - Generic TSV serialization & deterministic ordering
  * - Cell normalization & safe type conversions
  * - Tab & newline sanitization
- * - Google Maps 8-column spreadsheet projection
  * - Meta Ad Library 3-column spreadsheet projection
  * - Browser-facing clipboard writer abstraction & DI
  * - Architectural boundaries (zero acquisition imports, zero Lead schema pollution)
@@ -20,10 +19,6 @@ import { fileURLToPath } from 'url';
 import {
   serializeToTsv,
   sanitizeCellValue,
-  GOOGLE_MAPS_CLIPBOARD_COLUMNS,
-  googleMapsCandidateToClipboardRow,
-  googleMapsResultsToClipboardRows,
-  googleMapsResultsToTsv,
   META_CLIPBOARD_COLUMNS,
   metaResultToClipboardRow,
   metaResultsToClipboardRows,
@@ -216,179 +211,7 @@ test('17. No accidental "[object Object]" output from arbitrary objects', () => 
   assert.ok(!tsv.includes('[object Object]'));
 });
 
-// ─── GROUP 2: GOOGLE MAPS CLIPBOARD PROJECTION ──────────────────────────────
-group('GROUP 2: GOOGLE MAPS CLIPBOARD PROJECTION');
 
-test('18. Business name mapping (string and ObservedField)', () => {
-  const row1 = googleMapsCandidateToClipboardRow({ businessName: 'Prime Realtors' });
-  assert.strictEqual(row1.businessName, 'Prime Realtors');
-
-  const row2 = googleMapsCandidateToClipboardRow({
-    businessName: { availability: 'PRESENT', parsedValue: 'Acme Corp', rawValue: 'Acme Corp' }
-  });
-  assert.strictEqual(row2.businessName, 'Acme Corp');
-
-  const row3 = googleMapsCandidateToClipboardRow({ name: 'Fallback Name' });
-  assert.strictEqual(row3.businessName, 'Fallback Name');
-});
-
-test('19. Maps URL mapping (string and ObservedField)', () => {
-  const row1 = googleMapsCandidateToClipboardRow({
-    mapsUrl: 'https://www.google.com/maps/place/data=123'
-  });
-  assert.strictEqual(row1.googleMaps, 'https://www.google.com/maps/place/data=123');
-
-  const row2 = googleMapsCandidateToClipboardRow({
-    mapsUrl: { availability: 'PRESENT', parsedValue: 'https://maps.google.com/?cid=456' }
-  });
-  assert.strictEqual(row2.googleMaps, 'https://maps.google.com/?cid=456');
-});
-
-test('20. Website YES mapping (explicit state, string URL, ObservedField)', () => {
-  const r1 = googleMapsCandidateToClipboardRow({ websiteState: 'YES' });
-  assert.strictEqual(r1.website, 'YES');
-
-  const r2 = googleMapsCandidateToClipboardRow({ websiteUrl: 'https://example.com' });
-  assert.strictEqual(r2.website, 'YES');
-
-  const r3 = googleMapsCandidateToClipboardRow({
-    websiteUrl: { availability: 'PRESENT', parsedValue: 'https://acme.org' }
-  });
-  assert.strictEqual(r3.website, 'YES');
-});
-
-test('21. Website NO mapping (explicit state and ABSENT ObservedField)', () => {
-  const r1 = googleMapsCandidateToClipboardRow({ websiteState: 'NO' });
-  assert.strictEqual(r1.website, 'NO');
-
-  const r2 = googleMapsCandidateToClipboardRow({
-    websiteUrl: { availability: 'ABSENT' }
-  });
-  assert.strictEqual(r2.website, 'NO');
-});
-
-test('22. Website UNKNOWN handling yields blank ("") and is never coerced to NO', () => {
-  const r1 = googleMapsCandidateToClipboardRow({ websiteState: 'UNKNOWN' });
-  assert.strictEqual(r1.website, '');
-
-  const r2 = googleMapsCandidateToClipboardRow({
-    websiteUrl: { availability: 'UNKNOWN' }
-  });
-  assert.strictEqual(r2.website, '');
-
-  const r3 = googleMapsCandidateToClipboardRow({});
-  assert.strictEqual(r3.website, '');
-});
-
-test('23. Rating mapping (observed numbers 5, 4.7, 4.0)', () => {
-  const r1 = googleMapsCandidateToClipboardRow({ rating: 5 });
-  assert.strictEqual(r1.rating, '5');
-
-  const r2 = googleMapsCandidateToClipboardRow({ rating: 4.7 });
-  assert.strictEqual(r2.rating, '4.7');
-
-  const r3 = googleMapsCandidateToClipboardRow({
-    rating: { availability: 'PRESENT', parsedValue: 4.0 }
-  });
-  assert.strictEqual(r3.rating, '4');
-});
-
-test('24. Unknown rating remains blank ("") and is NEVER coerced to 0', () => {
-  const r1 = googleMapsCandidateToClipboardRow({ rating: null });
-  assert.strictEqual(r1.rating, '');
-  assert.notStrictEqual(r1.rating, '0');
-
-  const r2 = googleMapsCandidateToClipboardRow({
-    rating: { availability: 'UNKNOWN' }
-  });
-  assert.strictEqual(r2.rating, '');
-  assert.notStrictEqual(r2.rating, '0');
-
-  const r3 = googleMapsCandidateToClipboardRow({});
-  assert.strictEqual(r3.rating, '');
-});
-
-test('25. Phone mapping (direct and enriched)', () => {
-  const r1 = googleMapsCandidateToClipboardRow({ phone: '+1-555-0100' });
-  assert.strictEqual(r1.phone, '+1-555-0100');
-
-  const r2 = googleMapsCandidateToClipboardRow({
-    enrichmentResult: {
-      contactEvidence: {
-        phones: [{ phone: '+1-800-ACME' }]
-      }
-    }
-  });
-  assert.strictEqual(r2.phone, '+1-800-ACME');
-});
-
-test('26. Facebook mapping (direct, socialProfiles, and enrichment)', () => {
-  const r1 = googleMapsCandidateToClipboardRow({ facebook: 'https://facebook.com/prime' });
-  assert.strictEqual(r1.facebook, 'https://facebook.com/prime');
-
-  const r2 = googleMapsCandidateToClipboardRow({
-    socialProfiles: [{ platform: 'FACEBOOK', url: 'https://facebook.com/acme' }]
-  });
-  assert.strictEqual(r2.facebook, 'https://facebook.com/acme');
-});
-
-test('27. Instagram mapping (direct, socialProfiles, and enrichment)', () => {
-  const r1 = googleMapsCandidateToClipboardRow({ instagram: 'https://instagram.com/prime' });
-  assert.strictEqual(r1.instagram, 'https://instagram.com/prime');
-
-  const r2 = googleMapsCandidateToClipboardRow({
-    socialProfiles: [{ platform: 'INSTAGRAM', url: 'https://instagram.com/acme' }]
-  });
-  assert.strictEqual(r2.instagram, 'https://instagram.com/acme');
-});
-
-test('28. Other Social mapping (LinkedIn, YouTube, Twitter/X)', () => {
-  const r1 = googleMapsCandidateToClipboardRow({
-    socialProfiles: [
-      { platform: 'LINKEDIN', url: 'https://linkedin.com/company/acme' },
-      { platform: 'YOUTUBE', url: 'https://youtube.com/@acme' }
-    ]
-  });
-  assert.ok(r1.otherSocial.includes('https://linkedin.com/company/acme'));
-  assert.ok(r1.otherSocial.includes('https://youtube.com/@acme'));
-  assert.strictEqual(r1.facebook, '');
-  assert.strictEqual(r1.instagram, '');
-});
-
-test('29. Missing optional fields remain blank ("")', () => {
-  const row = googleMapsCandidateToClipboardRow({ businessName: 'Minimal Business' });
-  assert.strictEqual(row.businessName, 'Minimal Business');
-  assert.strictEqual(row.googleMaps, '');
-  assert.strictEqual(row.website, '');
-  assert.strictEqual(row.rating, '');
-  assert.strictEqual(row.phone, '');
-  assert.strictEqual(row.facebook, '');
-  assert.strictEqual(row.instagram, '');
-  assert.strictEqual(row.otherSocial, '');
-});
-
-test('29b. Google Maps TSV projection contains exact 8 columns in order', () => {
-  const candidate = {
-    businessName: 'Apex Law',
-    mapsUrl: 'https://maps.google.com/apex',
-    websiteState: 'YES',
-    rating: 4.8,
-    phone: '555-1234',
-    facebook: 'https://facebook.com/apex',
-    instagram: 'https://instagram.com/apex',
-    otherSocial: 'https://linkedin.com/apex'
-  };
-  const tsv = googleMapsResultsToTsv([candidate]);
-  const lines = tsv.split('\n');
-  assert.strictEqual(
-    lines[0],
-    'Business Name\tGoogle Maps\tWebsite\tRating\tPhone\tFacebook\tInstagram\tOther Social'
-  );
-  assert.strictEqual(
-    lines[1],
-    'Apex Law\thttps://maps.google.com/apex\tYES\t4.8\t555-1234\thttps://facebook.com/apex\thttps://instagram.com/apex\thttps://linkedin.com/apex'
-  );
-});
 
 // ─── GROUP 3: META AD LIBRARY CLIPBOARD PROJECTION ──────────────────────────
 group('GROUP 3: META AD LIBRARY CLIPBOARD PROJECTION');
@@ -491,20 +314,7 @@ await asyncTest('40. writeClipboardText fails gracefully without crashing when u
 // ─── GROUP 5: ARCHITECTURAL BOUNDARY & SAFETY ───────────────────────────────
 group('GROUP 5: ARCHITECTURAL BOUNDARY & SAFETY');
 
-test('36. Maps URL / rating may exist in clipboard projection without polluting persistent Lead', () => {
-  const cand = {
-    businessName: 'Vanguard Realty',
-    mapsUrl: 'https://www.google.com/maps/place/data=vanguard',
-    rating: 4.9,
-    websiteState: 'YES'
-  };
-
-  // Clipboard projection contains transient mapsUrl and rating
-  const clipboardRow = googleMapsCandidateToClipboardRow(cand);
-  assert.strictEqual(clipboardRow.googleMaps, 'https://www.google.com/maps/place/data=vanguard');
-  assert.strictEqual(clipboardRow.rating, '4.9');
-
-  // Verify toExportSafeLead projection still strictly denies restricted Google fields
+test('36. Export-safe lead projection strictly excludes restricted fields', () => {
   const anchor = {
     sourceId: 'anc_123',
     sourceClass: 'WEBSITE_PUBLIC',
@@ -557,15 +367,17 @@ test('37. toExportSafeLead validation remains valid and untouched', () => {
   assert.strictEqual(validation.errors.length, 0);
 });
 
-test('38. Restricted Google fields do not enter persistent Lead output through clipboard module', () => {
-  const clipboardSource = fs.readFileSync(
-    path.join(rootDir, 'src/extension/clipboard/googleMapsClipboard.ts'),
-    'utf-8'
-  );
-  // Must NOT import workspace or lead storage
-  assert.ok(!clipboardSource.includes('WorkspaceRepository'));
-  assert.ok(!clipboardSource.includes('toExportSafeLead'));
-  assert.ok(!clipboardSource.includes('leadRepository'));
+test('38. Clipboard domain does not import workspace or lead storage', () => {
+  const clipboardFiles = ['metaClipboard.ts', 'tsvSerializer.ts', 'clipboardWriter.ts'];
+  for (const f of clipboardFiles) {
+    const filePath = path.join(rootDir, 'src/extension/clipboard', f);
+    if (fs.existsSync(filePath)) {
+      const code = fs.readFileSync(filePath, 'utf-8');
+      assert.ok(!code.includes('WorkspaceRepository'), `${f} must not import WorkspaceRepository`);
+      assert.ok(!code.includes('toExportSafeLead'), `${f} must not import toExportSafeLead`);
+      assert.ok(!code.includes('leadRepository'), `${f} must not import leadRepository`);
+    }
+  }
 });
 
 test('41. Architectural Test: Clipboard domain does NOT import acquisition engine implementation', () => {

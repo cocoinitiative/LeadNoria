@@ -22,17 +22,6 @@ export interface TsvSerializerOptions {
   readonly columnDelimiter?: string;
 }
 
-export interface GoogleMapsClipboardRow extends ClipboardRow {
-  readonly businessName: string;
-  readonly googleMaps: string;
-  readonly website: string;
-  readonly rating: string;
-  readonly phone: string;
-  readonly facebook: string;
-  readonly instagram: string;
-  readonly otherSocial: string;
-}
-
 export interface MetaClipboardRow extends ClipboardRow {
   readonly facebookPageName: string;
   readonly facebookPage: string;

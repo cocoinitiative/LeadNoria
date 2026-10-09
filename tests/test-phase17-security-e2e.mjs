@@ -381,61 +381,40 @@ console.log('\n--- SECTION C: SOURCE ADAPTER SECURITY & GOOGLE MAPS HARD INVARIA
 
 const registry = new UnifiedSourceAdapterRegistry();
 
-test('C1: Google Maps adapter is registered with CONTRACT_ONLY or EXPERIMENTAL execution mode', () => {
+test('C1: Google Maps adapter is unregistered in active architecture', () => {
   const adapter = registry.get('GOOGLE_MAPS');
-  assert.ok(adapter);
-  assert.ok(
-    adapter.capabilities.stages.SOURCE_EXECUTION === 'CONTRACT_ONLY' ||
-    adapter.capabilities.stages.SOURCE_EXECUTION === 'EXPERIMENTAL',
-    'Maps execution mode must be CONTRACT_ONLY or EXPERIMENTAL'
-  );
+  assert.strictEqual(adapter, undefined);
+  assert.strictEqual(registry.has('GOOGLE_MAPS'), false);
 });
 
-test('C2: Google Maps adapter declares live extraction bounded to browser acquisition engine', () => {
-  const adapter = registry.get('GOOGLE_MAPS');
-  assert.ok(
-    adapter.capabilities.supportsLiveExtraction === false ||
-    adapter.capabilities.implementationState === 'EXPERIMENTAL',
-    'Live extraction must be false or EXPERIMENTAL browser acquisition'
-  );
+test('C2: Google Maps cannot be retrieved from active source registry', () => {
+  assert.strictEqual(registry.getCapability('GOOGLE_MAPS'), undefined);
 });
 
-test('C3: Google Maps adapter executeLive() throws explicitly without executing network calls', async () => {
-  const adapter = registry.get('GOOGLE_MAPS');
-  let threw = false;
-  try {
-    await adapter.executeLive({ planId: 'p-1', sourceType: 'GOOGLE_MAPS' });
-  } catch (err) {
-    threw = true;
-    assert.ok(
-      err.message.includes('CONTRACT_ONLY') ||
-      err.message.includes('not supported') ||
-      err.message.includes('prohibited') ||
-      err.message.includes('Invalid live config') ||
-      err.message.includes('Chrome extension runtime')
-    );
-  }
-  assert.strictEqual(threw, true);
+test('C3: Attempting to create plan for GOOGLE_MAPS throws un-registered error', () => {
+  assert.throws(() => {
+    createCanonicalSourcePlan('GOOGLE_MAPS', {}, registry);
+  }, /No registered source adapter/);
 });
 
-test('C4: Google Maps planning succeeds and generates valid structured search units', () => {
-  const plan = createCanonicalSourcePlan('GOOGLE_MAPS', {
+test('C4: Meta Ad Library planning succeeds and generates valid structured search units', () => {
+  const plan = createCanonicalSourcePlan('META', {
     queryScope: ['HVAC repair'],
     limits: { maxCandidates: 50, timeoutMs: 30000 }
   }, registry);
   assert.ok(plan);
-  assert.strictEqual(plan.sourceType, 'GOOGLE_MAPS');
-  assert.strictEqual(plan.executionMode, 'DRY_RUN');
+  assert.strictEqual(plan.sourceType, 'META');
+  assert.strictEqual(plan.executionMode, 'LIVE');
 });
 
-test('C5: Google Maps replay execution mode succeeds offline with synthetic fixture data', () => {
-  const adapter = registry.get('GOOGLE_MAPS');
+test('C5: Meta Ad Library replay execution mode succeeds offline with synthetic fixture data', () => {
+  const adapter = registry.get('META');
   const fixture = [
-    createTestEnvelope({ candidateId: 'maps-fix-1', sourceType: 'GOOGLE_MAPS', displayName: 'Denver Heating & Air' })
+    createTestEnvelope({ candidateId: 'meta-fix-1', sourceType: 'META', displayName: 'Denver Heating & Air' })
   ];
   const results = adapter.executeReplay(fixture);
   assert.strictEqual(results.length, 1);
-  assert.strictEqual(results[0].candidateId, 'maps-fix-1');
+  assert.strictEqual(results[0].candidateId, 'meta-fix-1');
 });
 
 test('C6: Meta Ad Library adapter is registered with LIVE and REPLAY capabilities', () => {
@@ -1278,7 +1257,7 @@ await asyncTest('U1: Extension installs and popup.html loads cleanly in Chromium
   await ctx.close();
 });
 
-await asyncTest('U2: Sidepanel.html renders header, navigation tabs, and CONTRACT_ONLY notice', async () => {
+await asyncTest('U2: Sidepanel.html renders header, navigation tabs, and APPROVED PRODUCTION SOURCE notice', async () => {
   const extPath = path.resolve(rootDir, 'extension');
   const browserPath = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 
@@ -1310,7 +1289,7 @@ await asyncTest('U2: Sidepanel.html renders header, navigation tabs, and CONTRAC
   const textContent = await sidePage.evaluate(() => document.body.innerText);
   assert.ok(textContent.includes('LeadNoria'));
   assert.ok(textContent.includes('Discover. Verify. Connect.'));
-  assert.ok(textContent.includes('CONTRACT ONLY'));
+  assert.ok(textContent.includes('APPROVED PRODUCTION SOURCE'));
 
   await sidePage.close();
   await page.close();
@@ -1448,7 +1427,7 @@ test('Y1: Canonical configuration fingerprinting is order-independent for dictio
 console.log('\n--- SECTION Z: REPLAY DETERMINISM ---');
 
 test('Z1: Replaying identical fixture produces bit-identical normalized outputs with zero network calls', async () => {
-  const adapter = registry.get('GOOGLE_MAPS');
+  const adapter = registry.get('META');
   const fixture = [
     createTestEnvelope({ candidateId: 'fx-1', displayName: 'Apex Roofing' }),
     createTestEnvelope({ candidateId: 'fx-2', displayName: 'Zenith Plumbing' })
@@ -1553,17 +1532,17 @@ test('E2E-03: Meta -> website verification -> contact enrichment -> qualificatio
   assert.strictEqual(reloaded.status, 'QUALIFIED');
 });
 
-test('E2E-04: Google Maps contract -> geographic plan -> replay -> normalization -> resolution -> relevance -> qualification', () => {
-  const mapsAdapter = registry.get('GOOGLE_MAPS');
-  const plan = createCanonicalSourcePlan('GOOGLE_MAPS', {
+test('E2E-04: Meta contract -> research plan -> replay -> normalization -> resolution -> relevance -> qualification', () => {
+  const metaAdapter = registry.get('META');
+  const plan = createCanonicalSourcePlan('META', {
     queryScope: ['plumbing'],
     limits: { maxCandidates: 10, timeoutMs: 10000 }
   }, registry);
   assert.ok(plan.planId);
-  const fixture = [createTestEnvelope({ candidateId: 'g-fix-1', sourceType: 'GOOGLE_MAPS', displayName: 'Texas Plumbers' })];
-  const candidates = mapsAdapter.executeReplay(fixture);
+  const fixture = [createTestEnvelope({ candidateId: 'm-fix-1', sourceType: 'META', displayName: 'Texas Plumbers' })];
+  const candidates = metaAdapter.executeReplay(fixture);
   assert.strictEqual(candidates.length, 1);
-  assert.strictEqual(candidates[0].sourceKey.sourceType, 'GOOGLE_MAPS');
+  assert.strictEqual(candidates[0].sourceKey.sourceType, 'META');
 });
 
 test('E2E-05: Multi-source -> Meta + Website -> entity resolution -> MIXED provenance -> qualification', async () => {
@@ -2005,9 +1984,10 @@ test('B8: No dynamic script element injection (document.createElement script) in
 });
 
 // --- SECTION C CONTINUED ---
-test('C8: Google Maps planning in DRY_RUN mode produces deterministic structured search units', () => {
-  const plan = createCanonicalSourcePlan('GOOGLE_MAPS', {
+test('C8: Meta planning in DRY_RUN mode produces deterministic structured search units', () => {
+  const plan = createCanonicalSourcePlan('META', {
     queryScope: ['Austin', 'HVAC'],
+    executionMode: 'DRY_RUN',
     limits: { maxCandidates: 25, timeoutMs: 5000 }
   }, registry);
   assert.ok(plan.planId);
@@ -2052,17 +2032,9 @@ test('D5: Pipeline graph rejects self-loop dependency', () => {
 });
 
 test('D6: Pipeline capability gate checks permission capabilities before launching stage', () => {
-  const mapsAdapter = registry.get('GOOGLE_MAPS');
-  assert.ok(
-    mapsAdapter.capabilities.implementationState === 'CONTRACT_ONLY' ||
-    mapsAdapter.capabilities.implementationState === 'EXPERIMENTAL',
-    'Maps adapter implementationState must be CONTRACT_ONLY or EXPERIMENTAL'
-  );
-  assert.ok(
-    mapsAdapter.capabilities.supportsLiveExtraction === false ||
-    mapsAdapter.capabilities.implementationState === 'EXPERIMENTAL',
-    'Live extraction must be false or bounded to EXPERIMENTAL browser acquisition'
-  );
+  const metaAdapter = registry.get('META');
+  assert.strictEqual(metaAdapter.capabilities.implementationState, 'LIVE');
+  assert.strictEqual(metaAdapter.capabilities.supportsLiveExtraction, true);
 });
 
 test('D7: Pipeline MultiSourceRun preserves independent failure without aborting healthy sources', () => {
@@ -3042,7 +3014,7 @@ test('Y4: Export projection field order is deterministic across runs', () => {
 
 // --- SECTION Z CONTINUED ---
 test('Z2: Replay mode preserves candidate timestamps and lineage', () => {
-  const adapter = registry.get('GOOGLE_MAPS');
+  const adapter = registry.get('META');
   const now = '2026-09-30T10:00:00Z';
   const fixture = [createTestEnvelope({ candidateId: 'fx-time', createdAt: now })];
   const out = adapter.executeReplay(fixture);
@@ -3051,7 +3023,7 @@ test('Z2: Replay mode preserves candidate timestamps and lineage', () => {
 });
 
 test('Z3: Replay mode outputs match pre-recorded snapshot fixtures', () => {
-  const adapter = registry.get('GOOGLE_MAPS');
+  const adapter = registry.get('META');
   const fixture = [createTestEnvelope({ candidateId: 'snap-1', displayName: 'Snapshot Co' })];
   const r1 = adapter.executeReplay(fixture);
   const r2 = adapter.executeReplay(fixture);
@@ -3061,7 +3033,7 @@ test('Z3: Replay mode outputs match pre-recorded snapshot fixtures', () => {
 });
 
 test('Z4: Replay mode on empty fixture returns empty array without throwing', () => {
-  const adapter = registry.get('GOOGLE_MAPS');
+  const adapter = registry.get('META');
   const out = adapter.executeReplay([]);
   assert.deepStrictEqual(out, []);
 });
@@ -3169,13 +3141,8 @@ test('AD5: Historical Phase 6 website qualification contract: domain extraction 
   assert.strictEqual(parsed.hostname, 'www.example.com');
 });
 
-test('AD6: Historical Phase 7 maps normalization contract: Maps records strictly CONTRACT_ONLY or EXPERIMENTAL', () => {
-  const mapsAdapter = registry.get('GOOGLE_MAPS');
-  assert.ok(
-    mapsAdapter.capabilities.implementationState === 'CONTRACT_ONLY' ||
-    mapsAdapter.capabilities.implementationState === 'EXPERIMENTAL',
-    'Maps adapter implementationState must be CONTRACT_ONLY or EXPERIMENTAL'
-  );
+test('AD6: Historical Phase 7 maps normalization contract: Google Maps is excised from active registry', () => {
+  assert.strictEqual(registry.has('GOOGLE_MAPS'), false);
 });
 
 test('AD7: Historical Phase 8 entity resolution contract: candidate clustering preserves IDs', () => {
@@ -3221,7 +3188,7 @@ test('AD12: Historical Phase 12 advanced qualification contract: score summary t
 });
 
 test('AD13: Historical Phase 13 geographic expansion contract: SourcePlan generated deterministically', () => {
-  const plan = createCanonicalSourcePlan('GOOGLE_MAPS', {
+  const plan = createCanonicalSourcePlan('META', {
     queryScope: ['Austin'],
     limits: { maxCandidates: 10, timeoutMs: 1000 }
   }, registry);
@@ -3229,8 +3196,8 @@ test('AD13: Historical Phase 13 geographic expansion contract: SourcePlan genera
   assert.strictEqual(plan.limits.maxCandidates, 10);
 });
 
-test('AD14: Historical Phase 14 unified multi-source orchestration: 4 registered adapters', () => {
-  assert.strictEqual(registry.listRegisteredSources().length, 4);
+test('AD14: Historical Phase 14 unified multi-source orchestration: 3 registered adapters', () => {
+  assert.strictEqual(registry.listRegisteredSources().length, 3);
 });
 
 test('AD15: Historical Phase 15 UI/UX viewModel contract: toResultRowViewModel maps accurately', () => {

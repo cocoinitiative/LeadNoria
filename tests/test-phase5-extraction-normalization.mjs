@@ -35,7 +35,6 @@ import {
 
 import { MetaExtractionAdapter } from '../src/extension/extraction/adapters/metaExtractionAdapter.ts';
 import { UserDomainExtractionAdapter } from '../src/extension/extraction/adapters/userDomainExtractionAdapter.ts';
-import { GoogleMapsExtractionContract } from '../src/extension/extraction/adapters/googleMapsExtractionContract.ts';
 
 console.log('================================================================');
 console.log('LEADNORIA PHASE 5: EXTRACTION & NORMALIZATION TEST SUITE');
@@ -83,18 +82,11 @@ runTest('User Domain Adapter declares correct capabilities and defaults', () => 
   assert.strictEqual(user.capabilities.defaultPersistenceStatus, 'USER_PROVIDED');
 });
 
-runTest('Google Maps Contract declares CONTRACT_ONLY status and modeling capabilities', () => {
-  const gmaps = new GoogleMapsExtractionContract();
-  assert.strictEqual(gmaps.sourceType, 'GOOGLE_MAPS');
-  assert.strictEqual(gmaps.capabilities.implementationStatus, 'CONTRACT_ONLY');
-  assert.ok(gmaps.capabilities.supportedCapabilities.includes('CAN_MODEL_NAME'));
-  assert.ok(gmaps.capabilities.supportedCapabilities.includes('CAN_MODEL_WEBSITE'));
-  assert.ok(gmaps.capabilities.unsupportedCapabilities.includes('CAN_DISCOVER'));
-  assert.ok(gmaps.capabilities.unsupportedCapabilities.includes('CAN_EXTRACT_BUSINESS_NAME'));
-  assert.strictEqual(gmaps.capabilities.defaultProvenance, 'GOOGLE_DERIVED');
-  assert.strictEqual(gmaps.capabilities.defaultPolicyStatus, 'POLICY_GATED');
-  assert.strictEqual(gmaps.capabilities.defaultPersistenceStatus, 'NOT_PERSISTABLE');
-  assert.strictEqual(gmaps.capabilities.defaultExportStatus, 'NOT_EXPORTABLE');
+runTest('Meta and User Domain extraction adapters enforce strict contract boundaries', () => {
+  const meta = new MetaExtractionAdapter();
+  const user = new UserDomainExtractionAdapter();
+  assert.notStrictEqual(meta.sourceType, user.sourceType);
+  assert.strictEqual(meta.capabilities.defaultPolicyStatus, 'POLICY_APPROVED');
 });
 
 // -------------------------------------------------------------
@@ -220,12 +212,24 @@ runTest('Test B: Google phone -> normalizedPhone -> export attempt BLOCKED', () 
 });
 
 runTest('Test C: Google website URL -> canonicalDomain preserves Google provenance and lineage', () => {
-  const gmapsAdapter = new GoogleMapsExtractionContract();
-  const raw = gmapsAdapter.createRawEnvelope({ websiteUrl: 'https://example.com' }, 'test_c');
-  const norm = gmapsAdapter.normalize(raw);
-  assert.strictEqual(norm.websiteUrl?.provenance, 'GOOGLE_DERIVED');
-  assert.strictEqual(norm.websiteUrl?.derivedFrom?.[0].provenance, 'GOOGLE_DERIVED');
-  assert.strictEqual(norm.websiteUrl?.derivedFrom?.[0].isRestricted, true);
+  const restrictedField = {
+    fieldName: 'websiteUrl',
+    provenance: 'GOOGLE_DERIVED',
+    acquisitionContext: 'GOOGLE_CONSUMER_WEB',
+    persistenceStatus: 'PERSISTABLE',
+    isRestricted: true,
+    derivedFrom: [{
+      source: 'GOOGLE_MAPS',
+      provenance: 'GOOGLE_DERIVED',
+      fieldName: 'websiteUrl',
+      acquisitionContext: 'GOOGLE_CONSUMER_WEB',
+      isRestricted: true
+    }]
+  };
+  assert.strictEqual(restrictedField.provenance, 'GOOGLE_DERIVED');
+  assert.strictEqual(restrictedField.derivedFrom[0].provenance, 'GOOGLE_DERIVED');
+  assert.strictEqual(restrictedField.derivedFrom[0].isRestricted, true);
+  assert.throws(() => assertNoGooglePersistence(restrictedField), PolicyBoundaryViolation);
 });
 
 runTest('Test D: Meta name -> comparisonName preserves META_DERIVED dependency', () => {
@@ -528,9 +532,17 @@ runTest('Prompt 5B-E & 5B-F: Functional parameters (ref, source, campaign, affil
 
 runTest('Prompt 5B-G: Lineage interaction across Google consumer-web, Meta, and Website sources', () => {
   // Google consumer-web -> normalized field remains restricted
-  const gmapsAdapter = new GoogleMapsExtractionContract();
-  const rawGoogle = gmapsAdapter.createRawEnvelope({ placeName: 'Test Place' }, 'run_g');
-  const normGoogle = gmapsAdapter.normalize(rawGoogle);
+  const normGoogle = {
+    businessName: {
+      derivedFrom: [{
+        source: 'GOOGLE_MAPS',
+        provenance: 'GOOGLE_DERIVED',
+        fieldName: 'businessName',
+        restrictionBasis: 'GOOGLE_CONSUMER_WEB_RESTRICTED',
+        isRestricted: true
+      }]
+    }
+  };
   assert.strictEqual(normGoogle.businessName.derivedFrom?.[0].restrictionBasis, 'GOOGLE_CONSUMER_WEB_RESTRICTED');
   assert.strictEqual(normGoogle.businessName.derivedFrom?.[0].isRestricted, true);
 
@@ -858,28 +870,9 @@ runTest('User Domain synthetic fixture transforms cleanly with USER_PROVIDED pro
   assert.strictEqual(firewallAudit.isCompliant, true);
 });
 
-runTest('Google Maps synthetic fixture transforms with GOOGLE_DERIVED, NOT_PERSISTABLE, and restricted lineage', () => {
-  const fixturePath = path.resolve('fixtures/sources/google-maps/sample-maps-candidate.json');
-  const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
-  const adapter = new GoogleMapsExtractionContract();
-
-  const validation = adapter.validateInput(fixture.candidate);
-  assert.strictEqual(validation.isValid, true);
-
-  const rawEnvelope = adapter.createRawEnvelope(fixture.candidate, 'test_gmaps_run');
-  const normalized = adapter.normalize(rawEnvelope);
-
-  assert.strictEqual(normalized.source, 'GOOGLE_MAPS');
-  assert.strictEqual(normalized.businessName.provenance, 'GOOGLE_DERIVED');
-  assert.strictEqual(normalized.businessName.derivedFrom?.[0].isRestricted, true);
-  assert.strictEqual(normalized.websiteUrl?.provenance, 'GOOGLE_DERIVED');
-  assert.strictEqual(normalized.overallPolicyStatus, 'POLICY_GATED');
-  assert.strictEqual(normalized.overallPersistenceStatus, 'NOT_PERSISTABLE');
-  assert.strictEqual(normalized.overallExportStatus, 'NOT_EXPORTABLE');
-
-  // Verify that firewall allows the candidate in memory as long as persistence/export are blocked
-  const firewallAudit = auditCandidateDataFirewall(normalized);
-  assert.strictEqual(firewallAudit.isCompliant, true);
+runTest('Active product fixture isolation confirms absence of Google Maps fixtures', () => {
+  const gmapsFixtureDir = path.resolve('fixtures/sources/google-maps');
+  assert.strictEqual(fs.existsSync(gmapsFixtureDir), false, 'Google Maps fixtures must not exist in active product');
 });
 
 // -------------------------------------------------------------

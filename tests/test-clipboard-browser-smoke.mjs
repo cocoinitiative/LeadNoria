@@ -1,6 +1,6 @@
 /**
  * LeadNoria — Real Browser Clipboard Smoke & Spreadsheet Integration Test
- * Section 14, 15, 16, 23
+ * Meta Ad Library ONLY
  *
  * Verifies in real Chromium instance (Playwright):
  * 1. Extension loads and sidepanel renders cleanly
@@ -8,11 +8,8 @@
  * 3. User interaction triggers clipboard write (writeClipboardText)
  * 4. TSV payload written to clipboard without permission exception
  * 5. Pasting clipboard content into spreadsheet-like grid parses exactly 3 columns for Meta
- * 6. Google Maps Copy All button rendered and operable
- * 7. Candidate results projected to clipboard with exact 8 columns
- * 8. Pasting clipboard content into spreadsheet-like grid preserves all 8 columns
- * 9. Missing fields in sparse records produce blank cells without column shifting
- * 10. Sanitized newlines and tabs prevent row/column corruption
+ * 6. Missing fields in sparse records produce blank cells without column shifting
+ * 7. Sanitized newlines and tabs prevent row/column corruption
  */
 
 import { chromium } from 'playwright';
@@ -101,125 +98,33 @@ async function runRealBrowserSmoke() {
     assert.strictEqual(isDisabledWhenEmpty, true, 'Copy All must be disabled when 0 results exist');
     pass('Empty-state handling: Meta Copy All is disabled when results list is empty');
 
-    // ─── PART B: GOOGLE MAPS BULK RESEARCH & COPY ALL WORKFLOW ───────────
-    console.log('\n--- PART B: Google Maps Bulk Research & Clipboard Workflow ---');
-
-    // Switch back to Research tab and Google Maps mode
+    // Switch to Research tab and verify Meta research controls
     const researchTabBtn = page.locator('#tab-RESEARCH');
     if (await researchTabBtn.count() > 0) {
       await researchTabBtn.click();
       await page.waitForTimeout(200);
     }
+    const maxCandidatesInput = page.locator('#max-candidates-input');
+    assert.ok(await maxCandidatesInput.count() > 0, '#max-candidates-input must be present in DOM');
+    pass('Meta Research view renders primary controls (#max-candidates-input)');
 
-    const gmapsModeBtn = page.locator('#source-switch-gmaps-btn');
-    if (await gmapsModeBtn.count() > 0) {
-      await gmapsModeBtn.click();
-      await page.waitForTimeout(300);
-    }
-    pass('Switched to Google Maps Bulk Research mode');
-
-    // Check for Google Maps Copy All button
-    const gmapsCopyAllBtn = page.locator('#gmaps-copy-all-btn');
-    assert.ok(await gmapsCopyAllBtn.count() > 0, '#gmaps-copy-all-btn must be present in DOM');
-    pass('Google Maps Copy All button (#gmaps-copy-all-btn) rendered in Google Maps view');
-
-    // Initial empty state: disabled
-    const isGmapsDisabledInitially = await gmapsCopyAllBtn.isDisabled();
-    assert.strictEqual(isGmapsDisabledInitially, true, 'Google Maps Copy All must be disabled when 0 results');
-    pass('Empty-state handling: Google Maps Copy All is disabled when 0 candidates observed');
-
-    // ─── PART C: DIRECT IN-PAGE CLIPBOARD API & TSV VALIDATION ──────────
-    console.log('\n--- PART C: In-Page Clipboard Projection & Spreadsheet Paste Simulation ---');
+    // ─── PART B: IN-PAGE CLIPBOARD PROJECTION & TSV VALIDATION ──────────
+    console.log('\n--- PART B: In-Page Clipboard Projection & Spreadsheet Paste Simulation ---');
 
     // Execute in the real extension page context
     const clipboardTestResult = await page.evaluate(async () => {
-      // 1. Google Maps candidates fixture (representing real structured results)
-      const mapsCandidates = [
-        {
-          businessName: 'Apex Holdings Ltd',
-          mapsUrl: 'https://maps.google.com/?cid=1001',
-          websiteState: 'YES',
-          rating: 4.8,
-          phone: '+880 1711-123456',
-          facebook: 'https://facebook.com/apexholdings',
-          instagram: 'https://instagram.com/apexholdings',
-          otherSocial: 'https://linkedin.com/company/apexholdings'
-        },
-        {
-          businessName: 'Bashundhara Housing',
-          mapsUrl: 'https://maps.google.com/?cid=1002',
-          websiteState: 'NO',
-          rating: 4.2,
-          phone: '+880 1711-654321',
-          facebook: 'https://facebook.com/bashundharahousing',
-          instagram: '',
-          otherSocial: ''
-        },
-        {
-          businessName: 'Concord Real Estate',
-          mapsUrl: 'https://maps.google.com/?cid=1003',
-          websiteState: 'UNKNOWN',
-          rating: '',
-          phone: '',
-          facebook: '',
-          instagram: '',
-          otherSocial: ''
-        }
-      ];
-
-      // Simulate spreadsheet paste parser (like Google Sheets)
+      // Simulate spreadsheet paste parser (like Google Sheets / Excel Ctrl+V)
       function parseSpreadsheetTsv(tsvText) {
         const rows = tsvText.split('\n');
         return rows.map(r => r.split('\t'));
       }
 
-      // Column definitions strictly matching LeadNoria specifications
-      const mapsCols = [
-        'Business Name',
-        'Google Maps',
-        'Website',
-        'Rating',
-        'Phone',
-        'Facebook',
-        'Instagram',
-        'Other Social'
-      ];
-
-      // Build TSV using the exact 8-column layout
-      const gmapsRows = [mapsCols.join('\t')];
-      for (const c of mapsCandidates) {
-        const row = [
-          c.businessName,
-          c.mapsUrl,
-          c.websiteState === 'YES' ? 'YES' : c.websiteState === 'NO' ? 'NO' : '',
-          c.rating !== '' ? String(c.rating) : '',
-          c.phone || '',
-          c.facebook || '',
-          c.instagram || '',
-          c.otherSocial || ''
-        ];
-        gmapsRows.push(row.join('\t'));
-      }
-      const gmapsTsv = gmapsRows.join('\n');
-
-      // Test clipboard write without throwing
-      let writeSuccess = false;
-      let writeError = null;
-
-      try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          await navigator.clipboard.writeText(gmapsTsv);
-          writeSuccess = true;
-        } else {
-          writeSuccess = true; // headless fallback
-        }
-      } catch (err) {
-        writeError = err.message;
+      function sanitize(val) {
+        if (val === null || val === undefined) return '';
+        return String(val).replace(/[\t\r\n]+/g, ' ').trim();
       }
 
-      const parsedGrid = parseSpreadsheetTsv(gmapsTsv);
-
-      // Meta 3-column fixture
+      // Meta 3-column items fixture
       const metaItems = [
         {
           facebookPageName: 'Nordic Health Clinic',
@@ -230,68 +135,59 @@ async function runRealBrowserSmoke() {
           facebookPageName: 'Dental Care Plus',
           facebookPage: 'https://facebook.com/dentalcareplus',
           website: 'NO'
+        },
+        {
+          facebookPageName: 'Sparse Entity',
+          facebookPage: '',
+          website: ''
+        },
+        {
+          facebookPageName: 'Dirty\tName\nWith\rLines',
+          facebookPage: 'https://facebook.com/dirty',
+          website: 'YES'
         }
       ];
 
       const metaCols = ['Facebook Page Name', 'Facebook Page', 'Website'];
       const metaRows = [metaCols.join('\t')];
       for (const m of metaItems) {
-        metaRows.push([m.facebookPageName, m.facebookPage, m.website].join('\t'));
+        metaRows.push([
+          sanitize(m.facebookPageName),
+          sanitize(m.facebookPage),
+          sanitize(m.website)
+        ].join('\t'));
       }
       const metaTsv = metaRows.join('\n');
+
+      let writeSuccess = false;
+      let writeError = null;
+
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(metaTsv);
+          writeSuccess = true;
+        } else {
+          writeSuccess = true; // headless fallback
+        }
+      } catch (err) {
+        writeError = err.message;
+      }
+
       const parsedMetaGrid = parseSpreadsheetTsv(metaTsv);
 
       return {
         writeSuccess,
         writeError,
-        parsedGmapsGrid: parsedGrid,
-        parsedMetaGrid: parsedMetaGrid
+        parsedMetaGrid
       };
     });
 
     assert.strictEqual(clipboardTestResult.writeError, null, `Clipboard write failed: ${clipboardTestResult.writeError}`);
     pass('navigator.clipboard in extension context executed without permission exception');
 
-    // Validate Google Maps parsed grid (Google Sheets Ctrl+V model)
-    const gmapsGrid = clipboardTestResult.parsedGmapsGrid;
-    assert.strictEqual(gmapsGrid.length, 4); // 1 header + 3 rows
-    for (let i = 0; i < gmapsGrid.length; i++) {
-      assert.strictEqual(
-        gmapsGrid[i].length,
-        8,
-        `Google Maps row ${i} must have exactly 8 columns`
-      );
-    }
-    pass('Google Maps paste validation: exactly 8 columns across all rows');
-
-    // Verify Column names
-    assert.deepStrictEqual(gmapsGrid[0], [
-      'Business Name',
-      'Google Maps',
-      'Website',
-      'Rating',
-      'Phone',
-      'Facebook',
-      'Instagram',
-      'Other Social'
-    ]);
-    pass('Google Maps column order strictly verified: A=Name, B=Maps, C=Website, D=Rating, E=Phone, F=FB, G=IG, H=Other');
-
-    // Sparse row verification: Concord Real Estate (only Name & Maps URL)
-    const sparseRow = gmapsGrid[3];
-    assert.strictEqual(sparseRow[0], 'Concord Real Estate');
-    assert.strictEqual(sparseRow[1], 'https://maps.google.com/?cid=1003');
-    assert.strictEqual(sparseRow[2], ''); // Website blank
-    assert.strictEqual(sparseRow[3], ''); // Rating blank (never 0)
-    assert.strictEqual(sparseRow[4], ''); // Phone blank
-    assert.strictEqual(sparseRow[5], ''); // Facebook blank
-    assert.strictEqual(sparseRow[6], ''); // Instagram blank
-    assert.strictEqual(sparseRow[7], ''); // Other Social blank
-    pass('Sparse Google Maps records preserve column alignment with blank cells');
-
     // Validate Meta parsed grid (Google Sheets Ctrl+V model)
     const metaGrid = clipboardTestResult.parsedMetaGrid;
-    assert.strictEqual(metaGrid.length, 3); // 1 header + 2 rows
+    assert.strictEqual(metaGrid.length, 5); // 1 header + 4 rows
     for (let i = 0; i < metaGrid.length; i++) {
       assert.strictEqual(
         metaGrid[i].length,
@@ -307,6 +203,20 @@ async function runRealBrowserSmoke() {
       'Website'
     ]);
     pass('Meta column order strictly verified: A=Page Name, B=Page URL, C=Website');
+
+    // Sparse row verification
+    const sparseRow = metaGrid[3];
+    assert.strictEqual(sparseRow[0], 'Sparse Entity');
+    assert.strictEqual(sparseRow[1], '');
+    assert.strictEqual(sparseRow[2], '');
+    pass('Sparse Meta record preserves column alignment with blank cells');
+
+    // Sanitized dirty row verification
+    const dirtyRow = metaGrid[4];
+    assert.strictEqual(dirtyRow[0], 'Dirty Name With Lines');
+    assert.strictEqual(dirtyRow[1], 'https://facebook.com/dirty');
+    assert.strictEqual(dirtyRow[2], 'YES');
+    pass('Sanitized newlines and tabs prevent row or column splitting');
 
   } catch (err) {
     fail('Chromium runtime clipboard smoke test failed', err);

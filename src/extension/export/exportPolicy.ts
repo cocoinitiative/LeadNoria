@@ -9,7 +9,7 @@
  * - Neither UI nor direct download can bypass policy evaluations
  */
 
-import { UnifiedResearchRecord, FieldEligibility } from '../pipeline/pipelineTypes.ts';
+import { UnifiedResearchRecord, FieldEligibility, SourceType } from '../pipeline/pipelineTypes.ts';
 import { FieldPolicyEvaluation, RecordExportEvaluation } from './exportTypes.ts';
 
 export class ExportPolicy {
@@ -23,7 +23,7 @@ export class ExportPolicy {
           fieldName,
           decision: 'EXPORT_BLOCKED',
           reasonCode: 'BLOCKED_BY_SOURCE_POLICY',
-          sourceFamily: 'GOOGLE_MAPS',
+          sourceFamily: 'META',
           provenance: 'GOOGLE_DERIVED'
         };
       }
@@ -43,15 +43,15 @@ export class ExportPolicy {
           fieldName,
           decision: 'EXPORT_BLOCKED',
           reasonCode: eligibility.restrictionBasis || 'BLOCKED_BY_GOOGLE_CONSUMER_POLICY',
-          sourceFamily: 'GOOGLE_MAPS',
+          sourceFamily: 'META',
           provenance: 'GOOGLE_DERIVED'
         };
       }
     }
 
-    const sourceFamily = eligibility.sourceProvenance === 'GOOGLE_DERIVED'
-      ? 'GOOGLE_MAPS'
-      : (eligibility.sourceProvenance === 'META_DERIVED' ? 'META' : 'WEBSITE');
+    const sourceFamily: SourceType = eligibility.sourceProvenance === 'WEBSITE_DERIVED'
+      ? 'WEBSITE'
+      : (eligibility.sourceProvenance === 'USER_PROVIDED' ? 'USER_PROVIDED' : 'META');
 
     if (!eligibility.isEligible) {
       return {

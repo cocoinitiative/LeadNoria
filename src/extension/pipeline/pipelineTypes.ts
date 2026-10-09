@@ -4,7 +4,7 @@
  * 
  * Non-Negotiable Invariants:
  * - One common orchestration layer over multiple source-specific adapters
- * - Google Maps remains strictly CONTRACT_ONLY
+ * - Dedicated Meta Ad Library lead research architecture
  * - Provenance, recursive lineage, and source restrictions are preserved
  * - Source isolation: failures in one source do not corrupt other sources
  * - Explicit typed capability gating and stage completeness
@@ -29,7 +29,6 @@ export const ORCHESTRATION_VERSION = '1.0.0';
 
 export type SourceType =
   | 'META'
-  | 'GOOGLE_MAPS'
   | 'USER_PROVIDED'
   | 'WEBSITE'
   | 'META_AD_LIBRARY'

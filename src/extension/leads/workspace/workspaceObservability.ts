@@ -1,5 +1,5 @@
 /**
- * LeadNoria — Google Maps Lead Intelligence Engine — Part 10
+ * LeadNoria — Lead Intelligence Engine — Part 10
  * Pipeline Observability & Operational Run Telemetry
  *
  * HARD ARCHITECTURAL INVARIANTS:

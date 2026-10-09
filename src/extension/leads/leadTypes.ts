@@ -10,11 +10,15 @@
  * 5. Google Data Firewall remains impenetrable across all projection boundaries.
  */
 
-import type { ReviewState } from '../acquisition/review/reviewTypes.ts';
+export type ReviewState =
+  | 'UNREVIEWED'
+  | 'REVIEWING'
+  | 'QUALIFIED'
+  | 'DISQUALIFIED'
+  | 'NEEDS_REVIEW';
 
 /**
  * Valid independent source classes permitted to anchor an ExportSafeLead.
- * GOOGLE_MAPS_BROWSER is explicitly RESTRICTED and can never be an anchor.
  */
 export type IndependentSourceClass =
   | 'WEBSITE_PUBLIC'
@@ -25,7 +29,7 @@ export type IndependentSourceClass =
  * Source classification of incoming research context.
  */
 export type CandidateSourceClass =
-  | 'GOOGLE_MAPS_BROWSER'
+  | 'RESTRICTED_SOURCE'
   | IndependentSourceClass;
 
 /**

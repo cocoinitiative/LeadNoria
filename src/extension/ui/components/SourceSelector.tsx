@@ -3,11 +3,9 @@
  * Primary Source Selector Component
  * 
  * Strict Invariants:
- * - Production research displays ONLY approved production source: [ From Meta Ad Library ]
- * - Google Maps must NOT appear as a normal selectable production source
+ * - Production research displays approved production source: [ From Meta Ad Library ]
  * - Non-color-only state indicators (Icon + Text + ARIA label)
  * - Keyboard navigable with standard focus-visible rings
- * - Preserves "CONTRACT ONLY" architectural invariant notice for security and policy traceability
  */
 
 import React from 'react';
@@ -63,14 +61,14 @@ export const SourceSelector: React.FC<SourceSelectorProps> = ({
         </button>
       </div>
 
-      {/* Contract & Policy Invariant Notice */}
+      {/* Policy & Source Status */}
       <div 
         className="mt-1 p-2 rounded bg-slate-950/60 border border-slate-800 text-[10px] text-slate-400 flex items-center justify-between"
         role="status"
         aria-label="Source contract status"
       >
         <span>Production signals: Meta Ad Library</span>
-        <span className="font-mono text-slate-500">CONTRACT ONLY: Google Maps live extraction disabled</span>
+        <span className="font-mono text-emerald-400">Dedicated Source Active</span>
       </div>
     </div>
   );

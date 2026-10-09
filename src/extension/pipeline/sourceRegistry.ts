@@ -6,13 +6,11 @@
  * - Deterministic adapter registration and lookup
  * - Rejects duplicate registrations or unauthorized replacement
  * - Prevents arbitrary dynamic import or path injection
- * - Google Maps capability is always registered as CONTRACT_ONLY
  */
 
 import {
   UnifiedSourceAdapter,
   MetaUnifiedAdapter,
-  GoogleMapsUnifiedAdapter,
   WebsiteUnifiedAdapter,
   UserProvidedUnifiedAdapter
 } from './sourceAdapter.ts';
@@ -24,7 +22,6 @@ export class UnifiedSourceAdapterRegistry {
   constructor(autoRegisterDefaults = true) {
     if (autoRegisterDefaults) {
       this.register(new MetaUnifiedAdapter());
-      this.register(new GoogleMapsUnifiedAdapter());
       this.register(new WebsiteUnifiedAdapter());
       this.register(new UserProvidedUnifiedAdapter());
     }

@@ -82,10 +82,6 @@ export function canonicalLeadToResultRowViewModel(record: CanonicalLeadRecord): 
     sourceBadges.push(getSourceBadgeInfo('WEBSITE'));
     seenSources.add('WEBSITE');
   }
-  if (record.policy?.hasGoogleConsumerWebLineage) {
-    sourceBadges.push(getSourceBadgeInfo('GOOGLE_MAPS'));
-    seenSources.add('GOOGLE_MAPS');
-  }
   if (record.policy?.hasUserProvidedLineage && !seenSources.has('USER_PROVIDED')) {
     sourceBadges.push(getSourceBadgeInfo('USER_PROVIDED'));
     seenSources.add('USER_PROVIDED');
@@ -98,9 +94,7 @@ export function canonicalLeadToResultRowViewModel(record: CanonicalLeadRecord): 
     }
   }
 
-  const primarySource: SourceType = record.policy?.hasMetaLineage
-    ? 'META'
-    : (record.policy?.hasGoogleConsumerWebLineage ? 'GOOGLE_MAPS' : 'META');
+  const primarySource: SourceType = 'META';
 
   const isMixedProvenance = record.policy?.overallProvenance === 'MIXED' || sourceBadges.length > 1;
 
@@ -666,12 +660,7 @@ export function toResultRowViewModel(record: UnifiedResearchRecord | CandidateEn
     friendlyFreshnessState: toFriendlyStatus('CURRENT'),
     lastObservedText: record.createdAt,
 
-    // Part 3 Google Maps Rating & Website Filter fields
-    rating: (record as any).rating ? {
-      availability: (record as any).rating.availability || 'UNKNOWN',
-      parsedValue: (record as any).rating.parsedValue,
-      rawValue: (record as any).rating.rawValue
-    } : undefined,
+    // Meta Website Availability
     websiteAvailability: (record as any).websiteUrl?.availability || ((record as any).digital?.verifiedWebsite?.value || websiteUrl ? 'PRESENT' : 'UNKNOWN')
   };
 }
@@ -1055,8 +1044,8 @@ export function toExportPreviewViewModel(records: (UnifiedResearchRecord | Canon
   ];
 
   const restrictedFieldsOmitted = [
-    'Google consumer-web place identifiers',
-    'Google consumer-web raw search entries'
+    'Private internal identifiers',
+    'Unverified raw search entries'
   ];
 
   const policyNotice = restrictedRecordsCount > 0

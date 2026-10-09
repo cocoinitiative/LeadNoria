@@ -4,7 +4,7 @@
  * 
  * Non-Negotiable Invariants:
  * - INVARIANT 1: Common orchestration over multiple source-specific adapters
- * - INVARIANT 2: Google Maps remains strictly CONTRACT_ONLY (never calls network/DOM)
+ * - INVARIANT 2: Dedicated Meta Ad Library execution
  * - INVARIANT 3: Source isolation (failures in source A do not corrupt source B)
  * - INVARIANT 4: Phase 8, 9, 6/10, 11, 12, 13 authorities are preserved and consumed
  * - INVARIANT 5: Deterministic replay capability with zero network access
@@ -82,19 +82,6 @@ export class UnifiedPipelineExecutor {
     for (const plan of config.sourcePlans) {
       const srcType = plan.sourceType;
       const adapter = this.registry.getRequired(srcType);
-
-      // Invariant: Google Maps CONTRACT_ONLY
-      if (srcType === 'GOOGLE_MAPS') {
-        run.setSourceStatus('GOOGLE_MAPS', 'CONTRACT_ONLY');
-        run.diagnostics.notes.push('Google Maps adapter registered in CONTRACT_ONLY state. Live extraction skipped.');
-
-        if (config.globalExecutionMode === 'REPLAY' && options.fixtureDataBySource?.['GOOGLE_MAPS']) {
-          const replayEnvelopes = adapter.executeReplay(options.fixtureDataBySource['GOOGLE_MAPS']);
-          candidateEnvelopes.push(...replayEnvelopes);
-          run.setSourceStatus('GOOGLE_MAPS', 'COMPLETED');
-        }
-        continue;
-      }
 
       run.setSourceStatus(srcType, 'RUNNING');
 

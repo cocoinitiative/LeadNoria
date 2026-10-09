@@ -5,7 +5,7 @@
  * Non-Negotiable Invariants:
  * - Rejects prototype pollution (__proto__, constructor, prototype)
  * - Rejects dynamic import / path injection attacks
- * - Strictly enforces Google Maps CONTRACT_ONLY invariant
+ * - Strictly enforces source adapter invariants
  * - Rejects cyclic pipeline graphs
  * - Bounds resource limits (max sources, max stages, max candidates, max concurrency)
  */
@@ -85,10 +85,6 @@ export function validateMultiSourceRunConfig(
       const planVal = validateSourcePlan(plan, registry);
       if (!planVal.isValid) {
         errors.push(...planVal.errors);
-      }
-      // Mandatory Invariant 58: Google Maps live rejection
-      if (plan.sourceType === 'GOOGLE_MAPS' && (plan.executionMode === 'LIVE' || c.globalExecutionMode === 'LIVE')) {
-        errors.push('Google Maps cannot be executed in LIVE mode under any run configuration.');
       }
     }
   }

@@ -6,7 +6,6 @@
  * - Pure observation/quality analytics layer
  * - NEVER buyer intent scoring, conversion prediction, sales propensity, or black-box scores
  * - All metrics derived only from observable evidence present in CanonicalLeadRecord / UnifiedResearchRecord
- * - Google Maps remains strictly INTERNAL / EXPERIMENTAL; restricted data stays restricted
  * - Zero telemetry, 100% local execution
  */
 
@@ -161,7 +160,7 @@ export interface SourceMetrics {
   websiteEnrichmentContributionCount: number;
   mixedSourceRecordCount: number;
   restrictedSourceRecordCount: number;
-  googleMapsStatus: 'INTERNAL_EXPERIMENTAL_RESTRICTED';
+  restrictedSourceStatus: 'INTERNAL_EXPERIMENTAL_RESTRICTED';
   restrictedPolicyNote: string;
 }
 

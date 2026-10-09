@@ -107,7 +107,7 @@ export class AnalyticsPersistenceRepository {
     }));
 
     const snapshot = computeRunAnalytics(runId, records, {
-      sourceType: run.selectedSources[0] === 'META' ? 'META' : 'GOOGLE_MAPS',
+      sourceType: 'META',
       runTitle: `Run ${runId}`
     });
 

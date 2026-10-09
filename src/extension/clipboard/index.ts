@@ -5,6 +5,5 @@
 
 export * from './types.ts';
 export * from './tsvSerializer.ts';
-export * from './googleMapsClipboard.ts';
 export * from './metaClipboard.ts';
 export * from './clipboardWriter.ts';

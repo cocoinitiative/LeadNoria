@@ -23,22 +23,22 @@ export function isIndependentSourceClass(sourceClass: string): sourceClass is In
 }
 
 /**
- * Checks whether an incoming research record has Google Maps restricted lineage.
+ * Checks whether an incoming research record has restricted lineage.
  */
-export function hasGoogleMapsLineage(context: {
+export function hasRestrictedLineage(context: {
   source?: string;
   isRestricted?: boolean;
   provenance?: { source?: string; isRestricted?: boolean };
 }): boolean {
   if (context.isRestricted === true) return true;
-  if (context.source === 'GOOGLE_MAPS_BROWSER' || context.source === 'GOOGLE_MAPS') return true;
+  if (context.source === 'RESTRICTED_SOURCE' || context.source === 'GOOGLE_MAPS') return true;
   if (context.provenance?.isRestricted === true) return true;
-  if (context.provenance?.source === 'GOOGLE_MAPS_BROWSER' || context.provenance?.source === 'GOOGLE_MAPS') return true;
+  if (context.provenance?.source === 'RESTRICTED_SOURCE' || context.provenance?.source === 'GOOGLE_MAPS') return true;
   return false;
 }
 
 /**
- * Validates that an independent source anchor is completely detached from Google Maps.
+ * Validates that an independent source anchor is completely detached from restricted sources.
  */
 export function validateIndependentAnchor(anchor?: IndependentSourceAnchor | null): {
   isValid: boolean;
@@ -64,10 +64,10 @@ export function validateIndependentAnchor(anchor?: IndependentSourceAnchor | nul
 }
 
 /**
- * Ensures field-level provenance contains NO Google Maps derived elements.
- * Returns true if all fields are safe from Google restrictions.
+ * Ensures field-level provenance contains NO restricted derived elements.
+ * Returns true if all fields are safe from restrictions.
  */
-export function assertZeroGoogleFieldProvenance(
+export function assertZeroRestrictedFieldProvenance(
   fieldProvenances: readonly { fieldName: string; source: string; isRestricted: boolean }[]
 ): {
   isClean: boolean;
@@ -76,7 +76,7 @@ export function assertZeroGoogleFieldProvenance(
   const taintedFields: string[] = [];
 
   for (const fp of fieldProvenances) {
-    if (fp.isRestricted || fp.source === 'GOOGLE_MAPS_BROWSER' || fp.source === 'GOOGLE_MAPS') {
+    if (fp.isRestricted || fp.source === 'RESTRICTED_SOURCE' || fp.source === 'GOOGLE_MAPS') {
       taintedFields.push(fp.fieldName);
     }
   }

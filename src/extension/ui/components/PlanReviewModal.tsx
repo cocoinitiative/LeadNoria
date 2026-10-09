@@ -4,7 +4,6 @@
  * 
  * Strict Invariants:
  * - Review plan before executing potentially large runs
- * - Disables execution if Google Maps is in LIVE mode
  * - Displays factual planned values (SearchUnits, categories, limits)
  * - Accessible modal: focus trap, Escape to dismiss
  */
@@ -149,7 +148,7 @@ export const PlanReviewModal: React.FC<PlanReviewModalProps> = ({
               <span className="text-rose-400 text-sm font-bold">⊘</span>
               <div>
                 <strong className="block font-semibold">Execution Blocked:</strong>
-                {plan.blockedReason || 'Google Maps operates strictly in CONTRACT_ONLY mode and cannot execute live extraction.'}
+                {plan.blockedReason || 'Execution blocked by configuration policy.'}
               </div>
             </div>
           )}

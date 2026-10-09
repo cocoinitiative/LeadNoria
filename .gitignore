@@ -12,6 +12,7 @@ dist/*
 !dist/leadnoria-v1.4.0.zip
 !dist/leadnoria-v1.5.0.zip
 !dist/leadnoria-v1.6.0.zip
+!dist/leadnoria-v1.7.0.zip
 
 # Coverage
 coverage/

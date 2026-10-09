@@ -59,7 +59,7 @@ export function sanitizeAnalyticsText(input: unknown): string {
 
 export interface ComputeAnalyticsOptions {
   runTitle?: string;
-  sourceType?: 'META' | 'GOOGLE_MAPS';
+  sourceType?: 'META';
   recordsDiscovered?: number;
   duplicatesDetected?: number;
   recordsRejected?: number;
@@ -399,7 +399,7 @@ export function computeRunAnalytics(
     if (hasMeta) metaRecords++;
     if (hasWeb) websiteEnrichmentRecords++;
     if (hasMeta && hasWeb) mixedSourceRecords++;
-    if (lead.isRestricted || sources.some(s => s === 'GOOGLE_MAPS' || s.includes('GOOGLE'))) {
+    if (lead.isRestricted || sources.some(s => s === 'RESTRICTED' || s.includes('RESTRICTED'))) {
       restrictedSourceRecords++;
     }
 
@@ -540,8 +540,8 @@ export function computeRunAnalytics(
     websiteEnrichmentContributionCount: websiteEnrichmentRecords,
     mixedSourceRecordCount: mixedSourceRecords,
     restrictedSourceRecordCount: restrictedSourceRecords,
-    googleMapsStatus: 'INTERNAL_EXPERIMENTAL_RESTRICTED',
-    restrictedPolicyNote: 'Google Maps lineage is restricted for internal experimental validation only and excluded from production export.'
+    restrictedSourceStatus: 'INTERNAL_EXPERIMENTAL_RESTRICTED',
+    restrictedPolicyNote: 'Restricted lineage is excluded from production export.'
   };
 
   // Restricted data aggregate
@@ -549,7 +549,7 @@ export function computeRunAnalytics(
     restrictedRecordCount: restrictedSourceRecords,
     excludedFromExportCount: restrictedSourceRecords,
     policyMessage: restrictedSourceRecords > 0
-      ? `${restrictedSourceRecords} restricted Google lineage record(s) excluded from export per data firewall policy.`
+      ? `${restrictedSourceRecords} restricted lineage record(s) excluded from export per data firewall policy.`
       : 'All records conform to production export policy.'
   };
 
@@ -682,7 +682,7 @@ export function evaluateQualityWarnings(
       metricName: 'blockedRate',
       observedValue: blockedRate,
       threshold: thresholds.highBlockedRateThreshold,
-      actionableRemedy: 'Check for restricted Google Maps candidate injection or policy exclusions.'
+      actionableRemedy: 'Check for restricted candidate injection or policy exclusions.'
     });
   }
 

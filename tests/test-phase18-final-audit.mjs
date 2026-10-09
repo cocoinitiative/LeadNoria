@@ -1088,60 +1088,44 @@ test('R4: canonicalJsonStringify produces deterministic output', () => {
 });
 
 // ============================================================================
-// SECTION S: GOOGLE MAPS CONTRACT_ONLY
+// SECTION S: GOOGLE MAPS COMPLETE EXCISION & SAFETY
 // ============================================================================
-section('SECTION S: GOOGLE MAPS CONTRACT_ONLY');
+section('SECTION S: GOOGLE MAPS COMPLETE EXCISION & SAFETY');
 
 const registry = new UnifiedSourceAdapterRegistry();
 
-test('S1: Google Maps adapter is registered', () => {
+test('S1: Google Maps adapter is NOT registered in active registry', () => {
+  assert.strictEqual(registry.has('GOOGLE_MAPS'), false);
   const adapter = registry.get('GOOGLE_MAPS');
-  assert.ok(adapter);
+  assert.strictEqual(adapter, undefined);
 });
 
-test('S2: Google Maps adapter has CONTRACT_ONLY or EXPERIMENTAL execution mode', () => {
-  const adapter = registry.get('GOOGLE_MAPS');
-  assert.ok(
-    adapter.capabilities.stages.SOURCE_EXECUTION === 'CONTRACT_ONLY' ||
-    adapter.capabilities.stages.SOURCE_EXECUTION === 'EXPERIMENTAL',
-    'Maps execution mode must be CONTRACT_ONLY or EXPERIMENTAL'
-  );
+test('S2: Registry lists only approved active adapters without Google Maps', () => {
+  const sources = registry.listRegisteredSources();
+  assert.ok(!sources.includes('GOOGLE_MAPS'));
+  assert.ok(sources.includes('META'));
 });
 
-test('S3: Google Maps adapter disallows direct unauthenticated live extraction', () => {
-  const adapter = registry.get('GOOGLE_MAPS');
-  assert.ok(
-    adapter.capabilities.supportsLiveExtraction === false ||
-    adapter.capabilities.implementationState === 'EXPERIMENTAL',
-    'Live extraction must be false or bounded to EXPERIMENTAL browser acquisition'
-  );
+test('S3: Attempting to plan for GOOGLE_MAPS throws unhandled/unregistered error', () => {
+  assert.throws(() => {
+    createCanonicalSourcePlan('GOOGLE_MAPS', {
+      queryScope: ['plumbing'],
+      limits: { maxCandidates: 50, timeoutMs: 30000 }
+    }, registry);
+  }, /No registered source adapter found/);
 });
 
-test('S4: Google Maps executeLive() throws', async () => {
-  const adapter = registry.get('GOOGLE_MAPS');
-  let threw = false;
-  try {
-    await adapter.executeLive({ planId: 'p-s4', sourceType: 'GOOGLE_MAPS' });
-  } catch (err) {
-    threw = true;
-  }
-  assert.strictEqual(threw, true);
+test('S4: Google Maps executeLive() is impossible on unregistered adapter', () => {
+  assert.strictEqual(registry.get('GOOGLE_MAPS'), undefined);
 });
 
 test('S5: No google.com/maps/search URL construction in source code', () => {
   const mapsAdapter = path.join(rootDir, 'src/extension/extraction/googleMapsContractAdapter.ts');
-  if (fs.existsSync(mapsAdapter)) {
-    const code = fs.readFileSync(mapsAdapter, 'utf8');
-    assert.strictEqual(code.includes('google.com/maps/search'), false);
-  }
+  assert.strictEqual(fs.existsSync(mapsAdapter), false);
 });
 
-test('S6: Google Maps source plan uses DRY_RUN execution mode', () => {
-  const plan = createCanonicalSourcePlan('GOOGLE_MAPS', {
-    queryScope: ['plumbing'],
-    limits: { maxCandidates: 50, timeoutMs: 30000 }
-  }, registry);
-  assert.strictEqual(plan.executionMode, 'DRY_RUN');
+test('S6: Pipeline run rejects unregistered GOOGLE_MAPS execution', () => {
+  assert.strictEqual(registry.has('GOOGLE_MAPS'), false);
 });
 
 // ============================================================================
@@ -1704,8 +1688,9 @@ test('AD9: Phase 13 invariant: source plan generated deterministically', () => {
   assert.strictEqual(plan1.sourceType, plan2.sourceType);
 });
 
-test('AD10: Phase 14 invariant: registry has at least 4 adapters', () => {
-  assert.ok(registry.listRegisteredSources().length >= 4);
+test('AD10: Phase 14 invariant: registry has at least 3 adapters without Google Maps', () => {
+  assert.ok(registry.listRegisteredSources().length >= 3);
+  assert.strictEqual(registry.has('GOOGLE_MAPS'), false);
 });
 
 test('AD11: Phase 15 invariant: toResultRowViewModel returns display fields', () => {

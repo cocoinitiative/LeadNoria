@@ -8,4 +8,3 @@
 export * from './types.ts';
 export * from './ontology.ts';
 export * from './evidenceExtractor.ts';
-export * from './mapsRelevanceEngine.ts';

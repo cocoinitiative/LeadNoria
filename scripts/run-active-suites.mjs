@@ -2,20 +2,18 @@ import { execSync } from 'child_process';
 import path from 'path';
 
 const suites = [
-  { name: 'Part 1: Acquisition Foundation', path: 'tests/test-gmaps-acquisition-foundation.mjs' },
-  { name: 'Part 2: Feed Scrolling & Extraction', path: 'tests/test-gmaps-feed-scrolling-extraction.mjs' },
-  { name: 'Part 3: Rating & Website Filters', path: 'tests/test-gmaps-rating-website-filter.mjs' },
-  { name: 'Part 4: Bulk Research Orchestration', path: 'tests/test-gmaps-bulk-research.mjs' },
-  { name: 'Part 5: Deduplication & Quality', path: 'tests/test-gmaps-dedup-quality.mjs' },
-  { name: 'Part 6: Enrichment Integration', path: 'tests/test-gmaps-enrichment-integration.mjs' },
-  { name: 'Part 7: Review & Qualification', path: 'tests/test-gmaps-review-qualification.mjs' },
-  { name: 'Part 8: Lead Projection', path: 'tests/test-gmaps-lead-projection.mjs' },
-  { name: 'Part 9: Workspace Persistence', path: 'tests/test-gmaps-workspace-persistence.mjs' },
+  { name: 'Clipboard Foundation', path: 'tests/test-clipboard-foundation.mjs' },
+  { name: 'Clipboard UI', path: 'tests/test-clipboard-ui.mjs' },
+  { name: 'Clipboard Browser Smoke', path: 'tests/test-clipboard-browser-smoke.mjs' },
   { name: 'Phase 21: Website Intelligence', path: 'tests/test-phase21-website-intelligence.mjs' },
   { name: 'Phase 22: Contact & Person Intel', path: 'tests/test-phase22-contact-person-intelligence.mjs' },
-  { name: 'Part 10: Production Hardening', path: 'tests/test-gmaps-part10-production-hardening.mjs' },
-  { name: 'Google Maps Adv Research & Qualification', path: 'tests/test-gmaps-advanced-research-qualification.mjs' },
-  { name: 'Browser Smoke', path: 'tests/test-gmaps-browser-smoke.mjs' }
+  { name: 'Phase 23: Business Intel Qualification', path: 'tests/test-phase23-business-intelligence-qualification.mjs' },
+  { name: 'Phase 24: Unified Lead Intelligence', path: 'tests/test-phase24-unified-lead-intelligence.mjs' },
+  { name: 'Phase 25: Unified Intelligence UI', path: 'tests/test-phase25-unified-intelligence-ui.mjs' },
+  { name: 'Phase 26: Production Hardening', path: 'tests/test-phase26-production-hardening.mjs' },
+  { name: 'Preset E2E', path: 'tests/test-preset-e2e.mjs' },
+  { name: 'Clean Chromium E2E', path: 'tests/test-clean-chromium-prompt6.mjs' },
+  { name: 'Post-Release Audit', path: 'tests/test-post-release-audit.mjs' }
 ];
 
 console.log('=== RUNNING ALL ACTIVE SUITES WITH TSX ===\n');
@@ -23,7 +21,7 @@ let grandTotal = 0;
 const results = [];
 
 for (const s of suites) {
-  const command = `npx tsx ${s.path}`;
+  const command = `node --import tsx ${s.path}`;
   try {
     const start = Date.now();
     const output = execSync(command, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });

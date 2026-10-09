@@ -106,7 +106,7 @@ console.log('[build-extension] Generated extension icons');
 // Read authoritative version from package.json
 const pkgJsonPath = path.join(rootDir, 'package.json');
 const pkgJson = fs.existsSync(pkgJsonPath) ? JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8')) : {};
-const authoritativeVersion = pkgJson.version || '1.6.0';
+const authoritativeVersion = pkgJson.version || '1.7.0';
 console.log('[build-extension] Authoritative version:', authoritativeVersion);
 
 // 2. Write manifest.json
@@ -114,7 +114,7 @@ const manifest = {
   manifest_version: 3,
   name: "LeadNoria",
   short_name: "LeadNoria",
-  version: "1.6.0",
+  version: "1.7.0",
   description: "Business lead research from real public signals.",
   permissions: [
     "storage",
@@ -227,17 +227,7 @@ await esbuild.build({
 });
 console.log('[build-extension] Bundled content-script.js');
 
-// 5b. Bundle Google Maps Content Script (IIFE — Experimental)
-await esbuild.build({
-  entryPoints: [path.join(rootDir, 'src/extension/acquisition/googleMapsContentScript.ts')],
-  outfile: path.join(outDir, 'gmaps-content-script.js'),
-  bundle: true,
-  format: 'iife',
-  target: 'chrome120',
-  platform: 'browser',
-  sourcemap: false
-});
-console.log('[build-extension] Bundled gmaps-content-script.js (experimental)');
+
 
 // 6. Bundle UI App (ESM)
 await esbuild.build({
@@ -318,6 +308,7 @@ const releaseZipPath7 = path.join(rootDir, 'dist/leadnoria-v1.3.0.zip');
 const releaseZipPath8 = path.join(rootDir, 'dist/leadnoria-v1.4.0.zip');
 const releaseZipPath9 = path.join(rootDir, 'dist/leadnoria-v1.5.0.zip');
 const releaseZipPath10 = path.join(rootDir, 'dist/leadnoria-v1.6.0.zip');
+const releaseZipPath11 = path.join(rootDir, 'dist/leadnoria-v1.7.0.zip');
 
 // v1.5.0 is IMMUTABLE — never overwrite release archives
 if (!fs.existsSync(releaseZipPath9)) {
@@ -326,13 +317,20 @@ if (!fs.existsSync(releaseZipPath9)) {
   console.log('[build-extension] Preserved IMMUTABLE V1.5.0 release archive: dist/leadnoria-v1.5.0.zip');
 }
 
-// v1.6.0 production hardened build artifact — built directly from hardened extension output directory
-await createZipArchive(outDir, releaseZipPath10);
-console.log('[build-extension] Successfully built independent V1.6.0 production hardened package: dist/leadnoria-v1.6.0.zip');
+// v1.6.0 is IMMUTABLE — never overwrite release archives
+if (!fs.existsSync(releaseZipPath10)) {
+  await createZipArchive(outDir, releaseZipPath10);
+} else {
+  console.log('[build-extension] Preserved IMMUTABLE V1.6.0 release archive: dist/leadnoria-v1.6.0.zip');
+}
 
-// extension.zip is the current 1.6.0 production release package (built directly from current output)
+// v1.7.0 production build artifact — Meta Ad Library Only
+await createZipArchive(outDir, releaseZipPath11);
+console.log('[build-extension] Successfully built independent V1.7.0 production package: dist/leadnoria-v1.7.0.zip');
+
+// extension.zip is the current 1.7.0 production release package (built directly from current output)
 await createZipArchive(outDir, releaseZipPath1);
-console.log('[build-extension] Successfully packaged current V1.6.0 production artifact: extension.zip');
+console.log('[build-extension] Successfully packaged current V1.7.0 production artifact: extension.zip');
 
 // v1.4.0 is IMMUTABLE — never overwrite
 if (!fs.existsSync(releaseZipPath8)) {

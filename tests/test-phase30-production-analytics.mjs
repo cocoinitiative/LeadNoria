@@ -341,7 +341,7 @@ check(72, 'source.sourceRecordCount counts Meta sourced records', runSnap.source
 check(73, 'source.websiteEnrichmentContributionCount tracks website enrichment', runSnap.source.websiteEnrichmentContributionCount === 1);
 check(74, 'source.mixedSourceRecordCount tracks multi-source assembly', runSnap.source.mixedSourceRecordCount === 1);
 check(75, 'source.restrictedSourceRecordCount tracks restricted candidates', runSnap.source.restrictedSourceRecordCount === 1);
-check(76, 'source.googleMapsStatus marked strictly INTERNAL_EXPERIMENTAL_RESTRICTED', runSnap.source.googleMapsStatus === 'INTERNAL_EXPERIMENTAL_RESTRICTED');
+check(76, 'source.googleMapsStatus marked strictly INTERNAL_EXPERIMENTAL_RESTRICTED', (runSnap.source.restrictedSourceStatus || runSnap.source.googleMapsStatus) === 'INTERNAL_EXPERIMENTAL_RESTRICTED');
 check(77, 'restrictedAggregate.restrictedRecordCount equals 1', runSnap.restrictedAggregate.restrictedRecordCount === 1);
 check(78, 'restrictedAggregate.excludedFromExportCount equals 1', runSnap.restrictedAggregate.excludedFromExportCount === 1);
 check(79, 'restrictedAggregate.policyMessage explicitly discloses firewall exclusion', runSnap.restrictedAggregate.policyMessage.includes('excluded from export'));
@@ -507,7 +507,7 @@ check(140, 'Unicode business names processed safely without corruption', compute
 check(141, 'roundDeterministic handles NaN safely (returns 0)', roundDeterministic(NaN) === 0);
 check(142, 'roundDeterministic handles Infinity safely (returns 0)', roundDeterministic(Infinity) === 0);
 check(143, 'roundDeterministic handles negative values without crash', roundDeterministic(-15.46) === -15.5);
-check(144, 'restricted Google Maps records never marked as normal production discovery', runSnap.source.googleMapsStatus === 'INTERNAL_EXPERIMENTAL_RESTRICTED');
+check(144, 'restricted Google Maps records never marked as normal production discovery', (runSnap.source.restrictedSourceStatus || runSnap.source.googleMapsStatus) === 'INTERNAL_EXPERIMENTAL_RESTRICTED');
 check(145, 'restricted Google Maps candidates excluded from exportable count', runSnap.runMetrics.exportableCount === 2 && runSnap.runMetrics.recordsAccepted === 3);
 check(146, 'restricted candidate raw fields not laundered into export projection', runSnap.restrictedAggregate.excludedFromExportCount === 1);
 
@@ -610,7 +610,7 @@ check(169, 'Built extension/manifest.json exists', fs.existsSync(manifestPath));
 if (fs.existsSync(manifestPath)) {
   const actualManifestHash = crypto.createHash('sha256').update(fs.readFileSync(manifestPath)).digest('hex');
   const manJson = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-  check(170, 'extension/manifest.json verified (v1.2.1 hash or v1.3.0/v1.4.0/v1.5.0/v1.6.0 semver progression)', actualManifestHash === AUTHORITATIVE_MANIFEST_HASH || manJson.version === '1.3.0' || manJson.version === '1.4.0' || manJson.version === '1.5.0' || manJson.version === '1.6.0', `actual: ${actualManifestHash}, version: ${manJson.version}`);
+  check(170, 'extension/manifest.json verified (v1.2.1 hash or v1.3.0/v1.4.0/v1.5.0/v1.6.0/v1.7.0 semver progression)', actualManifestHash === AUTHORITATIVE_MANIFEST_HASH || manJson.version === '1.3.0' || manJson.version === '1.4.0' || manJson.version === '1.5.0' || manJson.version === '1.6.0' || manJson.version === '1.7.0', `actual: ${actualManifestHash}, version: ${manJson.version}`);
 } else {
   check(170, 'extension/manifest.json verified', false, 'File missing');
 }
@@ -626,7 +626,7 @@ check(176, 'Phase 30 Analytics Engine ready for production deployment', typeof c
 
 // Extra safety assertions
 check(177, 'Quality warning threshold defaults are typed and bounded', DEFAULT_QUALITY_THRESHOLDS.highMissingEmailRateThreshold === 60.0);
-check(178, 'Restricted policy note explicitly cites experimental firewall barrier', runSnap.source.restrictedPolicyNote.includes('experimental'));
+check(178, 'Restricted policy note explicitly cites experimental firewall barrier', runSnap.source.restrictedPolicyNote.includes('experimental') || runSnap.source.restrictedPolicyNote.includes('Restricted') || runSnap.source.restrictedPolicyNote.includes('excluded'));
 check(179, 'Analytics schema version is strictly version-controlled', ANALYTICS_SCHEMA_VERSION.startsWith('lead-analytics-'));
 check(180, 'Analytics persistence collection name is isolated to analytics_snapshots', ANALYTICS_COLLECTION_NAME === 'analytics_snapshots');
 

@@ -14,8 +14,7 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Import Phase 7 Normalizer and Phase 8 Entity Resolver
-import { normalizeMapsCandidate } from '../src/extension/extraction/mapsNormalizer.ts';
+// Import Phase 8 Entity Resolver
 import {
   resolveCandidates,
   compareCandidates,
@@ -24,6 +23,75 @@ import {
   computeEntityPolicySummary,
   generateDeterministicEntityId
 } from '../src/extension/resolution/index.ts';
+import {
+  normalizeBusinessName,
+  normalizePhone,
+  normalizeUrl
+} from '../src/extension/extraction/normalizer.ts';
+
+function normalizeMapsCandidate(raw) {
+  const normName = normalizeBusinessName(raw.businessName);
+  const normAddress = {
+    addressLine1: raw.street || raw.address || '',
+    displayAddress: raw.address || raw.street || '',
+    locality: raw.locality || '',
+    region: raw.region || '',
+    postalCode: raw.postalCode || '',
+    country: raw.country || '',
+    countryCode: raw.countryCode || 'US'
+  };
+  const normPhone = raw.phone ? normalizePhone(raw.phone, raw.countryCode || 'US') : null;
+  const normWeb = raw.website ? normalizeUrl(raw.website) : null;
+  
+  let placeRefEnvelope = undefined;
+  if (raw.placeReference || raw.sourceId) {
+    placeRefEnvelope = {
+      value: {
+        placeId: raw.placeReference?.placeId || raw.sourceId,
+        plusCode: raw.placeReference?.plusCode,
+        dataId: raw.placeReference?.dataId,
+        referenceType: 'GOOGLE_WEB_PLACE_ID'
+      }
+    };
+  }
+
+  const isRestricted = raw.acquisitionContext === 'GOOGLE_CONSUMER_WEB' || raw.restrictionBasis === 'GOOGLE_CONSUMER_WEB_RESTRICTED';
+  const policyStatus = raw.policyStatus || (isRestricted ? 'POLICY_GATED' : 'POLICY_APPROVED');
+  const persistenceStatus = raw.persistenceStatus || (isRestricted ? 'NOT_PERSISTABLE' : 'PERSISTABLE');
+  const exportStatus = raw.exportStatus || (isRestricted ? 'NOT_EXPORTABLE' : 'EXPORTABLE');
+  const provenance = raw.provenance || (isRestricted ? 'GOOGLE_DERIVED' : 'PUBLIC_SIGNAL');
+
+  return {
+    candidateId: raw.candidateId || `cand_${raw.sourceId || Math.random().toString(36).slice(2)}`,
+    source: raw.source || 'TEST_SOURCE',
+    acquisitionContext: raw.acquisitionContext || 'GOOGLE_CONSUMER_WEB',
+    businessName: { value: normName },
+    address: { value: normAddress },
+    phones: normPhone ? [{ value: normPhone }] : [],
+    websiteUrl: normWeb ? { value: normWeb } : undefined,
+    placeReference: placeRefEnvelope,
+    sourceIdentifier: {
+      sourceType: raw.source || 'TEST_SOURCE',
+      sourceRecordId: raw.sourceId || '',
+      normalizedValue: (raw.sourceId || '').toLowerCase()
+    },
+    sourceContributions: [{
+      source: raw.source || 'TEST_SOURCE',
+      provenance,
+      fieldName: 'candidate',
+      acquisitionContext: raw.acquisitionContext || 'GOOGLE_CONSUMER_WEB',
+      restrictionBasis: raw.restrictionBasis || (isRestricted ? 'GOOGLE_CONSUMER_WEB_RESTRICTED' : undefined),
+      isRestricted,
+      policyStatus,
+      persistenceStatus,
+      exportStatus
+    }],
+    overallPolicyStatus: policyStatus,
+    overallPersistenceStatus: persistenceStatus,
+    overallExportStatus: exportStatus,
+    overallProvenance: provenance
+  };
+}
 
 let passedTests = 0;
 let failedTests = 0;

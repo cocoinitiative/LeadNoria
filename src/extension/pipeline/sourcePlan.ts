@@ -4,7 +4,7 @@
  * 
  * Invariants:
  * - Immutable plan contract defining execution scope per source
- * - Google Maps live execution mode is strictly rejected at the plan level
+ * - Dedicated Meta Ad Library execution with stage validation
  * - Explicit versioning and stage declaration
  */
 
@@ -64,11 +64,6 @@ export function validateSourcePlan(
 
   const adapter = registry.get(p.sourceType)!;
 
-  // Invariant 20: Google Maps CONTRACT_ONLY check
-  if (p.sourceType === 'GOOGLE_MAPS' && p.executionMode === 'LIVE') {
-    errors.push('Google Maps sourceType cannot be executed in LIVE mode; it is strictly CONTRACT_ONLY.');
-  }
-
   // Validate execution mode compatibility
   const validModes: ExecutionMode[] = ['LIVE', 'DRY_RUN', 'REPLAY', 'VALIDATION_ONLY'];
   if (!p.executionMode || !validModes.includes(p.executionMode)) {
@@ -112,8 +107,7 @@ export function createCanonicalSourcePlan(
   const adapter = registry.getRequired(sourceType);
   const now = new Date().toISOString();
 
-  const isGmaps = sourceType === 'GOOGLE_MAPS';
-  const defaultMode: ExecutionMode = isGmaps ? 'DRY_RUN' : 'LIVE';
+  const defaultMode: ExecutionMode = 'LIVE';
 
   return {
     planId: `plan_${sourceType.toLowerCase()}_${Date.now()}`,

@@ -1508,7 +1508,7 @@ export class RecordAssembler {
     const sourceRecords: SourceRecordKey[] = [];
     if (record.sourceSignals.googleEvidence) {
       sourceRecords.push({
-        sourceType: 'GOOGLE_MAPS',
+        sourceType: 'FUTURE_SOURCE',
         sourceNamespace: 'google',
         sourceRecordId: record.sourceSignals.googleEvidence.placeId || record.canonicalEntityId
       });

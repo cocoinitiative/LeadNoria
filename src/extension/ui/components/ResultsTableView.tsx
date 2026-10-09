@@ -16,8 +16,6 @@ import { ResultRowViewModel } from '../types.ts';
 import { StatusBadge } from './StatusBadge.tsx';
 import { toFriendlyStatus } from '../humanLabels.ts';
 import { getSafeExternalUrl } from '../security.ts';
-import { GoogleMapsFilterControls } from './GoogleMapsFilterControls.tsx';
-import type { RatingFilterOption, WebsiteFilterOption } from '../../acquisition/engine/filterTypes.ts';
 import { metaResultsToTsv, writeClipboardText } from '../../clipboard/index.ts';
 
 export type SortOption =
@@ -54,8 +52,6 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
   const [qualificationFilter, setQualificationFilter] = useState<string>('ALL');
   const [freshnessFilter, setFreshnessFilter] = useState<string>('ALL');
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
-  const [ratingFilter, setRatingFilter] = useState<RatingFilterOption>('ANY');
-  const [websiteFilter, setWebsiteFilter] = useState<WebsiteFilterOption>('ANY');
   const [requirePhone, setRequirePhone] = useState(false);
   const [requireEmail, setRequireEmail] = useState(false);
   const [requireWebsite, setRequireWebsite] = useState(false);
@@ -131,30 +127,6 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
       if (requireWebsite && !r.dataSignals?.websiteVerified) return false;
       if (requirePerson && !r.dataSignals?.publicPersonAvailable) return false;
 
-      // Part 3: Rating filter
-      if (ratingFilter !== 'ANY') {
-        const minRating = ratingFilter === 'MIN_4_5' ? 4.5 : 4.0;
-        if (
-          !r.rating ||
-          r.rating.availability !== 'PRESENT' ||
-          typeof r.rating.parsedValue !== 'number' ||
-          !Number.isFinite(r.rating.parsedValue) ||
-          r.rating.parsedValue < minRating
-        ) {
-          return false;
-        }
-      }
-
-      // Part 3: Website filter
-      if (websiteFilter === 'WITH_WEBSITE') {
-        // PRESENT and has non-empty URL
-        if (r.websiteAvailability !== 'PRESENT') return false;
-        if (!r.websiteUrl || r.websiteUrl.trim() === '') return false;
-      } else if (websiteFilter === 'WITHOUT_WEBSITE') {
-        // Only explicit ABSENT matches. UNKNOWN, AMBIGUOUS, UNSUPPORTED, PRESENT do NOT match
-        if (r.websiteAvailability !== 'ABSENT') return false;
-      }
-
       return true;
     });
   }, [
@@ -164,8 +136,6 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
     qualificationFilter,
     freshnessFilter,
     categoryFilter,
-    ratingFilter,
-    websiteFilter,
     requirePhone,
     requireEmail,
     requireWebsite,
@@ -377,7 +347,6 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
               <option value="ALL">All Sources</option>
               <option value="META">Meta</option>
               <option value="WEBSITE">Website</option>
-              <option value="GOOGLE_MAPS">Restricted Google</option>
             </select>
 
             {/* Freshness Filter */}
@@ -469,17 +438,6 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
         </div>
       </div>
 
-      {/* LeadNoria Part 3: Rating + Website Filter Controls */}
-      <GoogleMapsFilterControls
-        ratingFilter={ratingFilter}
-        websiteFilter={websiteFilter}
-        onRatingChange={newRating => { setRatingFilter(newRating); setPage(1); }}
-        onWebsiteChange={newWebsite => { setWebsiteFilter(newWebsite); setPage(1); }}
-        onResetFilters={() => { setRatingFilter('ANY'); setWebsiteFilter('ANY'); setPage(1); }}
-        totalObserved={results.length}
-        matchingCount={filteredResults.length}
-      />
-
       {/* Selection & Pagination Status Bar */}
       <div className="flex items-center justify-between px-1 text-xs text-slate-400">
         <div className="flex items-center gap-3">
@@ -523,16 +481,12 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
           <p className="text-xs font-semibold text-slate-300 mb-0.5">
             {results.length === 0
               ? 'No Research Results Available'
-              : (ratingFilter !== 'ANY' || websiteFilter !== 'ANY')
-                ? `0 businesses match ${ratingFilter !== 'ANY' ? ratingFilter : 'Any'} + ${websiteFilter === 'WITH_WEBSITE' ? 'With Website' : websiteFilter === 'WITHOUT_WEBSITE' ? 'Without Website' : 'Any'}`
-                : 'No Matching Businesses Found'}
+              : 'No Matching Businesses Found'}
           </p>
           <p className="text-[11px] text-slate-500">
             {results.length === 0
               ? 'Data not available. Start a research run to discover leads.'
-              : (ratingFilter !== 'ANY' || websiteFilter !== 'ANY')
-                ? 'Try relaxing your rating or website filter criteria to view more candidates.'
-                : 'Try adjusting your search terms or relaxing your filter criteria.'}
+              : 'Try adjusting your search terms or relaxing your filter criteria.'}
           </p>
         </div>
       )}
@@ -604,16 +558,6 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
                           <span className="font-mono text-slate-500 text-[10px]">{r.primarySource}</span>
                         )}
                       </div>
-
-                      {/* Rating Badge */}
-                      {r.rating && r.rating.availability === 'PRESENT' && typeof r.rating.parsedValue === 'number' && (
-                        <>
-                          <span className="text-slate-600">•</span>
-                          <span className="text-amber-400 font-semibold flex items-center gap-0.5" title={`Observed Rating: ${r.rating.parsedValue.toFixed(1)}`}>
-                            <span>★</span> {r.rating.parsedValue.toFixed(1)}
-                          </span>
-                        </>
-                      )}
                     </div>
                   </div>
                 </div>

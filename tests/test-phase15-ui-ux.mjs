@@ -224,32 +224,24 @@ async function runTestSuite() {
     pass('Test 1: Meta Ad Library source capability declared LIVE and available');
   } catch (e) { fail('Test 1', e); }
 
-  // Test 2: Google Maps selection
+  // Test 2: Google Maps excision check
   try {
-    const gmapsCap = defaultUnifiedRegistry.getCapability('GOOGLE_MAPS');
-    assert.ok(
-      gmapsCap.implementationState === 'CONTRACT_ONLY' || gmapsCap.implementationState === 'EXPERIMENTAL',
-      'Google Maps capability is CONTRACT_ONLY or EXPERIMENTAL'
-    );
-    assert.ok(typeof gmapsCap.supportsLiveExtraction === 'boolean');
-    pass('Test 2: Google Maps capability declared CONTRACT_ONLY or EXPERIMENTAL with boolean live extraction flag');
+    assert.strictEqual(defaultUnifiedRegistry.has('GOOGLE_MAPS'), false);
+    pass('Test 2: Google Maps capability cleanly excised from active registry');
   } catch (e) { fail('Test 2', e); }
 
   // Test 3: Source selection persistence
   try {
-    const selected = 'GOOGLE_MAPS';
-    assert.strictEqual(selected, 'GOOGLE_MAPS');
+    const selected = 'META';
+    assert.strictEqual(selected, 'META');
     pass('Test 3: Selected source state retained in local state');
   } catch (e) { fail('Test 3', e); }
 
   // Test 4: Source switching
   try {
     let source = 'META';
-    source = 'GOOGLE_MAPS';
-    assert.strictEqual(source, 'GOOGLE_MAPS');
-    source = 'META';
     assert.strictEqual(source, 'META');
-    pass('Test 4: Seamless bidirectional source switching between Meta and Google Maps');
+    pass('Test 4: Meta Ad Library configured as active research source');
   } catch (e) { fail('Test 4', e); }
 
   // Test 5: Contract-only state rendering
@@ -268,11 +260,10 @@ async function runTestSuite() {
 
   // Test 7: Explicit source selection
   try {
-    const availableSources = ['META', 'GOOGLE_MAPS'];
-    assert.strictEqual(availableSources.length, 2);
+    const availableSources = ['META'];
+    assert.strictEqual(availableSources.length, 1);
     assert.ok(availableSources.includes('META'));
-    assert.ok(availableSources.includes('GOOGLE_MAPS'));
-    pass('Test 7: User source selection requires explicit user choice');
+    pass('Test 7: User source selection targets Meta Ad Library as primary source');
   } catch (e) { fail('Test 7', e); }
 
   // ==========================================
@@ -356,9 +347,9 @@ async function runTestSuite() {
 
   // Test 17: Invalid configuration rejection
   try {
-    const invalidPlan = { sourceType: 'GOOGLE_MAPS', executionMode: 'LIVE', canExecuteLive: false };
+    const invalidPlan = { sourceType: 'UNKNOWN_SOURCE', executionMode: 'LIVE', canExecuteLive: false };
     assert.strictEqual(invalidPlan.canExecuteLive, false);
-    pass('Test 17: Google Maps + LIVE execution mode combination strictly rejected in plan review');
+    pass('Test 17: Unknown source + LIVE execution mode combination strictly rejected in plan review');
   } catch (e) { fail('Test 17', e); }
 
   // ==========================================
@@ -468,13 +459,13 @@ async function runTestSuite() {
     const run = new MultiSourceRun({
       runId: 'r_warn',
       runVersion: '1.0',
-      selectedSources: ['META', 'GOOGLE_MAPS'],
-      sourcePlans: [createCanonicalSourcePlan('META'), createCanonicalSourcePlan('GOOGLE_MAPS', { executionMode: 'DRY_RUN' })],
+      selectedSources: ['META', 'WEBSITE'],
+      sourcePlans: [createCanonicalSourcePlan('META'), createCanonicalSourcePlan('WEBSITE', { executionMode: 'DRY_RUN' })],
       globalExecutionMode: 'DRY_RUN',
       globalLimits: { maxTotalCandidates: 100, maxRunDurationMs: 60000, maxConcurrentSources: 2 }
     });
     run.setSourceStatus('META', 'COMPLETED');
-    run.setSourceStatus('GOOGLE_MAPS', 'CONTRACT_ONLY');
+    run.setSourceStatus('WEBSITE', 'CONTRACT_ONLY');
     const vm = toRunStatusViewModel(run);
     assert.strictEqual(vm.globalStatus, 'COMPLETED_WITH_WARNINGS');
     assert.strictEqual(vm.hasWarnings, true);
@@ -704,12 +695,12 @@ async function runTestSuite() {
     const run = new MultiSourceRun({
       runId: 'r_co',
       runVersion: '1.0',
-      selectedSources: ['GOOGLE_MAPS'],
-      sourcePlans: [createCanonicalSourcePlan('GOOGLE_MAPS', { executionMode: 'DRY_RUN' })],
+      selectedSources: ['WEBSITE'],
+      sourcePlans: [createCanonicalSourcePlan('WEBSITE', { executionMode: 'DRY_RUN' })],
       globalExecutionMode: 'DRY_RUN',
       globalLimits: { maxTotalCandidates: 100, maxRunDurationMs: 60000, maxConcurrentSources: 1 }
     });
-    run.setSourceStatus('GOOGLE_MAPS', 'CONTRACT_ONLY');
+    run.setSourceStatus('WEBSITE', 'CONTRACT_ONLY');
     const vm = toRunStatusViewModel(run);
     assert.strictEqual(vm.globalStatus, 'COMPLETED_WITH_WARNINGS');
     assert.notStrictEqual(vm.globalStatus, 'COMPLETED');
@@ -924,16 +915,16 @@ async function runTestSuite() {
     pass('Test 60: Meta-derived evidence labeled with source family META');
   } catch (e) { fail('Test 60', e); }
 
-  // Test 61: Google restriction display
+  // Test 61: Restricted records display
   try {
     const u = createSampleUnifiedRecord({
-      primarySource: 'GOOGLE_MAPS',
-      restrictions: { isRestricted: true, exportEligible: false, persistenceEligible: false, restrictionBasis: 'GOOGLE_CONSUMER_WEB_RESTRICTED' }
+      primarySource: 'USER_PROVIDED',
+      restrictions: { isRestricted: true, exportEligible: false, persistenceEligible: false, restrictionBasis: 'RESTRICTED_SOURCE' }
     });
     const row = toResultRowViewModel(u);
     assert.strictEqual(row.isRestricted, true);
     assert.strictEqual(row.isExportable, false);
-    pass('Test 61: Google consumer-web restrictions displayed clearly');
+    pass('Test 61: Restricted records displayed clearly');
   } catch (e) { fail('Test 61', e); }
 
   // Test 62: User-provided display
@@ -1203,14 +1194,14 @@ async function runTestSuite() {
   // Test 87: Restricted field filtering
   try {
     const restrictedRecord = createSampleUnifiedRecord({
-      primarySource: 'GOOGLE_MAPS',
+      primarySource: 'USER_PROVIDED',
       restrictions: { isRestricted: true, exportEligible: false, persistenceEligible: false }
     });
     const preview = toExportPreviewViewModel([restrictedRecord]);
     assert.strictEqual(preview.exportableRecordsCount, 0);
     assert.strictEqual(preview.restrictedRecordsCount, 1);
     assert.strictEqual(preview.isExportReady, false);
-    pass('Test 87: Policy firewall excludes restricted Google records from export count');
+    pass('Test 87: Policy firewall excludes restricted records from export count');
   } catch (e) { fail('Test 87', e); }
 
   // Test 88: Mixed record export handling
@@ -1218,7 +1209,7 @@ async function runTestSuite() {
     const r1 = createSampleUnifiedRecord({ recordId: 'r1' });
     const r2 = createSampleUnifiedRecord({
       recordId: 'r2',
-      primarySource: 'GOOGLE_MAPS',
+      primarySource: 'USER_PROVIDED',
       restrictions: { isRestricted: true, exportEligible: false, persistenceEligible: false }
     });
     const preview = toExportPreviewViewModel([r1, r2]);
@@ -1261,12 +1252,12 @@ async function runTestSuite() {
   // Test 93: No policy bypass in export preview
   try {
     const restrictedRecord = createSampleUnifiedRecord({
-      primarySource: 'GOOGLE_MAPS',
+      primarySource: 'USER_PROVIDED',
       restrictions: { isRestricted: true, exportEligible: false, persistenceEligible: false }
     });
     const preview = toExportPreviewViewModel([restrictedRecord]);
     assert.strictEqual(preview.isExportReady, false);
-    pass('Test 93: No bypass exists for Google consumer-web export restrictions');
+    pass('Test 93: No bypass exists for restricted record export restrictions');
   } catch (e) { fail('Test 93', e); }
 
   // ==========================================

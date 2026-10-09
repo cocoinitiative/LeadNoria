@@ -65,7 +65,6 @@ import {
 import {
   UnifiedSourceAdapterRegistry,
   MetaUnifiedAdapter,
-  GoogleMapsUnifiedAdapter,
   WebsiteUnifiedAdapter,
   UserProvidedUnifiedAdapter
 } from '../src/extension/pipeline/index.ts';
@@ -331,22 +330,19 @@ test('E2E-04: Google Maps contract -> geographic plan -> replay -> downstream pi
   assert.strictEqual(env.restrictions.restrictionBasis, 'GOOGLE_CONSUMER_WEB_RESTRICTED');
 
   const registry = new UnifiedSourceAdapterRegistry();
-  const plan = createCanonicalSourcePlan('GOOGLE_MAPS', {
-    queryScope: ['tours'],
-    limits: { maxCandidates: 50, timeoutMs: 10000 }
-  }, registry);
-
-  assert.strictEqual(plan.executionMode, 'DRY_RUN');
+  assert.strictEqual(registry.has('GOOGLE_MAPS'), false);
+  assert.throws(() => {
+    createCanonicalSourcePlan('GOOGLE_MAPS', {
+      queryScope: ['tours'],
+      limits: { maxCandidates: 50, timeoutMs: 10000 }
+    }, registry);
+  }, /No registered source adapter found/);
 });
 
 test('E2E-05: Google Maps LIVE attempt -> blocked -> UI -> persistence -> reload -> still blocked', async () => {
   const registry = new UnifiedSourceAdapterRegistry();
   const gmapsAdapter = registry.get('GOOGLE_MAPS');
-  assert.ok(gmapsAdapter);
-
-  await assert.rejects(async () => {
-    await gmapsAdapter.executeLive({ queryScope: ['test'], limits: { maxCandidates: 10, timeoutMs: 5000 } });
-  }, /CONTRACT_ONLY|GoogleMapsUnifiedAdapter/);
+  assert.strictEqual(gmapsAdapter, undefined);
 
   const adapter = new MemoryStorageAdapter();
   const repo = new PersistenceRepository(adapter);
@@ -703,12 +699,13 @@ test('E2E-21: Duplicate user action -> no duplicate state', async () => {
 test('E2E-22: Rapid source switching', () => {
   const registry = new UnifiedSourceAdapterRegistry();
   const meta = registry.get('META');
-  const gmaps = registry.get('GOOGLE_MAPS');
   const web = registry.get('WEBSITE');
+  const user = registry.get('USER_PROVIDED');
 
   assert.strictEqual(meta.sourceType, 'META');
-  assert.strictEqual(gmaps.sourceType, 'GOOGLE_MAPS');
   assert.strictEqual(web.sourceType, 'WEBSITE');
+  assert.strictEqual(user.sourceType, 'USER_PROVIDED');
+  assert.strictEqual(registry.has('GOOGLE_MAPS'), false);
 });
 
 test('E2E-23: Rapid filter/sort changes', () => {

@@ -1087,11 +1087,11 @@ import { readFileSync } from 'node:fs';
 
 // 205 — package.json version matches release candidate progression
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-assert(['1.5.0', '1.6.0'].includes(pkg.version), '205: package.json version is 1.5.0 or 1.6.0');
+assert(['1.5.0', '1.6.0', '1.7.0'].includes(pkg.version), '205: package.json version is 1.5.0, 1.6.0 or 1.7.0');
 
 // 206 — manifest.json version matches release candidate progression
 const manifest = JSON.parse(readFileSync(new URL('../src/extension/manifest.json', import.meta.url), 'utf8'));
-assert(['1.5.0', '1.6.0'].includes(manifest.version), '206: manifest.json version is 1.5.0 or 1.6.0');
+assert(['1.5.0', '1.6.0', '1.7.0'].includes(manifest.version), '206: manifest.json version is 1.5.0, 1.6.0 or 1.7.0');
 
 // 207 — v1.4.0 artifact still exists (immutability)
 import { existsSync } from 'node:fs';

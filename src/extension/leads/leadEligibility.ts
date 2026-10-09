@@ -15,7 +15,7 @@ import type {
   LeadEligibilityResult,
   LeadEligibilityStatus
 } from './leadTypes.ts';
-import { hasGoogleMapsLineage, validateIndependentAnchor } from './leadProvenance.ts';
+import { hasRestrictedLineage, validateIndependentAnchor } from './leadProvenance.ts';
 
 export interface LeadEligibilityEvaluationInput {
   readonly candidate?: {
@@ -63,7 +63,7 @@ export function evaluateLeadEligibility(
   }
 
   // 3. Inspect Candidate Lineage (if candidate is attached)
-  const isGoogleLineage = input.candidate ? hasGoogleMapsLineage(input.candidate) : false;
+  const isGoogleLineage = input.candidate ? hasRestrictedLineage(input.candidate) : false;
 
   // 4. Verify Independent Source Anchor
   const anchorValidation = validateIndependentAnchor(input.independentSource);

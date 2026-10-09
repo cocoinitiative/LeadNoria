@@ -611,7 +611,7 @@ export const SAMPLE_IDENTITY_PAIR: IdentityReviewPairModel = {
   },
   matchingSignals: [
     'Shared contact phone +1 (407) 555-0144 in landing page footer',
-    'Shared Google Maps corporate address: 1400 Orange Ave, Orlando, FL',
+    'Shared corporate address: 1400 Orange Ave, Orlando, FL',
     'Identical executive contact listed in Florida Sunbiz corporation filing: Robert Vance (CEO)'
   ],
   conflictingSignals: [

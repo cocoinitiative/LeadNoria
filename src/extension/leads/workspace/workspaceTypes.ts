@@ -14,10 +14,9 @@ import type {
   IndependentSourceClass,
   PublicContactEvidence,
   PublicPersonEvidence,
-  PublicWebsiteEvidence
+  PublicWebsiteEvidence,
+  ReviewState
 } from '../leadTypes.ts';
-
-import type { ReviewState } from '../../acquisition/review/reviewTypes.ts';
 
 /**
  * Current durable workspace storage schema version.

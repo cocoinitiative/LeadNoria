@@ -130,7 +130,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               Pipeline orchestration, normalization, entity deduplication, relevance scoring, and qualification profile evaluations occur entirely within your local browser environment.
             </p>
             <p className="text-[11px] text-slate-400 leading-relaxed">
-              <strong>Compliance Invariant:</strong> Data derived from Google consumer-web sources is strictly designated <code className="text-purple-300">NOT_PERSISTABLE</code> and <code className="text-purple-300">NOT_EXPORTABLE</code> to prevent policy breaches.
+              <strong>Compliance Invariant:</strong> Only export-safe and policy-approved data is persisted or exported to prevent policy breaches.
             </p>
           </div>
 
@@ -163,12 +163,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <strong className="text-slate-200">Meta Ad Library:</strong> Public UI advertiser search, creative signals, and domain pointers.
               </div>
             </li>
-            <li className="flex items-start gap-2">
-              <span className="text-purple-400 font-bold">⊘</span>
-              <div>
-                <strong className="text-slate-200">Google Maps:</strong> Contract planning &amp; geographic partitioning only. Live extraction is not enabled.
-              </div>
-            </li>
+
             <li className="flex items-start gap-2">
               <span className="text-emerald-400 font-bold">✓</span>
               <div>
