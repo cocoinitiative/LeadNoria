@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import esbuild from 'esbuild';
 import zlib from 'zlib';
+import { verifyZipMatchesDirectory, verifyMirrorIntegrity } from './release-integrity.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -114,7 +115,7 @@ const manifest = {
   manifest_version: 3,
   name: "LeadNoria",
   short_name: "LeadNoria",
-  version: "1.7.0",
+  version: authoritativeVersion,
   description: "Business lead research from real public signals.",
   permissions: [
     "storage",
@@ -309,6 +310,11 @@ const releaseZipPath8 = path.join(rootDir, 'dist/leadnoria-v1.4.0.zip');
 const releaseZipPath9 = path.join(rootDir, 'dist/leadnoria-v1.5.0.zip');
 const releaseZipPath10 = path.join(rootDir, 'dist/leadnoria-v1.6.0.zip');
 const releaseZipPath11 = path.join(rootDir, 'dist/leadnoria-v1.7.0.zip');
+const releaseZipPath12 = path.join(rootDir, 'dist/leadnoria-v1.7.1.zip');
+const releaseZipPath13 = path.join(rootDir, 'dist/leadnoria-v1.7.2.zip');
+const releaseZipPath14 = path.join(rootDir, 'dist/leadnoria-v1.7.3.zip');
+const releaseZipPath15 = path.join(rootDir, 'dist/leadnoria-v1.7.4.zip');
+const releaseZipPath16 = path.join(rootDir, 'dist/leadnoria-v1.7.5.zip');
 
 // v1.5.0 is IMMUTABLE — never overwrite release archives
 if (!fs.existsSync(releaseZipPath9)) {
@@ -324,13 +330,82 @@ if (!fs.existsSync(releaseZipPath10)) {
   console.log('[build-extension] Preserved IMMUTABLE V1.6.0 release archive: dist/leadnoria-v1.6.0.zip');
 }
 
-// v1.7.0 production build artifact — Meta Ad Library Only
-await createZipArchive(outDir, releaseZipPath11);
-console.log('[build-extension] Successfully built independent V1.7.0 production package: dist/leadnoria-v1.7.0.zip');
+// v1.7.0 is IMMUTABLE — never overwrite release archives
+if (!fs.existsSync(releaseZipPath11)) {
+  await createZipArchive(outDir, releaseZipPath11);
+} else {
+  console.log('[build-extension] Preserved IMMUTABLE V1.7.0 release archive: dist/leadnoria-v1.7.0.zip');
+}
 
-// extension.zip is the current 1.7.0 production release package (built directly from current output)
-await createZipArchive(outDir, releaseZipPath1);
-console.log('[build-extension] Successfully packaged current V1.7.0 production artifact: extension.zip');
+// v1.7.1 is IMMUTABLE — never overwrite release archives
+if (!fs.existsSync(releaseZipPath12)) {
+  await createZipArchive(outDir, releaseZipPath12);
+} else {
+  console.log('[build-extension] Preserved IMMUTABLE V1.7.1 release archive: dist/leadnoria-v1.7.1.zip');
+}
+
+// v1.7.2 is IMMUTABLE — never overwrite release archives
+if (!fs.existsSync(releaseZipPath13)) {
+  await createZipArchive(outDir, releaseZipPath13);
+} else {
+  console.log('[build-extension] Preserved IMMUTABLE V1.7.2 release archive: dist/leadnoria-v1.7.2.zip');
+}
+
+// v1.7.3 is IMMUTABLE — never overwrite release archives
+if (!fs.existsSync(releaseZipPath14)) {
+  await createZipArchive(outDir, releaseZipPath14);
+} else {
+  console.log('[build-extension] Preserved IMMUTABLE V1.7.3 release archive: dist/leadnoria-v1.7.3.zip');
+}
+
+// v1.7.4 is IMMUTABLE — never overwrite release archives
+if (!fs.existsSync(releaseZipPath15)) {
+  await createZipArchive(outDir, releaseZipPath15);
+} else {
+  console.log('[build-extension] Preserved IMMUTABLE V1.7.4 release archive: dist/leadnoria-v1.7.4.zip');
+}
+
+// v1.7.5 is IMMUTABLE — sealed authoritative release archive
+if (!fs.existsSync(releaseZipPath16)) {
+  await createZipArchive(outDir, releaseZipPath16);
+  console.log('[build-extension] Successfully built independent V1.7.5 production package: dist/leadnoria-v1.7.5.zip');
+} else {
+  console.log('[build-extension] Preserved IMMUTABLE V1.7.5 authoritative release archive: dist/leadnoria-v1.7.5.zip');
+
+  // Active Source-to-Archive Drift Detection:
+  const driftResult = verifyZipMatchesDirectory(releaseZipPath16, outDir);
+  if (!driftResult.valid) {
+    console.error(`[build-extension] FATAL ERROR: Source-to-archive drift detected for ${releaseZipPath16}!`);
+    console.error(`[build-extension] Reason: ${driftResult.reason}`);
+    if (driftResult.drifted) {
+      for (const d of driftResult.drifted) {
+        console.error(`  * ${d.file}: ${d.issue}`);
+      }
+    }
+    console.error(`[build-extension] The authoritative release archive is stale and does not match current compiled sources.`);
+    console.error(`[build-extension] To release changes, bump the version in package.json or perform an authorized release repackage.`);
+    process.exit(1);
+  }
+  console.log(`[build-extension] Verified source-to-archive consistency: all ${driftResult.fileCount} compiled files match dist/leadnoria-v1.7.5.zip`);
+}
+
+// extension.zip is the current production release package (mirrors authoritative v1.7.5 package)
+if (fs.existsSync(releaseZipPath16)) {
+  fs.copyFileSync(releaseZipPath16, releaseZipPath1);
+  console.log('[build-extension] Synchronized authoritative V1.7.5 production artifact: extension.zip');
+
+  // Active Mirror Integrity Verification:
+  const mirrorResult = verifyMirrorIntegrity(releaseZipPath16, releaseZipPath1);
+  if (!mirrorResult.valid) {
+    console.error(`[build-extension] FATAL ERROR: Mirror integrity verification failed between dist/leadnoria-v1.7.5.zip and extension.zip!`);
+    console.error(`[build-extension] Reason: ${mirrorResult.reason}`);
+    process.exit(1);
+  }
+  console.log(`[build-extension] Verified mirror integrity: extension.zip is byte-for-byte identical to dist/leadnoria-v1.7.5.zip (${mirrorResult.size} B, SHA-256: ${mirrorResult.sha256})`);
+} else {
+  await createZipArchive(outDir, releaseZipPath1);
+  console.log('[build-extension] Successfully packaged current V1.7.5 production artifact: extension.zip');
+}
 
 // v1.4.0 is IMMUTABLE — never overwrite
 if (!fs.existsSync(releaseZipPath8)) {

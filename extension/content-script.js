@@ -759,7 +759,7 @@
     const activeTaxonomies = [];
     for (const [key, tax] of Object.entries(BOUNDED_TAXONOMY)) {
       if (allQueryPhrases.some(
-        (phrase) => phrase.includes(key) || tax.rootTerms.some((rt) => phrase.includes(rt))
+        (phrase) => phrase.includes(key) || key.includes(phrase) || tax.rootTerms.some((rt) => phrase.includes(rt) || rt.includes(phrase)) || tax.productServiceTerms.some((pt) => phrase === pt || phrase.includes(pt) || pt.includes(phrase)) || tax.industryDescriptors.some((id) => phrase.includes(id) || id.includes(phrase))
       )) {
         activeTaxonomies.push(tax);
       }
@@ -869,20 +869,37 @@
       }
     }
     let strongNameFound = false;
+    const hasCoreVerticalInName = activeTaxonomies.some(
+      (tax) => tax.rootTerms.some((rt) => normalized.advertiserText.includes(rt)) || tax.industryDescriptors.some((id) => normalized.advertiserText.includes(id))
+    );
     for (const phrase of allQueryPhrases) {
       if (normalized.advertiserText.includes(phrase)) {
         strongNameFound = true;
-        evidenceList.push({
-          type: "ENTITY_IDENTITY",
-          strength: "STRONG",
-          source: "advertiser_name",
-          reason: `Advertiser name explicitly contains target category query "${phrase}"`,
-          matchedSignal: phrase,
-          reasonCode: "SIGNAL_ENTITY_NAME_EXACT",
-          value: phrase,
-          explanation: `Business name explicitly specifies target category: ${phrase}`,
-          signature: createEvidenceSignature("ENTITY_IDENTITY", "advertiser_name", "STRONG", phrase)
-        });
+        if (hasCoreVerticalInName) {
+          evidenceList.push({
+            type: "ENTITY_IDENTITY",
+            strength: "STRONG",
+            source: "advertiser_name",
+            reason: `Advertiser name explicitly contains target category query "${phrase}"`,
+            matchedSignal: phrase,
+            reasonCode: "SIGNAL_ENTITY_NAME_EXACT",
+            value: phrase,
+            explanation: `Business name explicitly specifies target category: ${phrase}`,
+            signature: createEvidenceSignature("ENTITY_IDENTITY", "advertiser_name", "STRONG", phrase)
+          });
+        } else {
+          evidenceList.push({
+            type: "ENTITY_IDENTITY",
+            strength: "MODERATE",
+            source: "advertiser_name",
+            reason: `Advertiser name mentions target product term "${phrase}"`,
+            matchedSignal: phrase,
+            reasonCode: "SIGNAL_ENTITY_NAME_PRODUCT",
+            value: phrase,
+            explanation: `Business name mentions product term without core vertical descriptor: ${phrase}`,
+            signature: createEvidenceSignature("ENTITY_IDENTITY", "advertiser_name", "MODERATE", phrase)
+          });
+        }
         break;
       }
     }
@@ -1250,23 +1267,56 @@
         presetVersion: intent.presetVersion
       };
     }
-    if (strongEntity && (moderateCategory || strongCategory || commercialIntent || strongDestination || moderateDestination)) {
+    const hasRootVerticalEntity = evidenceItems.some(
+      (e) => e.type === "ENTITY_IDENTITY" && (e.reasonCode === "SIGNAL_ENTITY_NAME_EXACT" || e.reasonCode === "SIGNAL_ENTITY_NAME_CORE")
+    );
+    const isAccessoryOnly = ACCESSORY_ONLY_INDICATORS.some(
+      (ind) => profile.advertiserName.toLowerCase().includes(ind) || Array.from(profile.distinctAdCopyHashes).some((copy) => copy.toLowerCase().includes(ind))
+    ) && !hasRootVerticalEntity;
+    if (isAccessoryOnly) {
+      decision = "UNCERTAIN";
+      confidence = "MEDIUM";
+      reasonCode = "UNCERTAIN_ACCESSORY_ONLY";
+      reasons.push("Candidate appears to offer furniture accessories/textiles rather than core furniture manufacturing or retail.");
+      explanation = "Advertiser provides furniture accessories or slipcovers rather than primary furniture manufacturing or retail.";
+      return {
+        decision,
+        confidence,
+        score: 0.28,
+        reasons,
+        matchedKeywords: v2Eval.matchedKeywords,
+        matchedTerms: v2Eval.matchedTerms,
+        negativeSignals: profile.negativeSignals,
+        evidence: evidenceItems,
+        conflicts: profile.conflicts,
+        evidenceCoverage: coverage,
+        uniqueEvidenceSignals: evidenceItems.length,
+        observedEvidenceOccurrences: profile.observedEvidenceOccurrences,
+        explanation,
+        reasonCode,
+        strategyVersion: RELEVANCE_STRATEGY_VERSION_V3,
+        engineVersion: RELEVANCE_ENGINE_VERSION_V3,
+        presetVersion: intent.presetVersion
+      };
+    }
+    const hasCategoryCorroboration = moderateCategory || strongCategory || strongDestination || moderateDestination;
+    if (strongEntity && (hasCategoryCorroboration || hasRootVerticalEntity && commercialIntent)) {
       decision = "RELEVANT";
-      confidence = strongCategory || commercialIntent || coverage.coverageLevel === "HIGH" ? "HIGH" : "MEDIUM";
+      confidence = strongCategory || coverage.coverageLevel === "HIGH" ? "HIGH" : "MEDIUM";
       reasonCode = "ACCEPT_STRONG_ENTITY_MATCH";
       reasons.push("Advertiser is confirmed as target business entity with supporting product/commercial evidence.");
       explanation = `Advertiser is identified as a ${intent.primaryKeywords?.[0] || "target"} business with supporting category evidence.`;
     } else if (strongCategory && (commercialIntent || strongDestination || moderateDestination || moderateEntity)) {
       decision = "RELEVANT";
-      confidence = commercialIntent && (strongDestination || moderateDestination) ? "HIGH" : "MEDIUM";
+      confidence = commercialIntent || strongDestination || moderateDestination ? "HIGH" : "MEDIUM";
       reasonCode = "ACCEPT_MULTI_SIGNAL_MATCH";
       reasons.push("Verified product/service catalog with corroborating commercial intent.");
       explanation = `Explicit product catalog and commercial intent confirm active business in target vertical.`;
-    } else if (moderateEntity && (moderateCategory || strongDestination || commercialIntent && weakCategory)) {
+    } else if (moderateEntity && (moderateCategory || strongCategory || hasRootVerticalEntity && strongDestination)) {
       decision = "RELEVANT";
       confidence = "MEDIUM";
       reasonCode = "ACCEPT_MULTI_SIGNAL_MATCH";
-      reasons.push("Entity product terms corroborated by destination or commercial evidence.");
+      reasons.push("Entity product terms corroborated by category evidence.");
       explanation = `Entity product branding corroborated by category match.`;
     } else if (!strongEntity && !moderateEntity && !strongDestination && !moderateDestination && !strongCategory) {
       if (weakCategory || moderateCategory) {
@@ -1487,7 +1537,7 @@
       locationCode
     };
   }
-  var RELEVANCE_STRATEGY_VERSION, RELEVANCE_ENGINE_VERSION, BOUNDED_TAXONOMY, NEGATIVE_CATEGORIES, STOP_WORDS, LeadRelevanceEngine;
+  var RELEVANCE_STRATEGY_VERSION, RELEVANCE_ENGINE_VERSION, BOUNDED_TAXONOMY, NEGATIVE_CATEGORIES, ACCESSORY_ONLY_INDICATORS, STOP_WORDS, LeadRelevanceEngine;
   var init_relevanceEngine = __esm({
     "src/extension/relevanceEngine.ts"() {
       init_presetCatalogue();
@@ -1949,7 +1999,66 @@
           ],
           entityTokens: ["charity", "foundation", "relief", "humanitarian", "donation", "ngo"],
           penalty: -0.55
+        },
+        {
+          category: "astrology_psychic_spiritual",
+          terms: [
+            "psychic",
+            "psychics",
+            "top uk psychics",
+            "psychic reading",
+            "psychic readings",
+            "tarot",
+            "tarot card",
+            "tarot reading",
+            "astrology",
+            "astrologer",
+            "horoscope",
+            "horoscopes",
+            "clairvoyant",
+            "spiritual guidance",
+            "fortune teller",
+            "fortune telling",
+            "palmistry",
+            "numerology",
+            "mediumship",
+            "trusted readings"
+          ],
+          entityTokens: ["psychic", "psychics", "tarot", "astrology", "astrologer", "horoscope", "clairvoyant", "spiritual", "medium"],
+          penalty: -0.65
+        },
+        {
+          category: "digital_entertainment_media",
+          terms: [
+            "podcast",
+            "podcast episode",
+            "listen on spotify",
+            "music band",
+            "mobile app wallet",
+            "app wallet",
+            "free minutes in our app",
+            "download our app for free"
+          ],
+          entityTokens: ["podcast", "streamer", "band"],
+          penalty: -0.55
         }
+      ];
+      ACCESSORY_ONLY_INDICATORS = [
+        "sofa cover",
+        "sofa covers",
+        "couch cover",
+        "couch covers",
+        "slipcover",
+        "slipcovers",
+        "cushion cover",
+        "cushion covers",
+        "pillow cover",
+        "pillow covers",
+        "elastic cover",
+        "furniture protector",
+        "sofa protector",
+        "chair cover",
+        "chair covers"
       ];
       STOP_WORDS = /* @__PURE__ */ new Set([
         "a",
@@ -2126,7 +2235,7 @@
           const activeTaxonomies = [];
           for (const [key, tax] of Object.entries(BOUNDED_TAXONOMY)) {
             if (allQueryPhrases.some(
-              (phrase) => phrase.includes(key) || tax.rootTerms.some((rt) => phrase.includes(rt))
+              (phrase) => phrase.includes(key) || key.includes(phrase) || tax.rootTerms.some((rt) => phrase.includes(rt) || rt.includes(phrase)) || tax.productServiceTerms.some((pt) => phrase === pt || phrase.includes(pt) || pt.includes(phrase)) || tax.industryDescriptors.some((id) => phrase.includes(id) || id.includes(phrase))
             )) {
               activeTaxonomies.push(tax);
             }
@@ -2234,22 +2343,42 @@
           let advertiserNameScore = 0;
           let hasStrongEntityMatch = false;
           let hasModerateEntityMatch = false;
+          const hasCoreVerticalInName = activeTaxonomies.some(
+            (tax) => tax.rootTerms.some((rt) => normalized.advertiserText.includes(rt)) || tax.industryDescriptors.some((id) => normalized.advertiserText.includes(id))
+          );
           for (const phrase of allQueryPhrases) {
             if (normalized.advertiserText.includes(phrase)) {
-              advertiserNameScore = 0.4;
-              hasStrongEntityMatch = true;
-              matchedKeywords.push(phrase);
-              matchedTerms.push(phrase);
-              const reason = `Advertiser name explicitly contains target category query "${phrase}"`;
-              reasons.push(reason);
-              structuredEvidence.push({
-                type: "ENTITY_IDENTITY",
-                strength: "STRONG",
-                source: "advertiser_name",
-                reason,
-                matchedSignal: phrase,
-                reasonCode: "SIGNAL_ENTITY_NAME_EXACT"
-              });
+              if (hasCoreVerticalInName) {
+                advertiserNameScore = 0.4;
+                hasStrongEntityMatch = true;
+                matchedKeywords.push(phrase);
+                matchedTerms.push(phrase);
+                const reason = `Advertiser name explicitly contains target category query "${phrase}"`;
+                reasons.push(reason);
+                structuredEvidence.push({
+                  type: "ENTITY_IDENTITY",
+                  strength: "STRONG",
+                  source: "advertiser_name",
+                  reason,
+                  matchedSignal: phrase,
+                  reasonCode: "SIGNAL_ENTITY_NAME_EXACT"
+                });
+              } else {
+                advertiserNameScore = 0.25;
+                hasModerateEntityMatch = true;
+                matchedKeywords.push(phrase);
+                matchedTerms.push(phrase);
+                const reason = `Advertiser name mentions target product term "${phrase}"`;
+                reasons.push(reason);
+                structuredEvidence.push({
+                  type: "ENTITY_IDENTITY",
+                  strength: "MODERATE",
+                  source: "advertiser_name",
+                  reason,
+                  matchedSignal: phrase,
+                  reasonCode: "SIGNAL_ENTITY_NAME_PRODUCT"
+                });
+              }
               break;
             }
           }
@@ -2494,11 +2623,20 @@
                 reasons.push(`Classified as UNCERTAIN: Mentioned keyword but lacks independent entity or product evidence.`);
               }
             } else {
-              const hasSupportingSignal = adCopyScore >= 0.1 || destinationScore >= 0.12 || commercialScore >= 0.05 || facebookPageScore >= 0.05 || hasProductCatalogEvidence;
-              const passesCriterion1 = hasStrongEntityMatch && hasSupportingSignal;
+              const isAccessoryOnly = ACCESSORY_ONLY_INDICATORS.some(
+                (ind) => normalized.advertiserText.includes(ind) || normalized.adCopyText.includes(ind)
+              ) && !hasCoreVerticalInName;
+              const hasCategoryCorroboration = adCopyScore >= 0.1 || destinationScore >= 0.12 || hasProductCatalogEvidence || hasDomainCategoryMatch;
+              const hasSupportingSignal = hasCategoryCorroboration || commercialScore >= 0.05 || facebookPageScore >= 0.05;
+              const passesCriterion1 = hasCoreVerticalInName && hasSupportingSignal || hasStrongEntityMatch && hasCategoryCorroboration;
               const passesCriterion2 = hasModerateEntityMatch && (adCopyScore >= 0.15 || destinationScore >= 0.12 || hasProductCatalogEvidence);
               const passesCriterion3 = hasProductCatalogEvidence && (destinationScore >= 0.12 || hasUrlSlugProduct || hasDomainCategoryMatch || adCopyScore >= 0.25 && commercialScore >= 0.05);
-              if ((passesCriterion1 || passesCriterion2 || passesCriterion3) && totalScore >= 0.35) {
+              if (isAccessoryOnly) {
+                decision = "UNCERTAIN";
+                confidence = "MEDIUM";
+                reasonCode = "UNCERTAIN_ACCESSORY_ONLY";
+                reasons.push("Classified as UNCERTAIN: Candidate appears to offer accessories or covers rather than core furniture manufacturing or retail.");
+              } else if ((passesCriterion1 || passesCriterion2 || passesCriterion3) && totalScore >= 0.35) {
                 decision = "RELEVANT";
                 const hasMultiDimensionalCorroboration = hasStrongEntityMatch && hasSupportingSignal || hasProductCatalogEvidence && destinationScore >= 0.12 && commercialScore >= 0.05;
                 confidence = totalScore >= 0.6 || hasMultiDimensionalCorroboration ? "HIGH" : "MEDIUM";
@@ -2665,6 +2803,15 @@
   // src/extension/metaAdapter.ts
   init_relevanceEngine();
   function checkForBotChallenge(doc) {
+    const hasAdCards = Array.from(doc.querySelectorAll("span, div")).some(
+      (el) => {
+        const txt = el.textContent || "";
+        return /(?:Library\s+ID|ID\s+de\s+la\s+biblioteca|Identifiant\s+de\s+la\s+biblioth|Bibliotheks-?ID|ID\s+della\s+libreria|ID\s+da\s+biblioteca)\s*:\s*[0-9]+/i.test(txt);
+      }
+    );
+    if (hasAdCards) {
+      return { isBlocked: false };
+    }
     const text = doc.body ? doc.body.innerText : "";
     if (text.includes("Security Check") || text.includes("Enter the characters you see below")) {
       return { isBlocked: true, reason: "Meta Security Check / CAPTCHA challenge presented.", code: "CHALLENGED" };
@@ -2673,12 +2820,7 @@
       return { isBlocked: true, reason: "Meta access temporarily rate-limited.", code: "RATE_LIMITED" };
     }
     if (text.includes("Log In to Facebook") && doc.querySelectorAll('input[type="password"]').length > 0) {
-      const hasAdCards = Array.from(doc.querySelectorAll("span, div")).some(
-        (el) => el.textContent && el.textContent.includes("Library ID:")
-      );
-      if (!hasAdCards) {
-        return { isBlocked: true, reason: "Meta mandatory login dialog restricting public ad library access.", code: "CHALLENGED" };
-      }
+      return { isBlocked: true, reason: "Meta mandatory login dialog restricting public ad library access.", code: "CHALLENGED" };
     }
     return { isBlocked: false };
   }
@@ -2746,131 +2888,581 @@
       return {};
     }
   }
-  function extractAdCardsFromDocument(doc, observedKeyword) {
-    const candidates = [];
-    const seenLibraryIds = /* @__PURE__ */ new Set();
-    const allElements = Array.from(doc.querySelectorAll("div, span"));
-    const idElements = allElements.filter((el) => {
-      return el.children.length === 0 && el.textContent && el.textContent.includes("Library ID:");
-    });
-    for (const idEl of idElements) {
-      const text = idEl.textContent || "";
-      const match = text.match(/Library ID:\s*([0-9]+)/i);
-      if (!match) continue;
-      const libraryId = match[1];
-      if (seenLibraryIds.has(libraryId)) continue;
-      seenLibraryIds.add(libraryId);
-      let container = idEl;
-      let cardRoot = null;
-      while (container && container.parentElement && container.parentElement !== doc.body) {
-        if (container.parentElement.children.length > 3 && container.querySelectorAll("a").length > 0 && container.offsetHeight > 150) {
-          cardRoot = container;
-          break;
-        }
-        container = container.parentElement;
-      }
-      if (!cardRoot) {
-        let fallback = idEl.parentElement;
-        for (let i = 0; i < 7; i++) {
-          if (fallback && fallback.parentElement && fallback.parentElement !== doc.body) {
-            fallback = fallback.parentElement;
+  function normalizeAdLibraryText(text) {
+    if (!text) return "";
+    return text.replace(/[\u00A0\u200B\u202F\uFEFF]/g, " ").replace(/\s+/g, " ").trim();
+  }
+  function extractAdIdentifier(text, context) {
+    if (!text) return null;
+    const clean = normalizeAdLibraryText(text);
+    const explicitPatterns = [
+      // English
+      { regex: /(?:Library\s+ID|Ad\s+Library\s+ID)\s*:\s*([0-9]{5,25})/i, label: "Library ID" },
+      // Spanish
+      { regex: /(?:ID\s+de\s+la\s+biblioteca|ID\s+de\s+biblioteca)\s*:\s*([0-9]{5,25})/i, label: "ID de la biblioteca" },
+      // French
+      { regex: /(?:Identifiant\s+de\s+la\s+biblioth[eè]que|ID\s+de\s+la\s+biblioth[eè]que)\s*:\s*([0-9]{5,25})/i, label: "Identifiant de la biblioth\xE8que" },
+      // German
+      { regex: /(?:Bibliotheks-?ID|Bibliothek-?ID)\s*:\s*([0-9]{5,25})/i, label: "Bibliotheks-ID" },
+      // Italian
+      { regex: /(?:ID\s+della\s+libreria|ID\s+libreria)\s*:\s*([0-9]{5,25})/i, label: "ID della libreria" },
+      // Portuguese
+      { regex: /(?:ID\s+da\s+biblioteca)\s*:\s*([0-9]{5,25})/i, label: "ID da biblioteca" }
+    ];
+    const multiLocaleMonthRegex = /^\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Ene|Abr|Ago|Dic|Janv|F[eé]vr|Mars|Avr|Mai|Juin|Juil|Ao[uû]t|Sept|M[aä]r|Okt|Dez|Fev|Set|Out|Gen|Mag|Giu|Lug|Ott)\b/i;
+    for (const { regex, label } of explicitPatterns) {
+      const match = clean.match(regex);
+      if (match && match[1]) {
+        let extractedId = match[1];
+        const afterMatch = clean.slice((match.index ?? 0) + match[0].length);
+        const monthMatch = afterMatch.match(multiLocaleMonthRegex);
+        if (monthMatch && extractedId.length >= 13) {
+          const lastTwo = extractedId.slice(-2);
+          const lastOne = extractedId.slice(-1);
+          const numTwo = parseInt(lastTwo, 10);
+          const numOne = parseInt(lastOne, 10);
+          if (numTwo >= 1 && numTwo <= 31 && extractedId.length - 2 >= 12) {
+            extractedId = extractedId.slice(0, -2);
+          } else if (numOne >= 1 && numOne <= 9 && extractedId.length - 1 >= 12) {
+            extractedId = extractedId.slice(0, -1);
           }
+        } else if (/^[A-Za-z]/.test(afterMatch)) {
+          return {
+            id: extractedId,
+            rawLabel: label,
+            confidence: "LOW",
+            isAmbiguous: true,
+            ambiguityReason: `Ambiguous boundary: digits directly fused into non-digit token "${afterMatch.slice(0, 15)}"`,
+            rawExtracted: match[0]
+          };
         }
-        cardRoot = fallback || idEl;
+        return {
+          id: extractedId,
+          rawLabel: label,
+          confidence: "HIGH"
+        };
       }
-      const cardFullText = cardRoot.innerText || cardRoot.textContent || "";
-      const isActive = !cardFullText.includes("Inactive") && (cardFullText.includes("Active") || true);
-      let startedRunning = "";
-      const dateMatch = cardFullText.match(/Started running on ([^\n~·]+)/i);
-      if (dateMatch) {
-        startedRunning = dateMatch[1].trim();
-      } else {
-        const rangeMatch = cardFullText.match(/([0-9]{1,2}\s+[A-Za-z]{3}\s+[0-9]{4}\s*-\s*[0-9]{1,2}\s+[A-Za-z]{3}\s+[0-9]{4})/i);
-        if (rangeMatch) startedRunning = rangeMatch[1].trim();
-      }
-      const hasMultipleVersions = cardFullText.includes("This ad has multiple versions");
-      let pageName = "Unknown Advertiser";
-      let facebookPageUrl;
-      let facebookPageId;
-      const links = Array.from(cardRoot.querySelectorAll("a"));
-      for (const link of links) {
-        const href = link.href || "";
-        const linkText = link.innerText || link.textContent || "";
-        const fbInfo = extractFacebookPageInfo(href, linkText);
-        if (fbInfo.pageUrl) {
-          facebookPageUrl = fbInfo.pageUrl;
-          if (linkText && linkText.trim() && !pageName || pageName === "Unknown Advertiser") {
-            pageName = linkText.trim();
-          }
-          const idMatch = fbInfo.pageUrl.match(/facebook\.com\/([0-9]{5,})/);
-          if (idMatch) facebookPageId = idMatch[1];
-          break;
-        }
-      }
-      if (pageName === "Unknown Advertiser") {
-        const sponsoredIndex = cardFullText.indexOf("Sponsored");
-        if (sponsoredIndex > 0) {
-          const textBefore = cardFullText.substring(0, sponsoredIndex).trim();
-          const lines = textBefore.split("\n").map((l) => l.trim()).filter(Boolean);
-          const lastLine = lines.pop();
-          if (lastLine && lastLine.length > 1 && !lastLine.includes("Library ID") && !lastLine.includes("Active")) {
-            pageName = lastLine;
-          }
-        }
-      }
-      let destinationUrl;
-      let destinationDomain;
-      let ctaText;
-      for (const link of links) {
-        const href = link.href || "";
-        const dest = extractUrlFromShim(href);
-        if (dest.destinationUrl) {
-          destinationUrl = dest.destinationUrl;
-          destinationDomain = dest.domain;
-          const text2 = (link.innerText || link.textContent || "").trim();
-          if (text2 && text2.length < 50) {
-            ctaText = text2.split("\n").pop()?.trim();
-          }
-          break;
-        }
-      }
-      if (!ctaText) {
-        const ctaPatterns = ["Learn more", "Shop Now", "Sign Up", "Contact Us", "Apply Now", "Book Now", "Get Quote", "Download"];
-        for (const pattern of ctaPatterns) {
-          if (cardFullText.includes(pattern)) {
-            ctaText = pattern;
-            break;
-          }
-        }
-      }
-      let bodyCopy = "";
-      const bodyMatch = cardFullText.match(/Sponsored\s*\n([\s\S]{10,350})/);
-      if (bodyMatch) {
-        bodyCopy = bodyMatch[1].trim().replace(/\n+/g, " ");
-      } else {
-        bodyCopy = cardFullText.substring(0, 200).replace(/\n+/g, " ");
-      }
-      candidates.push({
-        libraryId,
-        pageName,
-        facebookPageUrl,
-        facebookPageId,
-        destinationUrl,
-        destinationDomain,
-        isActive,
-        startedRunning,
-        hasMultipleVersions,
-        bodyCopy: bodyCopy.substring(0, 300),
-        ctaText,
-        observedKeyword,
-        rawText: cardFullText.substring(0, 200)
-      });
     }
-    return candidates;
+    const contextualMatch = clean.match(/\bID\s*:\s*([0-9]{5,25})/i);
+    if (contextualMatch && contextualMatch[1]) {
+      const ctx = normalizeAdLibraryText(context?.surroundingText || clean);
+      const hasAdSignal = /(?:Library|Biblioteca|Biblioth|Libreria|Active|Inactive|Activo|Inactivo|Actif|Inactif|Aktiv|Inaktiv|Attivo|Inattivo|Ativo|Inativo|Started\s+running|Sponsored|Publicidad|Sponsoris|Gesponsert)/i.test(ctx);
+      if (hasAdSignal) {
+        let extractedId = contextualMatch[1];
+        const afterMatch = clean.slice((contextualMatch.index ?? 0) + contextualMatch[0].length);
+        const monthMatch = afterMatch.match(multiLocaleMonthRegex);
+        if (monthMatch && extractedId.length >= 13) {
+          const lastTwo = extractedId.slice(-2);
+          const lastOne = extractedId.slice(-1);
+          const numTwo = parseInt(lastTwo, 10);
+          const numOne = parseInt(lastOne, 10);
+          if (numTwo >= 1 && numTwo <= 31 && extractedId.length - 2 >= 12) {
+            extractedId = extractedId.slice(0, -2);
+          } else if (numOne >= 1 && numOne <= 9 && extractedId.length - 1 >= 12) {
+            extractedId = extractedId.slice(0, -1);
+          }
+        } else if (/^[A-Za-z]/.test(afterMatch)) {
+          return {
+            id: extractedId,
+            rawLabel: "ID (Contextual)",
+            confidence: "LOW",
+            isAmbiguous: true,
+            ambiguityReason: `Ambiguous boundary: digits directly fused into non-digit token "${afterMatch.slice(0, 15)}"`,
+            rawExtracted: contextualMatch[0]
+          };
+        }
+        return {
+          id: extractedId,
+          rawLabel: "ID (Contextual)",
+          confidence: "LOW"
+        };
+      }
+    }
+    return null;
+  }
+  function findCandidateCardRoot(idEl, doc) {
+    const MAX_TRAVERSAL_DEPTH = 20;
+    let current = idEl;
+    let bestCardRoot = null;
+    let depth = 0;
+    while (current && current.parentElement && depth < MAX_TRAVERSAL_DEPTH) {
+      const parent = current.parentElement;
+      depth++;
+      if (parent === doc.body || parent === doc.documentElement) {
+        break;
+      }
+      const parentTag = (parent.tagName || "").toUpperCase();
+      if (parentTag === "NAV" || parentTag === "HEADER" || parentTag === "FORM") {
+        break;
+      }
+      if (parent.querySelector('input[type="search"], form[role="search"], nav')) {
+        break;
+      }
+      const parentText = parent.textContent || "";
+      const idMatches = parentText.match(/(?:Library\s+ID|ID\s+de\s+la\s+biblioteca|Identifiant\s+de\s+la\s+biblioth[eè]que|Bibliotheks-?ID|ID\s+della\s+libreria|ID\s+da\s+biblioteca)\s*:\s*[0-9]+/gi);
+      if (idMatches && idMatches.length > 1) {
+        if (!bestCardRoot) {
+          bestCardRoot = current;
+        }
+        break;
+      }
+      const hasLinks = current.querySelectorAll("a").length > 0;
+      const hasRoleArticle = current.getAttribute("role") === "article";
+      const hasCardClass = typeof current.className === "string" && /(?:card|ad-card|result-card)/i.test(current.className);
+      const hasAdvertiserSignal = /(?:Sponsored|Publicidad|Sponsoris|Gesponsert|Started\s+running|En\s+circulaci[oó]n)/i.test(current.textContent || "");
+      if (hasRoleArticle || hasLinks && hasAdvertiserSignal || hasCardClass) {
+        bestCardRoot = current;
+      }
+      current = parent;
+    }
+    const finalRoot = bestCardRoot || current || idEl;
+    if (!finalRoot) {
+      return { cardRoot: null, outcome: "INVALID_CONTAINER", reason: "No card container found" };
+    }
+    return { cardRoot: finalRoot, outcome: "VALID_CANDIDATE" };
+  }
+  function validateAdCardCandidate(cardRoot, libraryId, seenIds) {
+    if (!libraryId || !/^[0-9]{5,25}$/.test(libraryId)) {
+      return { isValid: false, outcome: "MISSING_IDENTIFIER", reason: "Invalid or missing library ID" };
+    }
+    if (seenIds.has(libraryId)) {
+      return { isValid: false, outcome: "DUPLICATE_CANDIDATE", reason: `Duplicate library ID: ${libraryId}` };
+    }
+    if (!cardRoot) {
+      return { isValid: false, outcome: "INVALID_CONTAINER", reason: "Card container element is null" };
+    }
+    const text = cardRoot.textContent || "";
+    const idMatches = text.match(/(?:Library\s+ID|ID\s+de\s+la\s+biblioteca|Identifiant\s+de\s+la\s+biblioth[eè]que|Bibliotheks-?ID|ID\s+della\s+libreria|ID\s+da\s+biblioteca)\s*:\s*([0-9]+)/gi);
+    if (idMatches && idMatches.length > 1) {
+      const uniqueIds = new Set(idMatches.map((m) => m.replace(/[^0-9]/g, "")));
+      if (uniqueIds.size > 1) {
+        return { isValid: false, outcome: "INVALID_CONTAINER", reason: "Container encapsulates multiple ad cards" };
+      }
+    }
+    return { isValid: true, outcome: "VALID_CANDIDATE" };
+  }
+  function extractFieldsFromCard(cardRoot, libraryId, observedKeyword) {
+    const adDetailLink = cardRoot.querySelector('a[href*="/ads/library/?id="], a[href*="/ads/library/"]');
+    if (adDetailLink) {
+      const href = adDetailLink.href || "";
+      const match = href.match(/[?&]id=([0-9]{5,25})/i);
+      if (match && match[1]) {
+        libraryId = match[1];
+      }
+    }
+    const cardFullText = cardRoot.innerText || cardRoot.textContent || "";
+    const inactiveRegex = /(?:Inactive|Inactivo|Inactif|Inaktiv|Inattivo|Inativo)/i;
+    const activeRegex = /(?:Active|Activo|Actif|Aktiv|Attivo|Ativo)/i;
+    const isActive = !inactiveRegex.test(cardFullText) && (activeRegex.test(cardFullText) || true);
+    let startedRunning = "";
+    const datePatterns = [
+      /Started running on ([^\n~·]+)/i,
+      /En circulaci[oó]n desde el ([^\n~·]+)/i,
+      /En circulation depuis le ([^\n~·]+)/i,
+      /Seit ([^\n~·]+) aktiv/i,
+      /Inizio pubblicazione:?\s*([^\n~·]+)/i,
+      /Veicula[çc][aã]o iniciada em ([^\n~·]+)/i,
+      /([0-9]{1,2}\s+[A-Za-z]{3}\s+[0-9]{4}\s*-\s*[0-9]{1,2}\s+[A-Za-z]{3}\s+[0-9]{4})/i
+    ];
+    for (const pattern of datePatterns) {
+      const match = cardFullText.match(pattern);
+      if (match) {
+        startedRunning = match[1].trim();
+        break;
+      }
+    }
+    const hasMultipleVersions = /(?:multiple versions|plusieurs versions|m[uú]ltiples versiones|mehrere Versionen|pi[uù] versioni|v[aá]rias vers[oõ]es)/i.test(cardFullText);
+    let pageName = "Unknown Advertiser";
+    let facebookPageUrl;
+    let facebookPageId;
+    const links = Array.from(cardRoot.querySelectorAll("a"));
+    for (const link of links) {
+      const href = link.href || "";
+      const linkText = link.innerText || link.textContent || "";
+      const fbInfo = extractFacebookPageInfo(href, linkText);
+      if (fbInfo.pageUrl) {
+        facebookPageUrl = fbInfo.pageUrl;
+        if (linkText && linkText.trim() && (!pageName || pageName === "Unknown Advertiser")) {
+          pageName = linkText.trim();
+        }
+        const idMatch = fbInfo.pageUrl.match(/facebook\.com\/([0-9]{5,})/);
+        if (idMatch) facebookPageId = idMatch[1];
+        break;
+      }
+    }
+    if (pageName === "Unknown Advertiser") {
+      const sponsoredRegex = /(?:Sponsored|Publicidad|Sponsoris[eé]|Gesponsert|Sponsorizzato|Patrocinado)/i;
+      const match = cardFullText.match(sponsoredRegex);
+      if (match && typeof match.index === "number" && match.index > 0) {
+        const textBefore = cardFullText.substring(0, match.index).trim();
+        const lines = textBefore.split("\n").map((l) => l.trim()).filter(Boolean);
+        const lastLine = lines.pop();
+        if (lastLine && lastLine.length > 1 && !lastLine.includes("Library ID") && !lastLine.includes("Active")) {
+          pageName = lastLine;
+        }
+      }
+    }
+    let destinationUrl;
+    let destinationDomain;
+    let ctaText;
+    for (const link of links) {
+      const href = link.href || "";
+      const dest = extractUrlFromShim(href);
+      if (dest.destinationUrl) {
+        destinationUrl = dest.destinationUrl;
+        destinationDomain = dest.domain;
+        const text = (link.innerText || link.textContent || "").trim();
+        if (text && text.length < 50) {
+          ctaText = text.split("\n").pop()?.trim();
+        }
+        break;
+      }
+    }
+    if (!ctaText) {
+      const ctaPatterns = [
+        "Learn more",
+        "Shop Now",
+        "Sign Up",
+        "Contact Us",
+        "Apply Now",
+        "Book Now",
+        "Get Quote",
+        "Download",
+        "M[a\xE1]s informaci[o\xF3]n",
+        "En savoir plus",
+        "Mehr dazu",
+        "Scopri di pi[u\xF9]",
+        "Saiba mais"
+      ];
+      for (const pattern of ctaPatterns) {
+        if (cardFullText.includes(pattern)) {
+          ctaText = pattern;
+          break;
+        }
+      }
+    }
+    let bodyCopy = "";
+    const bodyMatch = cardFullText.match(/(?:Sponsored|Publicidad|Sponsoris[eé]|Gesponsert|Sponsorizzato|Patrocinado)\s*\n([\s\S]{10,350})/i);
+    if (bodyMatch) {
+      bodyCopy = bodyMatch[1].trim().replace(/\n+/g, " ");
+    } else {
+      bodyCopy = cardFullText.substring(0, 200).replace(/\n+/g, " ");
+    }
+    return {
+      libraryId,
+      pageName,
+      facebookPageUrl,
+      facebookPageId,
+      destinationUrl,
+      destinationDomain,
+      isActive,
+      startedRunning,
+      hasMultipleVersions,
+      bodyCopy: bodyCopy.substring(0, 300),
+      ctaText,
+      observedKeyword,
+      rawText: cardFullText.substring(0, 200)
+    };
+  }
+  function extractAdCardsWithDiagnostics(doc, observedKeyword, options) {
+    const startTime = Date.now();
+    const candidates = [];
+    const seenLibraryIds = options?.seenLibraryIds ? new Set(options.seenLibraryIds) : /* @__PURE__ */ new Set();
+    const diagnosticDetails = [];
+    let cardsExamined = 0;
+    let identifierCandidatesFound = 0;
+    let cardsRejectedMissingId = 0;
+    let duplicateCardsIgnored = 0;
+    try {
+      const challenge = checkForBotChallenge(doc);
+      if (challenge.isBlocked) {
+        return {
+          candidates: [],
+          diagnostics: {
+            cardsExamined: 0,
+            identifierCandidatesFound: 0,
+            validCardsAccepted: 0,
+            cardsRejectedMissingId: 0,
+            duplicateCardsIgnored: 0,
+            extractionDurationMs: Date.now() - startTime,
+            scrollIteration: options?.scrollIteration,
+            relevantMutationsObserved: options?.relevantMutationsObserved
+          },
+          status: challenge.code || "CHALLENGED"
+        };
+      }
+      const idCandidates = [];
+      const detailLinks = Array.from(doc.querySelectorAll('a[href*="/ads/library/"]'));
+      for (const link of detailLinks) {
+        const href = link.href || "";
+        const urlMatch = href.match(/[?&]id=([0-9]{5,25})/i);
+        if (urlMatch && urlMatch[1]) {
+          const id = urlMatch[1];
+          if (!idCandidates.some((c) => c.idInfo.id === id)) {
+            idCandidates.push({
+              idEl: link,
+              idInfo: { id, rawLabel: "Ad Detail Link ID", confidence: "HIGH" }
+            });
+          }
+        }
+      }
+      const allElements = Array.from(doc.querySelectorAll("div, span, p, a, strong, b"));
+      for (const el of allElements) {
+        const htmlEl = el;
+        const text = htmlEl.textContent;
+        if (!text || text.length > 250) continue;
+        if (!/(?:ID|Identifiant|Bibliothek)/i.test(text)) continue;
+        const hasMatchingChild = (node) => {
+          if (!node.children || node.children.length === 0) return false;
+          for (const child of Array.from(node.children)) {
+            const childText = child.textContent || "";
+            if (/(?:ID|Identifiant|Bibliothek)/i.test(childText) && extractAdIdentifier(childText, { surroundingText: child.parentElement?.textContent || "" }) !== null) {
+              return true;
+            }
+            if (hasMatchingChild(child)) return true;
+          }
+          return false;
+        };
+        if (hasMatchingChild(htmlEl)) continue;
+        const parentText = htmlEl.parentElement ? htmlEl.parentElement.textContent || "" : "";
+        const idInfo = extractAdIdentifier(text, { surroundingText: parentText });
+        if (idInfo) {
+          if (!idCandidates.some((c) => c.idInfo.id === idInfo.id)) {
+            idCandidates.push({ idEl: htmlEl, idInfo });
+          }
+        }
+      }
+      identifierCandidatesFound = idCandidates.length;
+      const seenCardRoots = /* @__PURE__ */ new Set();
+      for (const { idEl, idInfo } of idCandidates) {
+        cardsExamined++;
+        const { id: libraryId } = idInfo;
+        if (idInfo.isAmbiguous) {
+          cardsRejectedMissingId++;
+          diagnosticDetails.push({
+            libraryId,
+            outcome: "AMBIGUOUS_CANDIDATE",
+            reason: idInfo.ambiguityReason || "Ambiguous identifier boundary without corroborating source"
+          });
+          continue;
+        }
+        if (seenLibraryIds.has(libraryId)) {
+          duplicateCardsIgnored++;
+          diagnosticDetails.push({ libraryId, outcome: "DUPLICATE_CANDIDATE", reason: "Identifier already seen in run" });
+          continue;
+        }
+        const containerResult = findCandidateCardRoot(idEl, doc);
+        if (!containerResult.cardRoot) {
+          cardsRejectedMissingId++;
+          diagnosticDetails.push({ libraryId, outcome: containerResult.outcome, reason: containerResult.reason });
+          continue;
+        }
+        if (seenCardRoots.has(containerResult.cardRoot)) {
+          duplicateCardsIgnored++;
+          diagnosticDetails.push({ libraryId, outcome: "DUPLICATE_CANDIDATE", reason: "Physical card root already extracted in current scan pass" });
+          continue;
+        }
+        const valResult = validateAdCardCandidate(containerResult.cardRoot, libraryId, seenLibraryIds);
+        if (!valResult.isValid) {
+          diagnosticDetails.push({ libraryId, outcome: valResult.outcome, reason: valResult.reason });
+          if (valResult.outcome === "DUPLICATE_CANDIDATE") duplicateCardsIgnored++;
+          else cardsRejectedMissingId++;
+          continue;
+        }
+        seenCardRoots.add(containerResult.cardRoot);
+        const candidate = extractFieldsFromCard(containerResult.cardRoot, libraryId, observedKeyword);
+        candidates.push(candidate);
+        seenLibraryIds.add(candidate.libraryId);
+        diagnosticDetails.push({ libraryId: candidate.libraryId, outcome: "VALID_CANDIDATE" });
+      }
+      const duration = Date.now() - startTime;
+      const status = candidates.length > 0 ? "RESULTS_FOUND" : "NO_NEW_RESULTS_OBSERVED";
+      return {
+        candidates,
+        diagnostics: {
+          cardsExamined,
+          identifierCandidatesFound,
+          validCardsAccepted: candidates.length,
+          cardsRejectedMissingId,
+          duplicateCardsIgnored,
+          extractionDurationMs: duration,
+          scrollIteration: options?.scrollIteration,
+          relevantMutationsObserved: options?.relevantMutationsObserved,
+          details: diagnosticDetails
+        },
+        status
+      };
+    } catch (err) {
+      return {
+        candidates: [],
+        diagnostics: {
+          cardsExamined,
+          identifierCandidatesFound,
+          validCardsAccepted: 0,
+          cardsRejectedMissingId,
+          duplicateCardsIgnored,
+          extractionDurationMs: Date.now() - startTime,
+          scrollIteration: options?.scrollIteration,
+          relevantMutationsObserved: options?.relevantMutationsObserved,
+          details: [{ outcome: "INVALID_CONTAINER", reason: err?.message || "Extraction exception" }]
+        },
+        status: "EXTRACTION_ERROR"
+      };
+    }
   }
 
   // src/extension/content-script.ts
-  console.log("[Meta Ad Library Scraper] Content script active on:", window.location.href);
+  console.log("[Meta Ad Library Scraper] Content script active on:", typeof window !== "undefined" ? window.location?.href : "unknown");
+  var activeWaitCancellation = null;
+  function isAtBottomOfPage(doc = document, win = window) {
+    try {
+      const scrollHeight = Math.max(
+        doc.documentElement?.scrollHeight || 0,
+        doc.body?.scrollHeight || 0,
+        doc.body?.offsetHeight || 0
+      );
+      const clientHeight = win.innerHeight || doc.documentElement?.clientHeight || 0;
+      const currentScroll = win.scrollY || win.pageYOffset || 0;
+      if (scrollHeight <= 0 || clientHeight <= 0) return false;
+      return currentScroll + clientHeight >= scrollHeight - 250;
+    } catch {
+      return false;
+    }
+  }
+  function waitForDynamicAdCards(doc = document, win = window, options) {
+    const {
+      keyword,
+      scroll = true,
+      quietPeriodMs = 400,
+      maxWaitMs = 3500,
+      scrollIteration = 1,
+      seenLibraryIds = /* @__PURE__ */ new Set()
+    } = options;
+    return new Promise((resolve) => {
+      let finished = false;
+      let quietTimer = null;
+      let maxWaitTimer = null;
+      let observer = null;
+      let relevantMutationsCount = 0;
+      let scrolled = false;
+      const cleanup = () => {
+        if (observer) {
+          observer.disconnect();
+          observer = null;
+        }
+        if (quietTimer) {
+          clearTimeout(quietTimer);
+          quietTimer = null;
+        }
+        if (maxWaitTimer) {
+          clearTimeout(maxWaitTimer);
+          maxWaitTimer = null;
+        }
+        if (activeWaitCancellation === cancelWait) {
+          activeWaitCancellation = null;
+        }
+      };
+      const finish = (statusOverride) => {
+        if (finished) return;
+        finished = true;
+        cleanup();
+        const extraction = extractAdCardsWithDiagnostics(doc, keyword, {
+          seenLibraryIds,
+          scrollIteration,
+          relevantMutationsObserved: relevantMutationsCount
+        });
+        const atBottom = isAtBottomOfPage(doc, win);
+        let finalStatus = statusOverride || extraction.status;
+        if (finalStatus === "NO_NEW_RESULTS_OBSERVED" && atBottom) {
+          finalStatus = "END_OF_RESULTS";
+        }
+        resolve({
+          ...extraction,
+          status: finalStatus,
+          scrolled,
+          atBottom
+        });
+      };
+      const cancelWait = () => {
+        finish("CANCELLED");
+      };
+      activeWaitCancellation = cancelWait;
+      try {
+        const initialChallenge = checkForBotChallenge(doc);
+        if (initialChallenge.isBlocked) {
+          finish(initialChallenge.code || "CHALLENGED");
+          return;
+        }
+        if (scroll) {
+          try {
+            const prevScrollY = win.scrollY || win.pageYOffset || 0;
+            if (typeof win.scrollBy === "function") {
+              win.scrollBy(0, 1200);
+            }
+            scrolled = (win.scrollY || win.pageYOffset || 0) > prevScrollY || true;
+          } catch {
+            scrolled = false;
+          }
+        }
+        const MutationObserverClass = win.MutationObserver || (typeof MutationObserver !== "undefined" ? MutationObserver : null);
+        const targetNode = doc.body || doc.documentElement;
+        if (MutationObserverClass && targetNode) {
+          observer = new MutationObserverClass((mutations) => {
+            try {
+              if (finished) return;
+              let hasRelevantElements = false;
+              for (const m of mutations) {
+                if (m.type === "childList" && m.addedNodes.length > 0) {
+                  for (let i = 0; i < m.addedNodes.length; i++) {
+                    if (m.addedNodes[i].nodeType === 1) {
+                      hasRelevantElements = true;
+                      break;
+                    }
+                  }
+                }
+                if (hasRelevantElements) break;
+              }
+              if (hasRelevantElements) {
+                relevantMutationsCount++;
+                const liveChallenge = checkForBotChallenge(doc);
+                if (liveChallenge.isBlocked) {
+                  finish(liveChallenge.code || "CHALLENGED");
+                  return;
+                }
+                const currentScan = extractAdCardsWithDiagnostics(doc, keyword, { seenLibraryIds });
+                if (currentScan.candidates.length > 0) {
+                  if (quietTimer) clearTimeout(quietTimer);
+                  quietTimer = setTimeout(() => {
+                    finish("RESULTS_FOUND");
+                  }, quietPeriodMs);
+                } else {
+                  if (quietTimer) clearTimeout(quietTimer);
+                  quietTimer = setTimeout(() => {
+                    finish();
+                  }, quietPeriodMs);
+                }
+              }
+            } catch {
+              finish("EXTRACTION_ERROR");
+            }
+          });
+          try {
+            observer.observe(targetNode, { childList: true, subtree: true });
+          } catch {
+          }
+        }
+        const initialQuietDelay = scroll ? Math.max(quietPeriodMs, 1e3) : quietPeriodMs;
+        quietTimer = setTimeout(() => {
+          finish();
+        }, initialQuietDelay);
+        maxWaitTimer = setTimeout(() => {
+          finish();
+        }, maxWaitMs);
+      } catch {
+        finish("EXTRACTION_ERROR");
+      }
+    });
+  }
   try {
     if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
       chrome.runtime.sendMessage({
@@ -2886,43 +3478,75 @@
       if (message.type === "SCAN_AND_EXTRACT") {
         const keyword = message.payload?.keyword || "";
         const shouldScroll = message.payload?.scroll ?? true;
+        const quietPeriodMs = message.payload?.quietPeriodMs;
+        const maxWaitMs = message.payload?.maxWaitMs;
+        const scrollIteration = message.payload?.scrollIteration;
+        const seenIdsArray = message.payload?.seenLibraryIds || [];
+        const seenLibraryIds = new Set(seenIdsArray);
         const challenge = checkForBotChallenge(document);
         if (challenge.isBlocked) {
           sendResponse({
             type: "CHALLENGE_DETECTED",
             reason: challenge.reason,
-            code: challenge.code || "CHALLENGED"
+            code: challenge.code || "CHALLENGED",
+            payload: {
+              candidates: [],
+              count: 0,
+              status: challenge.code || "CHALLENGED",
+              scrolled: false,
+              atBottom: false
+            }
           });
           return true;
         }
-        const candidates = extractAdCardsFromDocument(document, keyword);
-        if (shouldScroll) {
-          const prevScrollY = window.scrollY;
-          window.scrollBy({ top: 1200, behavior: "smooth" });
-          setTimeout(() => {
-            const updatedCandidates = extractAdCardsFromDocument(document, keyword);
-            sendResponse({
-              type: "CANDIDATES_COLLECTED",
-              payload: {
-                candidates: updatedCandidates,
-                count: updatedCandidates.length,
-                scrolled: window.scrollY > prevScrollY,
-                atBottom: window.innerHeight + window.scrollY >= document.body.offsetHeight - 200
-              }
-            });
-          }, 1200);
-          return true;
-        }
-        sendResponse({
-          type: "CANDIDATES_COLLECTED",
-          payload: {
-            candidates,
-            count: candidates.length,
-            scrolled: false,
-            atBottom: false
-          }
+        waitForDynamicAdCards(document, window, {
+          keyword,
+          scroll: shouldScroll,
+          quietPeriodMs,
+          maxWaitMs,
+          scrollIteration,
+          seenLibraryIds
+        }).then((result) => {
+          sendResponse({
+            type: "CANDIDATES_COLLECTED",
+            payload: {
+              candidates: result.candidates,
+              count: result.candidates.length,
+              status: result.status,
+              diagnostics: result.diagnostics,
+              scrolled: result.scrolled,
+              atBottom: result.atBottom
+            }
+          });
+        }).catch((err) => {
+          sendResponse({
+            type: "CANDIDATES_COLLECTED",
+            payload: {
+              candidates: [],
+              count: 0,
+              status: "EXTRACTION_ERROR",
+              diagnostics: {
+                cardsExamined: 0,
+                identifierCandidatesFound: 0,
+                validCardsAccepted: 0,
+                cardsRejectedMissingId: 0,
+                duplicateCardsIgnored: 0,
+                extractionDurationMs: 0
+              },
+              scrolled: shouldScroll,
+              atBottom: false,
+              error: err?.message || "Unknown extraction error"
+            }
+          });
         });
         return true;
+      }
+      if (message.type === "CANCEL_RESEARCH" || message.type === "STOP_RESEARCH") {
+        if (activeWaitCancellation) {
+          activeWaitCancellation();
+        }
+        sendResponse({ status: "CANCELLED" });
+        return false;
       }
       return false;
     });

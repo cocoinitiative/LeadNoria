@@ -44,6 +44,7 @@ import {
   normalizeEvidence,
   BOUNDED_TAXONOMY,
   NEGATIVE_CATEGORIES,
+  ACCESSORY_ONLY_INDICATORS,
   tokenizeText,
   stemToken
 } from './relevanceEngine.ts';
@@ -154,7 +155,10 @@ export function collectEvidenceWaterfall(
     if (
       allQueryPhrases.some(phrase =>
         phrase.includes(key) ||
-        tax.rootTerms.some(rt => phrase.includes(rt))
+        key.includes(phrase) ||
+        tax.rootTerms.some(rt => phrase.includes(rt) || rt.includes(phrase)) ||
+        tax.productServiceTerms.some(pt => phrase === pt || phrase.includes(pt) || pt.includes(phrase)) ||
+        tax.industryDescriptors.some(id => phrase.includes(id) || id.includes(phrase))
       )
     ) {
       activeTaxonomies.push(tax);
@@ -294,20 +298,39 @@ export function collectEvidenceWaterfall(
   // 2. ENTITY IDENTITY EVIDENCE
   // -------------------------------------------------------------
   let strongNameFound = false;
+  const hasCoreVerticalInName = activeTaxonomies.some(tax =>
+    tax.rootTerms.some(rt => normalized.advertiserText.includes(rt)) ||
+    tax.industryDescriptors.some(id => normalized.advertiserText.includes(id))
+  );
+
   for (const phrase of allQueryPhrases) {
     if (normalized.advertiserText.includes(phrase)) {
       strongNameFound = true;
-      evidenceList.push({
-        type: 'ENTITY_IDENTITY',
-        strength: 'STRONG',
-        source: 'advertiser_name',
-        reason: `Advertiser name explicitly contains target category query "${phrase}"`,
-        matchedSignal: phrase,
-        reasonCode: 'SIGNAL_ENTITY_NAME_EXACT',
-        value: phrase,
-        explanation: `Business name explicitly specifies target category: ${phrase}`,
-        signature: createEvidenceSignature('ENTITY_IDENTITY', 'advertiser_name', 'STRONG', phrase)
-      });
+      if (hasCoreVerticalInName) {
+        evidenceList.push({
+          type: 'ENTITY_IDENTITY',
+          strength: 'STRONG',
+          source: 'advertiser_name',
+          reason: `Advertiser name explicitly contains target category query "${phrase}"`,
+          matchedSignal: phrase,
+          reasonCode: 'SIGNAL_ENTITY_NAME_EXACT',
+          value: phrase,
+          explanation: `Business name explicitly specifies target category: ${phrase}`,
+          signature: createEvidenceSignature('ENTITY_IDENTITY', 'advertiser_name', 'STRONG', phrase)
+        });
+      } else {
+        evidenceList.push({
+          type: 'ENTITY_IDENTITY',
+          strength: 'MODERATE',
+          source: 'advertiser_name',
+          reason: `Advertiser name mentions target product term "${phrase}"`,
+          matchedSignal: phrase,
+          reasonCode: 'SIGNAL_ENTITY_NAME_PRODUCT',
+          value: phrase,
+          explanation: `Business name mentions product term without core vertical descriptor: ${phrase}`,
+          signature: createEvidenceSignature('ENTITY_IDENTITY', 'advertiser_name', 'MODERATE', phrase)
+        });
+      }
       break;
     }
   }
@@ -760,12 +783,56 @@ export function evaluateStrictRelevanceV3(
     };
   }
 
+  const hasRootVerticalEntity = evidenceItems.some(
+    e => e.type === 'ENTITY_IDENTITY' && (e.reasonCode === 'SIGNAL_ENTITY_NAME_EXACT' || e.reasonCode === 'SIGNAL_ENTITY_NAME_CORE')
+  );
+
   // =============================================================
-  // TIER 2: STRONG ENTITY + SUPPORTING CATEGORY / COMMERCIAL -> RELEVANT
+  // TIER 1.5: ACCESSORY-ONLY PROTECTION
   // =============================================================
-  if (strongEntity && (moderateCategory || strongCategory || commercialIntent || strongDestination || moderateDestination)) {
+  const isAccessoryOnly = ACCESSORY_ONLY_INDICATORS.some(ind =>
+    profile.advertiserName.toLowerCase().includes(ind) ||
+    Array.from(profile.distinctAdCopyHashes).some(copy => copy.toLowerCase().includes(ind))
+  ) && !hasRootVerticalEntity;
+
+  if (isAccessoryOnly) {
+    decision = 'UNCERTAIN';
+    confidence = 'MEDIUM';
+    reasonCode = 'UNCERTAIN_ACCESSORY_ONLY';
+    reasons.push('Candidate appears to offer furniture accessories/textiles rather than core furniture manufacturing or retail.');
+    explanation = 'Advertiser provides furniture accessories or slipcovers rather than primary furniture manufacturing or retail.';
+
+    return {
+      decision,
+      confidence,
+      score: 0.28,
+      reasons,
+      matchedKeywords: v2Eval.matchedKeywords,
+      matchedTerms: v2Eval.matchedTerms,
+      negativeSignals: profile.negativeSignals,
+      evidence: evidenceItems,
+      conflicts: profile.conflicts,
+      evidenceCoverage: coverage,
+      uniqueEvidenceSignals: evidenceItems.length,
+      observedEvidenceOccurrences: profile.observedEvidenceOccurrences,
+      explanation,
+      reasonCode,
+      strategyVersion: RELEVANCE_STRATEGY_VERSION_V3,
+      engineVersion: RELEVANCE_ENGINE_VERSION_V3,
+      presetVersion: intent.presetVersion
+    };
+  }
+
+  // =============================================================
+  // TIER 2: STRONG ENTITY + SUPPORTING CATEGORY / VERIFIED DESTINATION
+  // =============================================================
+  const hasCategoryCorroboration = (
+    moderateCategory || strongCategory || strongDestination || moderateDestination
+  );
+
+  if (strongEntity && (hasCategoryCorroboration || (hasRootVerticalEntity && commercialIntent))) {
     decision = 'RELEVANT';
-    confidence = (strongCategory || commercialIntent || coverage.coverageLevel === 'HIGH') ? 'HIGH' : 'MEDIUM';
+    confidence = (strongCategory || coverage.coverageLevel === 'HIGH') ? 'HIGH' : 'MEDIUM';
     reasonCode = 'ACCEPT_STRONG_ENTITY_MATCH';
     reasons.push('Advertiser is confirmed as target business entity with supporting product/commercial evidence.');
     explanation = `Advertiser is identified as a ${intent.primaryKeywords?.[0] || 'target'} business with supporting category evidence.`;
@@ -775,19 +842,19 @@ export function evaluateStrictRelevanceV3(
   // =============================================================
   else if (strongCategory && (commercialIntent || strongDestination || moderateDestination || moderateEntity)) {
     decision = 'RELEVANT';
-    confidence = (commercialIntent && (strongDestination || moderateDestination)) ? 'HIGH' : 'MEDIUM';
+    confidence = (commercialIntent || strongDestination || moderateDestination) ? 'HIGH' : 'MEDIUM';
     reasonCode = 'ACCEPT_MULTI_SIGNAL_MATCH';
     reasons.push('Verified product/service catalog with corroborating commercial intent.');
     explanation = `Explicit product catalog and commercial intent confirm active business in target vertical.`;
   }
   // =============================================================
-  // TIER 4: MODERATE ENTITY + MODERATE CATEGORY -> RELEVANT
+  // TIER 4: MODERATE ENTITY + CATEGORY CORROBORATION -> RELEVANT
   // =============================================================
-  else if (moderateEntity && (moderateCategory || strongDestination || (commercialIntent && weakCategory))) {
+  else if (moderateEntity && (moderateCategory || strongCategory || (hasRootVerticalEntity && strongDestination))) {
     decision = 'RELEVANT';
     confidence = 'MEDIUM';
     reasonCode = 'ACCEPT_MULTI_SIGNAL_MATCH';
-    reasons.push('Entity product terms corroborated by destination or commercial evidence.');
+    reasons.push('Entity product terms corroborated by category evidence.');
     explanation = `Entity product branding corroborated by category match.`;
   }
   // =============================================================

@@ -358,7 +358,33 @@ export const NEGATIVE_CATEGORIES: NegativeCategoryDefinition[] = [
     ],
     entityTokens: ['charity', 'foundation', 'relief', 'humanitarian', 'donation', 'ngo'],
     penalty: -0.55
+  },
+  {
+    category: 'astrology_psychic_spiritual',
+    terms: [
+      'psychic', 'psychics', 'top uk psychics', 'psychic reading', 'psychic readings',
+      'tarot', 'tarot card', 'tarot reading', 'astrology', 'astrologer', 'horoscope',
+      'horoscopes', 'clairvoyant', 'spiritual guidance', 'fortune teller', 'fortune telling',
+      'palmistry', 'numerology', 'mediumship', 'trusted readings'
+    ],
+    entityTokens: ['psychic', 'psychics', 'tarot', 'astrology', 'astrologer', 'horoscope', 'clairvoyant', 'spiritual', 'medium'],
+    penalty: -0.65
+  },
+  {
+    category: 'digital_entertainment_media',
+    terms: [
+      'podcast', 'podcast episode', 'listen on spotify', 'music band',
+      'mobile app wallet', 'app wallet', 'free minutes in our app', 'download our app for free'
+    ],
+    entityTokens: ['podcast', 'streamer', 'band'],
+    penalty: -0.55
   }
+];
+
+export const ACCESSORY_ONLY_INDICATORS = [
+  'sofa cover', 'sofa covers', 'couch cover', 'couch covers', 'slipcover', 'slipcovers',
+  'cushion cover', 'cushion covers', 'pillow cover', 'pillow covers', 'elastic cover',
+  'furniture protector', 'sofa protector', 'chair cover', 'chair covers'
 ];
 
 const STOP_WORDS = new Set([
@@ -554,7 +580,10 @@ export class LeadRelevanceEngine {
       if (
         allQueryPhrases.some(phrase =>
           phrase.includes(key) ||
-          tax.rootTerms.some(rt => phrase.includes(rt))
+          key.includes(phrase) ||
+          tax.rootTerms.some(rt => phrase.includes(rt) || rt.includes(phrase)) ||
+          tax.productServiceTerms.some(pt => phrase === pt || phrase.includes(pt) || pt.includes(phrase)) ||
+          tax.industryDescriptors.some(id => phrase.includes(id) || id.includes(phrase))
         )
       ) {
         activeTaxonomies.push(tax);
@@ -699,23 +728,47 @@ export class LeadRelevanceEngine {
     let hasStrongEntityMatch = false;
     let hasModerateEntityMatch = false;
 
+    // Check if advertiser name contains a genuine root vertical category or industry descriptor
+    const hasCoreVerticalInName = activeTaxonomies.some(tax =>
+      tax.rootTerms.some(rt => normalized.advertiserText.includes(rt)) ||
+      tax.industryDescriptors.some(id => normalized.advertiserText.includes(id))
+    );
+
     // Exact phrase match in advertiser name
     for (const phrase of allQueryPhrases) {
       if (normalized.advertiserText.includes(phrase)) {
-        advertiserNameScore = 0.40;
-        hasStrongEntityMatch = true;
-        matchedKeywords.push(phrase);
-        matchedTerms.push(phrase);
-        const reason = `Advertiser name explicitly contains target category query "${phrase}"`;
-        reasons.push(reason);
-        structuredEvidence.push({
-          type: 'ENTITY_IDENTITY',
-          strength: 'STRONG',
-          source: 'advertiser_name',
-          reason,
-          matchedSignal: phrase,
-          reasonCode: 'SIGNAL_ENTITY_NAME_EXACT'
-        });
+        if (hasCoreVerticalInName) {
+          advertiserNameScore = 0.40;
+          hasStrongEntityMatch = true;
+          matchedKeywords.push(phrase);
+          matchedTerms.push(phrase);
+          const reason = `Advertiser name explicitly contains target category query "${phrase}"`;
+          reasons.push(reason);
+          structuredEvidence.push({
+            type: 'ENTITY_IDENTITY',
+            strength: 'STRONG',
+            source: 'advertiser_name',
+            reason,
+            matchedSignal: phrase,
+            reasonCode: 'SIGNAL_ENTITY_NAME_EXACT'
+          });
+        } else {
+          // Product-only mention in business name (e.g. "Sofa" in "Psychic Sofa" or "The Red Sofa")
+          advertiserNameScore = 0.25;
+          hasModerateEntityMatch = true;
+          matchedKeywords.push(phrase);
+          matchedTerms.push(phrase);
+          const reason = `Advertiser name mentions target product term "${phrase}"`;
+          reasons.push(reason);
+          structuredEvidence.push({
+            type: 'ENTITY_IDENTITY',
+            strength: 'MODERATE',
+            source: 'advertiser_name',
+            reason,
+            matchedSignal: phrase,
+            reasonCode: 'SIGNAL_ENTITY_NAME_PRODUCT'
+          });
+        }
         break;
       }
     }
@@ -1001,17 +1054,32 @@ export class LeadRelevanceEngine {
           reasons.push(`Classified as UNCERTAIN: Mentioned keyword but lacks independent entity or product evidence.`);
         }
       } else {
+        // Accessory-only protection:
+        const isAccessoryOnly = ACCESSORY_ONLY_INDICATORS.some(ind =>
+          normalized.advertiserText.includes(ind) || normalized.adCopyText.includes(ind)
+        ) && !hasCoreVerticalInName;
+
         // Evaluate Positive Sufficiency Criteria:
         // Criterion 1: Strong Entity Identity (name contains category or core stem) + at least 1 supporting signal
-        const hasSupportingSignal = (
+        const hasCategoryCorroboration = (
           adCopyScore >= 0.10 ||
           destinationScore >= 0.12 ||
-          commercialScore >= 0.05 ||
-          facebookPageScore >= 0.05 ||
-          hasProductCatalogEvidence
+          hasProductCatalogEvidence ||
+          hasDomainCategoryMatch
         );
 
-        const passesCriterion1 = hasStrongEntityMatch && hasSupportingSignal;
+        const hasSupportingSignal = (
+          hasCategoryCorroboration ||
+          commercialScore >= 0.05 ||
+          facebookPageScore >= 0.05
+        );
+
+        // Core rule: A root vertical descriptor in name is corroborated by commercial or category signals.
+        // But a product-only name requires actual category or catalog corroboration (commercial intent alone is NOT enough).
+        const passesCriterion1 = (
+          (hasCoreVerticalInName && hasSupportingSignal) ||
+          (hasStrongEntityMatch && hasCategoryCorroboration)
+        );
 
         // Criterion 2: Moderate Entity Identity (e.g. name has product term "Seating", "ErgoDesk") + ad copy/destination evidence
         const passesCriterion2 = hasModerateEntityMatch && (adCopyScore >= 0.15 || destinationScore >= 0.12 || hasProductCatalogEvidence);
@@ -1025,7 +1093,12 @@ export class LeadRelevanceEngine {
           (adCopyScore >= 0.25 && commercialScore >= 0.05)
         );
 
-        if ((passesCriterion1 || passesCriterion2 || passesCriterion3) && totalScore >= 0.35) {
+        if (isAccessoryOnly) {
+          decision = 'UNCERTAIN';
+          confidence = 'MEDIUM';
+          reasonCode = 'UNCERTAIN_ACCESSORY_ONLY';
+          reasons.push('Classified as UNCERTAIN: Candidate appears to offer accessories or covers rather than core furniture manufacturing or retail.');
+        } else if ((passesCriterion1 || passesCriterion2 || passesCriterion3) && totalScore >= 0.35) {
           decision = 'RELEVANT';
           const hasMultiDimensionalCorroboration = (
             (hasStrongEntityMatch && hasSupportingSignal) ||

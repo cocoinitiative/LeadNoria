@@ -15319,7 +15319,7 @@ function collectEvidenceWaterfall(evidence, intent) {
   const activeTaxonomies = [];
   for (const [key, tax] of Object.entries(BOUNDED_TAXONOMY)) {
     if (allQueryPhrases.some(
-      (phrase) => phrase.includes(key) || tax.rootTerms.some((rt) => phrase.includes(rt))
+      (phrase) => phrase.includes(key) || key.includes(phrase) || tax.rootTerms.some((rt) => phrase.includes(rt) || rt.includes(phrase)) || tax.productServiceTerms.some((pt) => phrase === pt || phrase.includes(pt) || pt.includes(phrase)) || tax.industryDescriptors.some((id) => phrase.includes(id) || id.includes(phrase))
     )) {
       activeTaxonomies.push(tax);
     }
@@ -15429,20 +15429,37 @@ function collectEvidenceWaterfall(evidence, intent) {
     }
   }
   let strongNameFound = false;
+  const hasCoreVerticalInName = activeTaxonomies.some(
+    (tax) => tax.rootTerms.some((rt) => normalized.advertiserText.includes(rt)) || tax.industryDescriptors.some((id) => normalized.advertiserText.includes(id))
+  );
   for (const phrase of allQueryPhrases) {
     if (normalized.advertiserText.includes(phrase)) {
       strongNameFound = true;
-      evidenceList.push({
-        type: "ENTITY_IDENTITY",
-        strength: "STRONG",
-        source: "advertiser_name",
-        reason: `Advertiser name explicitly contains target category query "${phrase}"`,
-        matchedSignal: phrase,
-        reasonCode: "SIGNAL_ENTITY_NAME_EXACT",
-        value: phrase,
-        explanation: `Business name explicitly specifies target category: ${phrase}`,
-        signature: createEvidenceSignature("ENTITY_IDENTITY", "advertiser_name", "STRONG", phrase)
-      });
+      if (hasCoreVerticalInName) {
+        evidenceList.push({
+          type: "ENTITY_IDENTITY",
+          strength: "STRONG",
+          source: "advertiser_name",
+          reason: `Advertiser name explicitly contains target category query "${phrase}"`,
+          matchedSignal: phrase,
+          reasonCode: "SIGNAL_ENTITY_NAME_EXACT",
+          value: phrase,
+          explanation: `Business name explicitly specifies target category: ${phrase}`,
+          signature: createEvidenceSignature("ENTITY_IDENTITY", "advertiser_name", "STRONG", phrase)
+        });
+      } else {
+        evidenceList.push({
+          type: "ENTITY_IDENTITY",
+          strength: "MODERATE",
+          source: "advertiser_name",
+          reason: `Advertiser name mentions target product term "${phrase}"`,
+          matchedSignal: phrase,
+          reasonCode: "SIGNAL_ENTITY_NAME_PRODUCT",
+          value: phrase,
+          explanation: `Business name mentions product term without core vertical descriptor: ${phrase}`,
+          signature: createEvidenceSignature("ENTITY_IDENTITY", "advertiser_name", "MODERATE", phrase)
+        });
+      }
       break;
     }
   }
@@ -15810,23 +15827,56 @@ function evaluateStrictRelevanceV3(candidateOrProfile, intent) {
       presetVersion: intent.presetVersion
     };
   }
-  if (strongEntity && (moderateCategory || strongCategory || commercialIntent || strongDestination || moderateDestination)) {
+  const hasRootVerticalEntity = evidenceItems.some(
+    (e) => e.type === "ENTITY_IDENTITY" && (e.reasonCode === "SIGNAL_ENTITY_NAME_EXACT" || e.reasonCode === "SIGNAL_ENTITY_NAME_CORE")
+  );
+  const isAccessoryOnly = ACCESSORY_ONLY_INDICATORS.some(
+    (ind) => profile.advertiserName.toLowerCase().includes(ind) || Array.from(profile.distinctAdCopyHashes).some((copy) => copy.toLowerCase().includes(ind))
+  ) && !hasRootVerticalEntity;
+  if (isAccessoryOnly) {
+    decision = "UNCERTAIN";
+    confidence = "MEDIUM";
+    reasonCode = "UNCERTAIN_ACCESSORY_ONLY";
+    reasons.push("Candidate appears to offer furniture accessories/textiles rather than core furniture manufacturing or retail.");
+    explanation = "Advertiser provides furniture accessories or slipcovers rather than primary furniture manufacturing or retail.";
+    return {
+      decision,
+      confidence,
+      score: 0.28,
+      reasons,
+      matchedKeywords: v2Eval.matchedKeywords,
+      matchedTerms: v2Eval.matchedTerms,
+      negativeSignals: profile.negativeSignals,
+      evidence: evidenceItems,
+      conflicts: profile.conflicts,
+      evidenceCoverage: coverage,
+      uniqueEvidenceSignals: evidenceItems.length,
+      observedEvidenceOccurrences: profile.observedEvidenceOccurrences,
+      explanation,
+      reasonCode,
+      strategyVersion: RELEVANCE_STRATEGY_VERSION_V3,
+      engineVersion: RELEVANCE_ENGINE_VERSION_V3,
+      presetVersion: intent.presetVersion
+    };
+  }
+  const hasCategoryCorroboration = moderateCategory || strongCategory || strongDestination || moderateDestination;
+  if (strongEntity && (hasCategoryCorroboration || hasRootVerticalEntity && commercialIntent)) {
     decision = "RELEVANT";
-    confidence = strongCategory || commercialIntent || coverage.coverageLevel === "HIGH" ? "HIGH" : "MEDIUM";
+    confidence = strongCategory || coverage.coverageLevel === "HIGH" ? "HIGH" : "MEDIUM";
     reasonCode = "ACCEPT_STRONG_ENTITY_MATCH";
     reasons.push("Advertiser is confirmed as target business entity with supporting product/commercial evidence.");
     explanation = `Advertiser is identified as a ${intent.primaryKeywords?.[0] || "target"} business with supporting category evidence.`;
   } else if (strongCategory && (commercialIntent || strongDestination || moderateDestination || moderateEntity)) {
     decision = "RELEVANT";
-    confidence = commercialIntent && (strongDestination || moderateDestination) ? "HIGH" : "MEDIUM";
+    confidence = commercialIntent || strongDestination || moderateDestination ? "HIGH" : "MEDIUM";
     reasonCode = "ACCEPT_MULTI_SIGNAL_MATCH";
     reasons.push("Verified product/service catalog with corroborating commercial intent.");
     explanation = `Explicit product catalog and commercial intent confirm active business in target vertical.`;
-  } else if (moderateEntity && (moderateCategory || strongDestination || commercialIntent && weakCategory)) {
+  } else if (moderateEntity && (moderateCategory || strongCategory || hasRootVerticalEntity && strongDestination)) {
     decision = "RELEVANT";
     confidence = "MEDIUM";
     reasonCode = "ACCEPT_MULTI_SIGNAL_MATCH";
-    reasons.push("Entity product terms corroborated by destination or commercial evidence.");
+    reasons.push("Entity product terms corroborated by category evidence.");
     explanation = `Entity product branding corroborated by category match.`;
   } else if (!strongEntity && !moderateEntity && !strongDestination && !moderateDestination && !strongCategory) {
     if (weakCategory || moderateCategory) {
@@ -16047,7 +16097,7 @@ function compileResearchIntent(mode, keywords, presetId, locationCode = "US") {
     locationCode
   };
 }
-var RELEVANCE_STRATEGY_VERSION, RELEVANCE_ENGINE_VERSION, BOUNDED_TAXONOMY, NEGATIVE_CATEGORIES, STOP_WORDS, LeadRelevanceEngine;
+var RELEVANCE_STRATEGY_VERSION, RELEVANCE_ENGINE_VERSION, BOUNDED_TAXONOMY, NEGATIVE_CATEGORIES, ACCESSORY_ONLY_INDICATORS, STOP_WORDS, LeadRelevanceEngine;
 var init_relevanceEngine = __esm({
   "src/extension/relevanceEngine.ts"() {
     init_presetCatalogue();
@@ -16509,7 +16559,66 @@ var init_relevanceEngine = __esm({
         ],
         entityTokens: ["charity", "foundation", "relief", "humanitarian", "donation", "ngo"],
         penalty: -0.55
+      },
+      {
+        category: "astrology_psychic_spiritual",
+        terms: [
+          "psychic",
+          "psychics",
+          "top uk psychics",
+          "psychic reading",
+          "psychic readings",
+          "tarot",
+          "tarot card",
+          "tarot reading",
+          "astrology",
+          "astrologer",
+          "horoscope",
+          "horoscopes",
+          "clairvoyant",
+          "spiritual guidance",
+          "fortune teller",
+          "fortune telling",
+          "palmistry",
+          "numerology",
+          "mediumship",
+          "trusted readings"
+        ],
+        entityTokens: ["psychic", "psychics", "tarot", "astrology", "astrologer", "horoscope", "clairvoyant", "spiritual", "medium"],
+        penalty: -0.65
+      },
+      {
+        category: "digital_entertainment_media",
+        terms: [
+          "podcast",
+          "podcast episode",
+          "listen on spotify",
+          "music band",
+          "mobile app wallet",
+          "app wallet",
+          "free minutes in our app",
+          "download our app for free"
+        ],
+        entityTokens: ["podcast", "streamer", "band"],
+        penalty: -0.55
       }
+    ];
+    ACCESSORY_ONLY_INDICATORS = [
+      "sofa cover",
+      "sofa covers",
+      "couch cover",
+      "couch covers",
+      "slipcover",
+      "slipcovers",
+      "cushion cover",
+      "cushion covers",
+      "pillow cover",
+      "pillow covers",
+      "elastic cover",
+      "furniture protector",
+      "sofa protector",
+      "chair cover",
+      "chair covers"
     ];
     STOP_WORDS = /* @__PURE__ */ new Set([
       "a",
@@ -16686,7 +16795,7 @@ var init_relevanceEngine = __esm({
         const activeTaxonomies = [];
         for (const [key, tax] of Object.entries(BOUNDED_TAXONOMY)) {
           if (allQueryPhrases.some(
-            (phrase) => phrase.includes(key) || tax.rootTerms.some((rt) => phrase.includes(rt))
+            (phrase) => phrase.includes(key) || key.includes(phrase) || tax.rootTerms.some((rt) => phrase.includes(rt) || rt.includes(phrase)) || tax.productServiceTerms.some((pt) => phrase === pt || phrase.includes(pt) || pt.includes(phrase)) || tax.industryDescriptors.some((id) => phrase.includes(id) || id.includes(phrase))
           )) {
             activeTaxonomies.push(tax);
           }
@@ -16794,22 +16903,42 @@ var init_relevanceEngine = __esm({
         let advertiserNameScore = 0;
         let hasStrongEntityMatch = false;
         let hasModerateEntityMatch = false;
+        const hasCoreVerticalInName = activeTaxonomies.some(
+          (tax) => tax.rootTerms.some((rt) => normalized.advertiserText.includes(rt)) || tax.industryDescriptors.some((id) => normalized.advertiserText.includes(id))
+        );
         for (const phrase of allQueryPhrases) {
           if (normalized.advertiserText.includes(phrase)) {
-            advertiserNameScore = 0.4;
-            hasStrongEntityMatch = true;
-            matchedKeywords.push(phrase);
-            matchedTerms.push(phrase);
-            const reason = `Advertiser name explicitly contains target category query "${phrase}"`;
-            reasons.push(reason);
-            structuredEvidence.push({
-              type: "ENTITY_IDENTITY",
-              strength: "STRONG",
-              source: "advertiser_name",
-              reason,
-              matchedSignal: phrase,
-              reasonCode: "SIGNAL_ENTITY_NAME_EXACT"
-            });
+            if (hasCoreVerticalInName) {
+              advertiserNameScore = 0.4;
+              hasStrongEntityMatch = true;
+              matchedKeywords.push(phrase);
+              matchedTerms.push(phrase);
+              const reason = `Advertiser name explicitly contains target category query "${phrase}"`;
+              reasons.push(reason);
+              structuredEvidence.push({
+                type: "ENTITY_IDENTITY",
+                strength: "STRONG",
+                source: "advertiser_name",
+                reason,
+                matchedSignal: phrase,
+                reasonCode: "SIGNAL_ENTITY_NAME_EXACT"
+              });
+            } else {
+              advertiserNameScore = 0.25;
+              hasModerateEntityMatch = true;
+              matchedKeywords.push(phrase);
+              matchedTerms.push(phrase);
+              const reason = `Advertiser name mentions target product term "${phrase}"`;
+              reasons.push(reason);
+              structuredEvidence.push({
+                type: "ENTITY_IDENTITY",
+                strength: "MODERATE",
+                source: "advertiser_name",
+                reason,
+                matchedSignal: phrase,
+                reasonCode: "SIGNAL_ENTITY_NAME_PRODUCT"
+              });
+            }
             break;
           }
         }
@@ -17054,11 +17183,20 @@ var init_relevanceEngine = __esm({
               reasons.push(`Classified as UNCERTAIN: Mentioned keyword but lacks independent entity or product evidence.`);
             }
           } else {
-            const hasSupportingSignal = adCopyScore >= 0.1 || destinationScore >= 0.12 || commercialScore >= 0.05 || facebookPageScore >= 0.05 || hasProductCatalogEvidence;
-            const passesCriterion1 = hasStrongEntityMatch && hasSupportingSignal;
+            const isAccessoryOnly = ACCESSORY_ONLY_INDICATORS.some(
+              (ind) => normalized.advertiserText.includes(ind) || normalized.adCopyText.includes(ind)
+            ) && !hasCoreVerticalInName;
+            const hasCategoryCorroboration = adCopyScore >= 0.1 || destinationScore >= 0.12 || hasProductCatalogEvidence || hasDomainCategoryMatch;
+            const hasSupportingSignal = hasCategoryCorroboration || commercialScore >= 0.05 || facebookPageScore >= 0.05;
+            const passesCriterion1 = hasCoreVerticalInName && hasSupportingSignal || hasStrongEntityMatch && hasCategoryCorroboration;
             const passesCriterion2 = hasModerateEntityMatch && (adCopyScore >= 0.15 || destinationScore >= 0.12 || hasProductCatalogEvidence);
             const passesCriterion3 = hasProductCatalogEvidence && (destinationScore >= 0.12 || hasUrlSlugProduct || hasDomainCategoryMatch || adCopyScore >= 0.25 && commercialScore >= 0.05);
-            if ((passesCriterion1 || passesCriterion2 || passesCriterion3) && totalScore >= 0.35) {
+            if (isAccessoryOnly) {
+              decision = "UNCERTAIN";
+              confidence = "MEDIUM";
+              reasonCode = "UNCERTAIN_ACCESSORY_ONLY";
+              reasons.push("Classified as UNCERTAIN: Candidate appears to offer accessories or covers rather than core furniture manufacturing or retail.");
+            } else if ((passesCriterion1 || passesCriterion2 || passesCriterion3) && totalScore >= 0.35) {
               decision = "RELEVANT";
               const hasMultiDimensionalCorroboration = hasStrongEntityMatch && hasSupportingSignal || hasProductCatalogEvidence && destinationScore >= 0.12 && commercialScore >= 0.05;
               confidence = totalScore >= 0.6 || hasMultiDimensionalCorroboration ? "HIGH" : "MEDIUM";
@@ -21509,8 +21647,8 @@ function toRunStatusViewModel(run, elapsedMs = 0) {
     sourceStatus,
     stages: stageViewModels,
     candidatesProcessed: 0,
-    hasWarnings: run.status === "COMPLETED_WITH_WARNINGS",
-    warningMessages: run.status === "COMPLETED_WITH_WARNINGS" ? ["Run completed with warnings: some sources or stages completed in CONTRACT_ONLY or SKIPPED status"] : [],
+    hasWarnings: run.status === "COMPLETED_WITH_WARNINGS" || Boolean(run.hasWarnings || run.warningMessages?.length),
+    warningMessages: run.status === "COMPLETED_WITH_WARNINGS" ? ["Run completed with warnings: some sources or stages completed in CONTRACT_ONLY or SKIPPED status"] : run.warningMessages || [],
     isPausable,
     isResumable,
     isStoppable,
@@ -24330,6 +24468,7 @@ var ExtensionApp = () => {
       setRawLeads(run.leads);
     }
     const stageStates = {};
+    const warningMessages = [];
     if (run.status === "COMPLETED") {
       stageStates.SOURCE_PLANNING = "COMPLETED";
       stageStates.SOURCE_EXECUTION = "COMPLETED";
@@ -24340,6 +24479,25 @@ var ExtensionApp = () => {
     } else if (isJobRunning(run.status)) {
       stageStates.SOURCE_PLANNING = "COMPLETED";
       stageStates.SOURCE_EXECUTION = "IN_PROGRESS";
+    } else if (run.status === "FAILED" || run.stopReason === "EXTRACTION_ERROR") {
+      stageStates.SOURCE_PLANNING = "COMPLETED";
+      stageStates.SOURCE_EXECUTION = "FAILED";
+      warningMessages.push(`Extraction failed: ${run.challengeReason || "Meta Ad Library card structure could not be extracted."}`);
+    } else if (run.status === "CHALLENGED" || run.status === "RATE_LIMITED" || run.status === "BLOCKED") {
+      stageStates.SOURCE_PLANNING = "COMPLETED";
+      stageStates.SOURCE_EXECUTION = "BLOCKED";
+      warningMessages.push(`Security challenge or rate-limit active: ${run.challengeReason || "Access restricted."}`);
+    } else if (run.status === "CANCELLED") {
+      stageStates.SOURCE_PLANNING = "COMPLETED";
+      stageStates.SOURCE_EXECUTION = "SKIPPED";
+      warningMessages.push("Research was cancelled by user.");
+    } else if (run.status === "PARTIAL") {
+      stageStates.SOURCE_PLANNING = "COMPLETED";
+      stageStates.SOURCE_EXECUTION = "COMPLETED";
+      stageStates.NORMALIZATION = "COMPLETED";
+      if (run.stopReason === "NO_NEW_RESULTS_OBSERVED") {
+        warningMessages.push("Search completed: no matching ad results observed on public Meta Ad Library.");
+      }
     }
     const mockRun = {
       runId: run.runId || "run_active",
@@ -24348,6 +24506,8 @@ var ExtensionApp = () => {
       config: { selectedSources: [selectedSource] },
       stageStates,
       sourceStates: { [selectedSource]: run.status || "UNKNOWN" },
+      warningMessages,
+      hasWarnings: warningMessages.length > 0,
       checkpoint: void 0
     };
     setRunStatusVM(toRunStatusViewModel(mockRun, elapsedSeconds * 1e3));

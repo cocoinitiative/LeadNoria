@@ -39,7 +39,10 @@ export type ResearchStopReason =
   | 'CHALLENGE_DETECTED'
   | 'STALE_JOB_TIMEOUT'
   | 'FAILED'
-  | 'FATAL_ERROR';
+  | 'FATAL_ERROR'
+  | 'EXTRACTION_ERROR'
+  | 'END_OF_RESULTS'
+  | 'TAB_TIMEOUT';
 
 export type RelevanceDecision = 'RELEVANT' | 'UNCERTAIN' | 'NOT_RELEVANT';
 export type RelevanceConfidence = 'HIGH' | 'MEDIUM' | 'LOW';
@@ -326,6 +329,7 @@ export interface ExtensionLead {
   activeAdCount: number;
   adCount?: number;
   adLibraryIds: string[];
+  activeAdLibraryIds?: string[];
   adLibraryUrl?: string;
   matchedKeywords: string[];
   matchedQueries?: string[];
@@ -539,4 +543,48 @@ export interface WebsiteVerificationRecord {
   durationMs: number;
   blockedReason?: string;
   errorCode?: string;
+}
+
+// ==========================================
+// Meta Ad Library Hardened Extraction Types
+// ==========================================
+
+export type CardValidationOutcome =
+  | 'VALID_CANDIDATE'
+  | 'MISSING_IDENTIFIER'
+  | 'AMBIGUOUS_CANDIDATE'
+  | 'INVALID_CONTAINER'
+  | 'DUPLICATE_CANDIDATE';
+
+export interface AdExtractionDiagnostics {
+  cardsExamined: number;
+  identifierCandidatesFound: number;
+  validCardsAccepted: number;
+  cardsRejectedMissingId: number;
+  duplicateCardsIgnored: number;
+  extractionDurationMs: number;
+  scrollIteration?: number;
+  relevantMutationsObserved?: number;
+  details?: Array<{
+    libraryId?: string;
+    outcome: CardValidationOutcome;
+    reason?: string;
+  }>;
+}
+
+export type ExtractionResultStatus =
+  | 'RESULTS_FOUND'
+  | 'NO_NEW_RESULTS_OBSERVED'
+  | 'END_OF_RESULTS'
+  | 'CHALLENGED'
+  | 'RATE_LIMITED'
+  | 'TAB_TIMEOUT'
+  | 'CANCELLED'
+  | 'EXTRACTION_ERROR';
+
+export interface AdExtractionResult {
+  candidates: ScrapedAdCandidate[];
+  diagnostics: AdExtractionDiagnostics;
+  status: ExtractionResultStatus;
+  atBottom?: boolean;
 }

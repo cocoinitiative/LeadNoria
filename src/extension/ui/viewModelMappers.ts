@@ -994,10 +994,10 @@ export function toRunStatusViewModel(run: MultiSourceRun, elapsedMs = 0): RunSta
     sourceStatus,
     stages: stageViewModels,
     candidatesProcessed: 0,
-    hasWarnings: run.status === 'COMPLETED_WITH_WARNINGS',
+    hasWarnings: run.status === 'COMPLETED_WITH_WARNINGS' || Boolean((run as any).hasWarnings || (run as any).warningMessages?.length),
     warningMessages: run.status === 'COMPLETED_WITH_WARNINGS' 
       ? ['Run completed with warnings: some sources or stages completed in CONTRACT_ONLY or SKIPPED status'] 
-      : [],
+      : ((run as any).warningMessages || []),
     isPausable,
     isResumable,
     isStoppable,

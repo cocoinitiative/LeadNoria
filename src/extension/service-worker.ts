@@ -153,40 +153,77 @@ function broadcastProgress(run: ExtensionResearchRun, stage: string, logMessage:
 }
 
 /**
- * Helper to wait for a tab to finish loading
+ * Checks whether current URL matches target Meta Ad Library search URL,
+ * taking into account URL normalization, parameter ordering, and query keywords.
  */
-function waitForTabLoad(tabId: number, timeoutMs = 25000): Promise<void> {
+export function isAdLibraryUrlMatch(currentUrl: string | undefined, targetUrl?: string): boolean {
+  if (!currentUrl) return false;
+  if (!targetUrl) return currentUrl.includes('/ads/library');
+  try {
+    const cur = new URL(currentUrl);
+    const tgt = new URL(targetUrl);
+    if (!cur.pathname.includes('/ads/library')) return false;
+    const curQ = cur.searchParams.get('q')?.toLowerCase().trim();
+    const tgtQ = tgt.searchParams.get('q')?.toLowerCase().trim();
+    if (tgtQ && curQ) {
+      return curQ === tgtQ;
+    }
+    return true;
+  } catch {
+    return currentUrl.includes('/ads/library');
+  }
+}
+
+/**
+ * Helper to wait for a tab to finish loading target URL.
+ * Handles redirects, URL normalization, timeouts, tab closure, and repeated navigations.
+ */
+export function waitForTabLoad(tabId: number, targetUrl?: string, timeoutMs = 25000): Promise<void> {
   return new Promise(async (resolve) => {
     let resolved = false;
 
-    try {
-      const currentTab = await chrome.tabs.get(tabId);
-      if (currentTab && currentTab.status === 'complete') {
+    const cleanup = () => {
+      if (!resolved) {
         resolved = true;
+        try {
+          chrome.tabs?.onUpdated?.removeListener(listener);
+          chrome.tabs?.onRemoved?.removeListener(onTabRemoved);
+        } catch {}
         resolve();
-        return;
       }
-    } catch {}
+    };
 
-    const listener = (updatedTabId: number, changeInfo: { status?: string }) => {
+    const listener = (updatedTabId: number, changeInfo: { status?: string; url?: string }, tab?: chrome.tabs.Tab) => {
       if (updatedTabId === tabId && changeInfo.status === 'complete') {
-        if (!resolved) {
-          resolved = true;
-          chrome.tabs.onUpdated.removeListener(listener);
-          resolve();
+        if (!targetUrl || (tab?.url && isAdLibraryUrlMatch(tab.url, targetUrl))) {
+          cleanup();
         }
       }
     };
 
-    chrome.tabs.onUpdated.addListener(listener);
-
-    setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
+    const onTabRemoved = (removedTabId: number) => {
+      if (removedTabId === tabId) {
+        cleanup();
       }
-    }, timeoutMs);
+    };
+
+    try {
+      chrome.tabs?.onUpdated?.addListener(listener);
+      chrome.tabs?.onRemoved?.addListener(onTabRemoved);
+    } catch {}
+
+    // Only resolve immediately if current tab is ALREADY on the target URL with matching keyword and complete
+    try {
+      const currentTab = await chrome.tabs.get(tabId);
+      if (currentTab && currentTab.status === 'complete') {
+        if (targetUrl && isAdLibraryUrlMatch(currentTab.url, targetUrl)) {
+          cleanup();
+          return;
+        }
+      }
+    } catch {}
+
+    setTimeout(cleanup, timeoutMs);
   });
 }
 
@@ -208,10 +245,11 @@ async function executeResearchPipeline(
 
   const keywords = payload.keywords.map(k => k.trim()).filter(Boolean);
   const countryCode = payload.countryCode || 'US';
-  const isAutoDiscovery = payload.researchMode === 'AUTO_DISCOVERY' || payload.maxResults === undefined;
+  const requestedLimit = payload.maxFinalUniqueRelevantLeads ?? payload.maxResults;
+  const isAutoDiscovery = payload.researchMode === 'AUTO_DISCOVERY' && requestedLimit === undefined;
   const effectiveCeiling = isAutoDiscovery
     ? MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH
-    : Math.min(Math.max(1, payload.maxResults || MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH), MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH);
+    : Math.min(Math.max(1, requestedLimit || MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH), MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH);
   const targetLeadCount = isAutoDiscovery ? undefined : effectiveCeiling;
 
   const researchIntent = compileResearchIntent(
@@ -302,6 +340,7 @@ async function executeResearchPipeline(
   const completedKeywords: string[] = [...(initialRun.frontier?.completedKeywords || [])];
   let isStalled = false;
   let batchIndex = initialRun.lastCheckpointBatch || 0;
+  let encounteredExtractionError = false;
 
   try {
     for (let qi = startQi; qi < queriesToRun.length; qi++) {
@@ -329,7 +368,7 @@ async function executeResearchPipeline(
       let queryNewEntities = 0;
       let queryDuplicateEntities = 0;
 
-      const searchUrl = `https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=${encodeURIComponent(countryCode)}&q=${encodeURIComponent(currentKeyword)}`;
+      const searchUrl = `https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=${encodeURIComponent(countryCode)}&q=${encodeURIComponent(currentKeyword)}&search_type=keyword_unordered&media_type=all`;
       const queryTypeLabel = currentPlannedQuery.variantType === 'SEED' ? 'Primary Seed' : `Expansion: ${currentPlannedQuery.variantType}`;
       broadcastProgress(initialRun, 'NAVIGATING', `[${qi + 1}/${queriesToRun.length} ${queryTypeLabel}] Opening Meta Ad Library for "${currentKeyword}" in ${countryCode}...`);
 
@@ -344,7 +383,7 @@ async function executeResearchPipeline(
         throw new Error('Failed to create or update browser tab for research.');
       }
 
-      await waitForTabLoad(currentTabId);
+      await waitForTabLoad(currentTabId, searchUrl);
       // Give DOM extra settle time for dynamic scripts
       await wait(3000);
 
@@ -383,7 +422,12 @@ async function executeResearchPipeline(
         try {
           response = await chrome.tabs.sendMessage(currentTabId, {
             type: 'SCAN_AND_EXTRACT',
-            payload: { keyword: currentKeyword, scroll: true }
+            payload: {
+              keyword: currentKeyword,
+              scroll: true,
+              scrollIteration: scrollAttempts,
+              seenLibraryIds: Array.from(seenAdLibraryIds)
+            }
           });
         } catch (err: any) {
           // Content script might need dynamic injection if not yet auto-injected
@@ -395,15 +439,20 @@ async function executeResearchPipeline(
             await wait(1000);
             response = await chrome.tabs.sendMessage(currentTabId, {
               type: 'SCAN_AND_EXTRACT',
-              payload: { keyword: currentKeyword, scroll: true }
+              payload: {
+                keyword: currentKeyword,
+                scroll: true,
+                scrollIteration: scrollAttempts,
+                seenLibraryIds: Array.from(seenAdLibraryIds)
+              }
             });
           } catch (scriptErr: any) {
             broadcastProgress(initialRun, 'COLLECTING', `Tab communication retry: ${scriptErr.message}`);
           }
         }
 
-        if (response && response.type === 'CHALLENGE_DETECTED') {
-          const isRateLimit = response.code === 'RATE_LIMITED' || (response.reason && response.reason.includes('rate limit'));
+        if (response && (response.type === 'CHALLENGE_DETECTED' || response.payload?.status === 'CHALLENGED' || response.payload?.status === 'RATE_LIMITED')) {
+          const isRateLimit = response.code === 'RATE_LIMITED' || response.payload?.status === 'RATE_LIMITED' || (response.reason && response.reason.includes('rate limit'));
           initialRun.status = isRateLimit ? 'RATE_LIMITED' : 'CHALLENGED';
           initialRun.challengeReason = response.reason || 'Meta Ad Library security challenge presented.';
           initialRun.stopReason = isRateLimit ? 'RATE_LIMITED' : 'CHALLENGED';
@@ -412,6 +461,11 @@ async function executeResearchPipeline(
           await saveActiveRun(initialRun);
           await appendToHistory(initialRun);
           return initialRun;
+        }
+
+        if (response?.payload?.status === 'EXTRACTION_ERROR') {
+          encounteredExtractionError = true;
+          broadcastProgress(initialRun, 'COLLECTING', `Extraction diagnostic warning: ${response.payload.error || 'DOM structure issue encountered during scan'}`);
         }
 
         const candidates: ScrapedAdCandidate[] = (response && response.payload && response.payload.candidates) || [];
@@ -532,7 +586,7 @@ async function executeResearchPipeline(
             break;
           }
 
-          if (response.payload && response.payload.atBottom && consecutiveNoNewCards >= 2) {
+          if ((response.payload && response.payload.atBottom && consecutiveNoNewCards >= 2) || response.payload?.status === 'END_OF_RESULTS') {
             broadcastProgress(initialRun, 'COLLECTING', `Reached end of public search results for "${currentKeyword}".`);
             break;
           }
@@ -597,23 +651,30 @@ async function executeResearchPipeline(
         );
       }
     } else {
-      initialRun.status = 'PARTIAL';
-      if (initialRun.totalAdsInspected === 0) {
-        initialRun.stopReason = 'NO_NEW_RESULTS_OBSERVED';
-      } else if (isStalled) {
-        initialRun.stopReason = 'SOURCE_PROGRESS_STALLED';
+      if (initialRun.totalAdsInspected === 0 && encounteredExtractionError) {
+        initialRun.status = 'FAILED';
+        initialRun.stopReason = 'EXTRACTION_ERROR';
+        initialRun.challengeReason = 'Extraction failed: Meta Ad Library card structure could not be extracted.';
+        broadcastProgress(initialRun, 'FAILED', `Extraction error: Could not extract ad cards from page.`);
       } else {
-        initialRun.stopReason = 'SOURCE_EXHAUSTED';
+        initialRun.status = 'PARTIAL';
+        if (initialRun.totalAdsInspected === 0) {
+          initialRun.stopReason = 'NO_NEW_RESULTS_OBSERVED';
+        } else if (isStalled) {
+          initialRun.stopReason = 'SOURCE_PROGRESS_STALLED';
+        } else {
+          initialRun.stopReason = 'SOURCE_EXHAUSTED';
+        }
+        initialRun.completedAt = new Date().toISOString();
+        const completionMsg = isAutoDiscovery
+          ? `Auto-discovery finished (${initialRun.status} / ${initialRun.stopReason}): ${finalLeadCount} qualifying unique relevant leads discovered from ${initialRun.totalAdsInspected} public ads.`
+          : `Research finished (${initialRun.status} / ${initialRun.stopReason}): ${finalLeadCount} of ${targetLeadCount} requested unique relevant leads observed from ${initialRun.totalAdsInspected} public ads.`;
+        broadcastProgress(
+          initialRun,
+          initialRun.status,
+          completionMsg
+        );
       }
-      initialRun.completedAt = new Date().toISOString();
-      const completionMsg = isAutoDiscovery
-        ? `Auto-discovery finished (${initialRun.status} / ${initialRun.stopReason}): ${finalLeadCount} qualifying unique relevant leads discovered from ${initialRun.totalAdsInspected} public ads.`
-        : `Research finished (${initialRun.status} / ${initialRun.stopReason}): ${finalLeadCount} of ${targetLeadCount} requested unique relevant leads observed from ${initialRun.totalAdsInspected} public ads.`;
-      broadcastProgress(
-        initialRun,
-        initialRun.status,
-        completionMsg
-      );
     }
 
   } catch (err: any) {

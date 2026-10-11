@@ -203,6 +203,7 @@ export const ExtensionApp: React.FC = () => {
 
     // Map to RunStatusViewModel
     const stageStates: Record<string, any> = {};
+    const warningMessages: string[] = [];
     if (run.status === 'COMPLETED') {
       stageStates.SOURCE_PLANNING = 'COMPLETED';
       stageStates.SOURCE_EXECUTION = 'COMPLETED';
@@ -213,6 +214,25 @@ export const ExtensionApp: React.FC = () => {
     } else if (isJobRunning(run.status)) {
       stageStates.SOURCE_PLANNING = 'COMPLETED';
       stageStates.SOURCE_EXECUTION = 'IN_PROGRESS';
+    } else if (run.status === 'FAILED' || run.stopReason === 'EXTRACTION_ERROR') {
+      stageStates.SOURCE_PLANNING = 'COMPLETED';
+      stageStates.SOURCE_EXECUTION = 'FAILED';
+      warningMessages.push(`Extraction failed: ${run.challengeReason || 'Meta Ad Library card structure could not be extracted.'}`);
+    } else if (run.status === 'CHALLENGED' || run.status === 'RATE_LIMITED' || run.status === 'BLOCKED') {
+      stageStates.SOURCE_PLANNING = 'COMPLETED';
+      stageStates.SOURCE_EXECUTION = 'BLOCKED';
+      warningMessages.push(`Security challenge or rate-limit active: ${run.challengeReason || 'Access restricted.'}`);
+    } else if (run.status === 'CANCELLED') {
+      stageStates.SOURCE_PLANNING = 'COMPLETED';
+      stageStates.SOURCE_EXECUTION = 'SKIPPED';
+      warningMessages.push('Research was cancelled by user.');
+    } else if (run.status === 'PARTIAL') {
+      stageStates.SOURCE_PLANNING = 'COMPLETED';
+      stageStates.SOURCE_EXECUTION = 'COMPLETED';
+      stageStates.NORMALIZATION = 'COMPLETED';
+      if (run.stopReason === 'NO_NEW_RESULTS_OBSERVED') {
+        warningMessages.push('Search completed: no matching ad results observed on public Meta Ad Library.');
+      }
     }
 
     const mockRun = {
@@ -222,6 +242,8 @@ export const ExtensionApp: React.FC = () => {
       config: { selectedSources: [selectedSource] },
       stageStates,
       sourceStates: { [selectedSource]: run.status || 'UNKNOWN' },
+      warningMessages,
+      hasWarnings: warningMessages.length > 0,
       checkpoint: undefined
     } as any;
 

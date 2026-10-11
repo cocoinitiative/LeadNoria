@@ -20,6 +20,7 @@ import type {
   EntityRelationshipType,
   EntityMergeRecord
 } from './types.ts';
+import { sanitizeAdLibraryIds } from './metaAdapter.ts';
 
 // Generic shorteners, shared hosting, and multi-tenant marketplace platforms
 // Domains in this set MUST NEVER act as sole identity anchors for entity merging
@@ -546,14 +547,33 @@ export function mergeCandidateIntoEntity(
   decision: EntityMergeDecision,
   sourceQuery?: string
 ): void {
-  // 1. Increment ad counters
-  target.activeAdCount = (target.activeAdCount || 0) + 1;
-  target.adCount = (target.adCount || 0) + 1;
+  // 0. Initialize activeAdLibraryIds from pre-existing target state before merging new candidate
+  if (!target.activeAdLibraryIds) {
+    if (typeof target.activeAdCount === 'number' && target.activeAdCount > 0) {
+      target.activeAdLibraryIds = (target.adLibraryIds || []).slice(0, target.activeAdCount);
+    } else {
+      target.activeAdLibraryIds = [];
+    }
+  }
 
-  // 2. Preserve unique Ad Library IDs
-  if (!target.adLibraryIds.includes(cand.libraryId)) {
+  // 1. Preserve unique, sanitized Ad Library IDs
+  if (!target.adLibraryIds) {
+    target.adLibraryIds = [];
+  }
+  if (/^[0-9]{5,25}$/.test(cand.libraryId) && !target.adLibraryIds.includes(cand.libraryId)) {
     target.adLibraryIds.push(cand.libraryId);
   }
+  target.adLibraryIds = sanitizeAdLibraryIds(target.adLibraryIds);
+
+  // 2. Synchronize accurate ad counts based on validated unique IDs
+  target.adCount = target.adLibraryIds.length;
+  if (cand.isActive !== false && /^[0-9]{5,25}$/.test(cand.libraryId)) {
+    if (!target.activeAdLibraryIds.includes(cand.libraryId)) {
+      target.activeAdLibraryIds.push(cand.libraryId);
+    }
+  }
+  target.activeAdLibraryIds = target.activeAdLibraryIds.filter(id => target.adLibraryIds.includes(id));
+  target.activeAdCount = target.activeAdLibraryIds.length;
 
   // 3. Preserve unique matched queries & keywords
   if (sourceQuery) {
