@@ -16074,7 +16074,10 @@ function compileResearchIntent(modeOrConfig, keywords = [], presetId, locationCo
   let pId = presetId;
   let loc = locationCode;
   let opts = options;
-  if (typeof modeOrConfig === "object" && modeOrConfig !== null) {
+  if (typeof modeOrConfig === "string") {
+    mode = modeOrConfig;
+    cleanKeywords = (keywords || []).map((k) => k.trim()).filter(Boolean);
+  } else if (modeOrConfig && typeof modeOrConfig === "object") {
     mode = modeOrConfig.mode || "CUSTOM";
     cleanKeywords = (modeOrConfig.keywords || modeOrConfig.targetNiches || []).map((k) => k.trim()).filter(Boolean);
     pId = modeOrConfig.presetId;
@@ -16084,11 +16087,9 @@ function compileResearchIntent(modeOrConfig, keywords = [], presetId, locationCo
       allowProbableLocal: modeOrConfig.allowProbableLocal,
       requiredCtaTypes: modeOrConfig.requiredCtaTypes,
       requiredDestinationTypes: modeOrConfig.requiredDestinationTypes,
+      requireWebsiteFound: modeOrConfig.requireWebsiteFound,
       ...options
     };
-  } else {
-    mode = modeOrConfig;
-    cleanKeywords = (keywords || []).map((k) => k.trim()).filter(Boolean);
   }
   if (mode === "PRESET" && pId) {
     const preset = RESEARCH_PRESETS.find((p) => p.preset_id === pId);
@@ -16108,7 +16109,8 @@ function compileResearchIntent(modeOrConfig, keywords = [], presetId, locationCo
         strictLocalMode: opts?.strictLocalMode,
         allowProbableLocal: opts?.allowProbableLocal,
         requiredCtaTypes: opts?.requiredCtaTypes,
-        requiredDestinationTypes: opts?.requiredDestinationTypes
+        requiredDestinationTypes: opts?.requiredDestinationTypes,
+        requireWebsiteFound: opts?.requireWebsiteFound
       };
     }
   }
@@ -16122,7 +16124,8 @@ function compileResearchIntent(modeOrConfig, keywords = [], presetId, locationCo
     strictLocalMode: opts?.strictLocalMode,
     allowProbableLocal: opts?.allowProbableLocal,
     requiredCtaTypes: opts?.requiredCtaTypes,
-    requiredDestinationTypes: opts?.requiredDestinationTypes
+    requiredDestinationTypes: opts?.requiredDestinationTypes,
+    requireWebsiteFound: opts?.requireWebsiteFound
   };
 }
 var RELEVANCE_STRATEGY_VERSION, RELEVANCE_ENGINE_VERSION, BOUNDED_TAXONOMY, NEGATIVE_CATEGORIES, ACCESSORY_ONLY_INDICATORS, STOP_WORDS, LeadRelevanceEngine;

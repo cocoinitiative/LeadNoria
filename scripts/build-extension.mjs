@@ -270,170 +270,38 @@ button, input, select, textarea { font-family: inherit; }
 fs.writeFileSync(path.join(outDir, 'styles.css'), cssContent);
 console.log('[build-extension] Written styles.css');
 
-// 8. Package distribution ZIPs for GitHub Releases
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-const archiver = require('archiver');
+// 8. Package distribution ZIPs (Isolated Safe Packaging)
+import { createSafeZipArchive } from './packaging-safety.mjs';
 
-function createZipArchive(sourceDir, zipPath) {
-  return new Promise((resolve, reject) => {
-    const parentDir = path.dirname(zipPath);
-    if (!fs.existsSync(parentDir)) {
-      fs.mkdirSync(parentDir, { recursive: true });
-    }
+const isPackaging = process.argv.includes('--package') || process.argv.includes('--zip');
+const outArgIndex = Math.max(process.argv.indexOf('--out'), process.argv.indexOf('--dest'));
+const explicitOut = outArgIndex !== -1 && process.argv[outArgIndex + 1] ? process.argv[outArgIndex + 1] : null;
+const allowOverwrite = process.argv.includes('--overwrite') || process.argv.includes('--force');
 
-    const output = fs.createWriteStream(zipPath);
-    const archive = new archiver.ZipArchive({ zlib: { level: 9 } });
-
-    output.on('close', () => {
-      console.log(`[build-extension] Packaged release ZIP: ${zipPath} (${(archive.pointer() / 1024).toFixed(1)} KB)`);
-      resolve();
-    });
-
-    archive.on('error', (err) => reject(err));
-    archive.pipe(output);
-    archive.directory(sourceDir, false);
-    archive.finalize();
-  });
-}
-
-if (process.argv.includes('--unpacked-only')) {
-  console.log('[build-extension] --unpacked-only: Successfully built unpacked extension in', outDir);
+if (!isPackaging) {
+  console.log('[build-extension] Unpacked build completed successfully in', outDir);
+  console.log('[build-extension] Mode: Unpacked development build (ZIP packaging skipped by default)');
   process.exit(0);
 }
 
-const releaseZipPath1 = path.join(rootDir, 'extension.zip');
-const releaseZipPath3 = path.join(rootDir, 'dist/leadnoria-v1.0.0.zip');
-const releaseZipPath4 = path.join(rootDir, 'dist/leadnoria-v1.1.0.zip');
-const releaseZipPath5 = path.join(rootDir, 'dist/leadnoria-v1.2.0.zip');
-const releaseZipPath6 = path.join(rootDir, 'dist/leadnoria-v1.2.1.zip');
-const releaseZipPath7 = path.join(rootDir, 'dist/leadnoria-v1.3.0.zip');
-const releaseZipPath8 = path.join(rootDir, 'dist/leadnoria-v1.4.0.zip');
-const releaseZipPath9 = path.join(rootDir, 'dist/leadnoria-v1.5.0.zip');
-const releaseZipPath10 = path.join(rootDir, 'dist/leadnoria-v1.6.0.zip');
-const releaseZipPath11 = path.join(rootDir, 'dist/leadnoria-v1.7.0.zip');
-const releaseZipPath12 = path.join(rootDir, 'dist/leadnoria-v1.7.1.zip');
-const releaseZipPath13 = path.join(rootDir, 'dist/leadnoria-v1.7.2.zip');
-const releaseZipPath14 = path.join(rootDir, 'dist/leadnoria-v1.7.3.zip');
-const releaseZipPath15 = path.join(rootDir, 'dist/leadnoria-v1.7.4.zip');
-const releaseZipPath16 = path.join(rootDir, 'dist/leadnoria-v1.7.5.zip');
-const releaseZipPath17 = path.join(rootDir, 'dist/leadnoria-v1.7.6.zip');
+// Mode B: Explicit Safe Local Packaging
+console.log('[build-extension] Packaging mode requested (--package)...');
+const defaultPackageDir = path.join(rootDir, 'dist/local');
+const defaultPackagePath = path.join(defaultPackageDir, `leadnoria-v${authoritativeVersion}-local.zip`);
+const targetZip = explicitOut ? path.resolve(process.cwd(), explicitOut) : defaultPackagePath;
 
-// v1.5.0 is IMMUTABLE — never overwrite release archives
-if (!fs.existsSync(releaseZipPath9)) {
-  await createZipArchive(outDir, releaseZipPath9);
-} else {
-  console.log('[build-extension] Preserved IMMUTABLE V1.5.0 release archive: dist/leadnoria-v1.5.0.zip');
-}
+console.log('[build-extension] Target package destination:', targetZip);
 
-// v1.6.0 is IMMUTABLE — never overwrite release archives
-if (!fs.existsSync(releaseZipPath10)) {
-  await createZipArchive(outDir, releaseZipPath10);
-} else {
-  console.log('[build-extension] Preserved IMMUTABLE V1.6.0 release archive: dist/leadnoria-v1.6.0.zip');
-}
+try {
+  const packResult = await createSafeZipArchive(outDir, targetZip, {
+    rootDir,
+    allowOverwrite
+  });
 
-// v1.7.0 is IMMUTABLE — never overwrite release archives
-if (!fs.existsSync(releaseZipPath11)) {
-  await createZipArchive(outDir, releaseZipPath11);
-} else {
-  console.log('[build-extension] Preserved IMMUTABLE V1.7.0 release archive: dist/leadnoria-v1.7.0.zip');
-}
-
-// v1.7.1 is IMMUTABLE — never overwrite release archives
-if (!fs.existsSync(releaseZipPath12)) {
-  await createZipArchive(outDir, releaseZipPath12);
-} else {
-  console.log('[build-extension] Preserved IMMUTABLE V1.7.1 release archive: dist/leadnoria-v1.7.1.zip');
-}
-
-// v1.7.2 is IMMUTABLE — never overwrite release archives
-if (!fs.existsSync(releaseZipPath13)) {
-  await createZipArchive(outDir, releaseZipPath13);
-} else {
-  console.log('[build-extension] Preserved IMMUTABLE V1.7.2 release archive: dist/leadnoria-v1.7.2.zip');
-}
-
-// v1.7.3 is IMMUTABLE — never overwrite release archives
-if (!fs.existsSync(releaseZipPath14)) {
-  await createZipArchive(outDir, releaseZipPath14);
-} else {
-  console.log('[build-extension] Preserved IMMUTABLE V1.7.3 release archive: dist/leadnoria-v1.7.3.zip');
-}
-
-// v1.7.4 is IMMUTABLE — never overwrite release archives
-if (!fs.existsSync(releaseZipPath15)) {
-  await createZipArchive(outDir, releaseZipPath15);
-} else {
-  console.log('[build-extension] Preserved IMMUTABLE V1.7.4 release archive: dist/leadnoria-v1.7.4.zip');
-}
-
-// v1.7.5 is IMMUTABLE — sealed authoritative release archive
-if (!fs.existsSync(releaseZipPath16)) {
-  await createZipArchive(outDir, releaseZipPath16);
-  console.log('[build-extension] Successfully built independent V1.7.5 production package: dist/leadnoria-v1.7.5.zip');
-} else {
-  console.log('[build-extension] Preserved IMMUTABLE V1.7.5 authoritative release archive: dist/leadnoria-v1.7.5.zip');
-}
-
-// v1.7.6 Release Candidate Package
-if (fs.existsSync(releaseZipPath17)) {
-  fs.unlinkSync(releaseZipPath17);
-}
-await createZipArchive(outDir, releaseZipPath17);
-console.log('[build-extension] Successfully built independent V1.7.6 production package: dist/leadnoria-v1.7.6.zip');
-
-// Active Source-to-Archive Drift Detection for V1.7.6:
-const driftResult = verifyZipMatchesDirectory(releaseZipPath17, outDir);
-if (!driftResult.valid) {
-  console.error(`[build-extension] FATAL ERROR: Source-to-archive drift detected for ${releaseZipPath17}!`);
-  console.error(`[build-extension] Reason: ${driftResult.reason}`);
-  if (driftResult.drifted) {
-    for (const d of driftResult.drifted) {
-      console.error(`  * ${d.file}: ${d.issue}`);
-    }
-  }
+  console.log(`[build-extension] Successfully created isolated package: ${packResult.zipPath}`);
+  console.log(`[build-extension] Package size: ${(packResult.size / 1024).toFixed(1)} KB, SHA-256: ${packResult.sha256}`);
+  console.log(`[build-extension] Verified archive integrity: all ${packResult.fileCount} runtime files match directory.`);
+} catch (err) {
+  console.error('[build-extension] Packaging failed:', err.message);
   process.exit(1);
 }
-console.log(`[build-extension] Verified source-to-archive consistency: all ${driftResult.fileCount} compiled files match dist/leadnoria-v1.7.6.zip`);
-
-// extension.zip is PRESERVED as historical v1.7.5 production archive — DO NOT OVERWRITE
-if (fs.existsSync(releaseZipPath1)) {
-  console.log('[build-extension] Preserved IMMUTABLE V1.7.5 production archive: extension.zip');
-}
-
-// v1.4.0 is IMMUTABLE — never overwrite
-if (!fs.existsSync(releaseZipPath8)) {
-  await createZipArchive(outDir, releaseZipPath8);
-} else {
-  console.log('[build-extension] Preserved IMMUTABLE V1.4.0 release archive: dist/leadnoria-v1.4.0.zip');
-}
-if (!fs.existsSync(releaseZipPath7)) {
-  await createZipArchive(outDir, releaseZipPath7);
-} else {
-  console.log('[build-extension] Preserved frozen V1.3.0 release archive: dist/leadnoria-v1.3.0.zip');
-}
-if (!fs.existsSync(releaseZipPath6)) {
-  await createZipArchive(outDir, releaseZipPath6);
-} else {
-  console.log('[build-extension] Preserved frozen V1.2.1 release archive: dist/leadnoria-v1.2.1.zip');
-}
-if (!fs.existsSync(releaseZipPath3)) {
-  await createZipArchive(outDir, releaseZipPath3);
-} else {
-  console.log('[build-extension] Preserved frozen V1.0 release archive: dist/leadnoria-v1.0.0.zip');
-}
-if (!fs.existsSync(releaseZipPath4)) {
-  await createZipArchive(outDir, releaseZipPath4);
-} else {
-  console.log('[build-extension] Preserved frozen V1.1 release archive: dist/leadnoria-v1.1.0.zip');
-}
-if (!fs.existsSync(releaseZipPath5)) {
-  await createZipArchive(outDir, releaseZipPath5);
-} else {
-  console.log('[build-extension] Preserved historical V1.2.0 release archive: dist/leadnoria-v1.2.0.zip');
-}
-
-console.log('[build-extension] Extension build completed successfully in ./extension');
-console.log('[build-extension] Release distribution package ready in dist/leadnoria-v1.7.6.zip');
-console.log('[build-extension] Historical archives preserved as immutable: dist/leadnoria-v1.7.5.zip and extension.zip');

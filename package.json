@@ -6,14 +6,17 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs && node scripts/build-extension.mjs",
-    "build:extension": "node scripts/build-extension.mjs",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs && node scripts/build-extension.mjs --unpacked-only",
+    "build:extension": "node scripts/build-extension.mjs --unpacked-only",
+    "package:extension": "node scripts/build-extension.mjs --package",
+    "verify:offline": "node scripts/verify-offline.mjs",
+    "test": "node scripts/verify-offline.mjs",
+    "typecheck": "tsc --noEmit",
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
     "dotenv": "^17.2.3",

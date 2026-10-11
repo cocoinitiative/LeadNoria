@@ -15,6 +15,7 @@ export type JobStatus =
   | 'NORMALIZING'
   | 'COMPLETED'
   | 'PARTIAL'
+  | 'PAUSED'
   | 'CANCELLED'
   | 'BLOCKED'
   | 'FAILED'
@@ -536,6 +537,7 @@ export interface StartResearchPayload {
   researchMode?: 'AUTO_DISCOVERY';
   maxFinalUniqueRelevantLeads?: number;
   // Legacy backward-compatibility
+  maxResults?: number;
   // Geographic qualification mode
   strictLocalMode?: boolean;
   allowProbableLocal?: boolean;
@@ -579,6 +581,7 @@ export type WebsiteVerificationStatus =
   | 'NOT_A_BUSINESS_SITE'
   | 'INVALID'
   | 'BLOCKED'
+  | 'DISABLED'
   | 'NO_WEBSITE';
 
 export type WebsiteIdentityMatchLevel = 'STRONG' | 'MODERATE' | 'WEAK' | 'CONTRADICTORY' | 'UNKNOWN';

@@ -1513,7 +1513,10 @@ function compileResearchIntent(modeOrConfig, keywords = [], presetId, locationCo
   let pId = presetId;
   let loc = locationCode;
   let opts = options;
-  if (typeof modeOrConfig === "object" && modeOrConfig !== null) {
+  if (typeof modeOrConfig === "string") {
+    mode = modeOrConfig;
+    cleanKeywords = (keywords || []).map((k) => k.trim()).filter(Boolean);
+  } else if (modeOrConfig && typeof modeOrConfig === "object") {
     mode = modeOrConfig.mode || "CUSTOM";
     cleanKeywords = (modeOrConfig.keywords || modeOrConfig.targetNiches || []).map((k) => k.trim()).filter(Boolean);
     pId = modeOrConfig.presetId;
@@ -1523,11 +1526,9 @@ function compileResearchIntent(modeOrConfig, keywords = [], presetId, locationCo
       allowProbableLocal: modeOrConfig.allowProbableLocal,
       requiredCtaTypes: modeOrConfig.requiredCtaTypes,
       requiredDestinationTypes: modeOrConfig.requiredDestinationTypes,
+      requireWebsiteFound: modeOrConfig.requireWebsiteFound,
       ...options
     };
-  } else {
-    mode = modeOrConfig;
-    cleanKeywords = (keywords || []).map((k) => k.trim()).filter(Boolean);
   }
   if (mode === "PRESET" && pId) {
     const preset = RESEARCH_PRESETS.find((p) => p.preset_id === pId);
@@ -1547,7 +1548,8 @@ function compileResearchIntent(modeOrConfig, keywords = [], presetId, locationCo
         strictLocalMode: opts?.strictLocalMode,
         allowProbableLocal: opts?.allowProbableLocal,
         requiredCtaTypes: opts?.requiredCtaTypes,
-        requiredDestinationTypes: opts?.requiredDestinationTypes
+        requiredDestinationTypes: opts?.requiredDestinationTypes,
+        requireWebsiteFound: opts?.requireWebsiteFound
       };
     }
   }
@@ -1561,7 +1563,8 @@ function compileResearchIntent(modeOrConfig, keywords = [], presetId, locationCo
     strictLocalMode: opts?.strictLocalMode,
     allowProbableLocal: opts?.allowProbableLocal,
     requiredCtaTypes: opts?.requiredCtaTypes,
-    requiredDestinationTypes: opts?.requiredDestinationTypes
+    requiredDestinationTypes: opts?.requiredDestinationTypes,
+    requireWebsiteFound: opts?.requireWebsiteFound
   };
 }
 var RELEVANCE_STRATEGY_VERSION, RELEVANCE_ENGINE_VERSION, BOUNDED_TAXONOMY, NEGATIVE_CATEGORIES, ACCESSORY_ONLY_INDICATORS, STOP_WORDS, LeadRelevanceEngine;
@@ -3293,7 +3296,18 @@ function normalizeStoredLead(raw) {
     webState = raw.destinationUrl ? "found" : "unknown";
   }
   const adIds = Array.isArray(raw.adLibraryIds) ? Array.from(new Set(raw.adLibraryIds.filter((id) => typeof id === "string" && /^[0-9]{5,25}$/.test(id)))) : [];
-  const activeAdIds = Array.isArray(raw.activeAdLibraryIds) ? Array.from(new Set(raw.activeAdLibraryIds.filter((id) => adIds.includes(id)))) : [...adIds];
+  const activeAdIds = Array.isArray(raw.activeAdLibraryIds) ? Array.from(new Set(raw.activeAdLibraryIds.filter((id) => typeof id === "string" && adIds.includes(id)))) : [...adIds];
+  const qualResult = evaluateLeadQualificationGates({
+    name: cleanName,
+    adLibraryIds: adIds,
+    relevanceDecision,
+    geographicClassification: geoClassification,
+    primaryCtaType: ctaSummary.primaryCtaType,
+    observedCtaTypes: ctaSummary.observedCtaTypes,
+    primaryDestinationType: ctaSummary.primaryDestinationType,
+    observedDestinationTypes: ctaSummary.observedDestinationTypes,
+    websiteState: webState
+  });
   return {
     ...raw,
     name: cleanName,
@@ -3322,39 +3336,9 @@ function normalizeStoredLead(raw) {
     relevanceDecision,
     relevanceConfidence: raw.relevanceConfidence || (relevanceDecision === "RELEVANT" ? "HIGH" : "LOW"),
     relevanceScore: raw.relevanceScore,
-    status: evaluateLeadQualificationGates({
-      name: cleanName,
-      adLibraryIds: adIds,
-      relevanceDecision,
-      geographicClassification: geoClassification,
-      primaryCtaType: ctaSummary.primaryCtaType,
-      observedCtaTypes: ctaSummary.observedCtaTypes,
-      primaryDestinationType: ctaSummary.primaryDestinationType,
-      observedDestinationTypes: ctaSummary.observedDestinationTypes,
-      websiteState: webState
-    }).status,
-    qualificationFailedGates: evaluateLeadQualificationGates({
-      name: cleanName,
-      adLibraryIds: adIds,
-      relevanceDecision,
-      geographicClassification: geoClassification,
-      primaryCtaType: ctaSummary.primaryCtaType,
-      observedCtaTypes: ctaSummary.observedCtaTypes,
-      primaryDestinationType: ctaSummary.primaryDestinationType,
-      observedDestinationTypes: ctaSummary.observedDestinationTypes,
-      websiteState: webState
-    }).failedGates,
-    qualificationReasons: evaluateLeadQualificationGates({
-      name: cleanName,
-      adLibraryIds: adIds,
-      relevanceDecision,
-      geographicClassification: geoClassification,
-      primaryCtaType: ctaSummary.primaryCtaType,
-      observedCtaTypes: ctaSummary.observedCtaTypes,
-      primaryDestinationType: ctaSummary.primaryDestinationType,
-      observedDestinationTypes: ctaSummary.observedDestinationTypes,
-      websiteState: webState
-    }).reasons,
+    status: qualResult.status,
+    qualificationFailedGates: qualResult.failedGates,
+    qualificationReasons: qualResult.reasons,
     schemaVersion: 2
   };
 }
@@ -6284,7 +6268,7 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
       evidenceExplanation: v3Result?.explanation,
       uniqueEvidenceSignals: v3Result?.uniqueEvidenceSignals,
       observedEvidenceOccurrences: v3Result?.observedEvidenceOccurrences,
-      evaluationStatus: (v3Result?.decision ?? evalResult?.decision) === "RELEVANT" ? "RELEVANT" : "UNASSESSED",
+      evaluationStatus: (v3Result?.decision ?? evalResult?.decision) === "RELEVANT" ? "RELEVANT" : (v3Result?.decision ?? evalResult?.decision) === "NOT_RELEVANT" ? "REJECTED" : (v3Result?.decision ?? evalResult?.decision) === "UNCERTAIN" ? "UNCERTAIN" : void 0,
       creativeSignals: extractCreativeSignalsFromCandidate(cand)
     };
     const qualGate = evaluateLeadQualificationGates(newLead, intent);

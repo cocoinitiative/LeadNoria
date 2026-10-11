@@ -61,6 +61,7 @@ export interface ResearchIntent {
   allowProbableLocal?: boolean;
   requiredCtaTypes?: CtaType[];
   requiredDestinationTypes?: DestinationType[];
+  requireWebsiteFound?: boolean;
 }
 
 export interface CandidateEvidence {
@@ -505,6 +506,7 @@ export function compileResearchIntent(
     allowProbableLocal?: boolean;
     requiredCtaTypes?: CtaType[];
     requiredDestinationTypes?: DestinationType[];
+    requireWebsiteFound?: boolean;
   },
   keywords: string[] = [],
   presetId?: string,
@@ -514,6 +516,7 @@ export function compileResearchIntent(
     allowProbableLocal?: boolean;
     requiredCtaTypes?: CtaType[];
     requiredDestinationTypes?: DestinationType[];
+    requireWebsiteFound?: boolean;
   }
 ): ResearchIntent {
   let mode: ResearchMode = 'CUSTOM';
@@ -522,7 +525,10 @@ export function compileResearchIntent(
   let loc = locationCode;
   let opts = options;
 
-  if (typeof modeOrConfig === 'object' && modeOrConfig !== null) {
+  if (typeof modeOrConfig === 'string') {
+    mode = modeOrConfig;
+    cleanKeywords = (keywords || []).map(k => k.trim()).filter(Boolean);
+  } else if (modeOrConfig && typeof modeOrConfig === 'object') {
     mode = modeOrConfig.mode || 'CUSTOM';
     cleanKeywords = (modeOrConfig.keywords || modeOrConfig.targetNiches || []).map(k => k.trim()).filter(Boolean);
     pId = modeOrConfig.presetId;
@@ -532,11 +538,9 @@ export function compileResearchIntent(
       allowProbableLocal: modeOrConfig.allowProbableLocal,
       requiredCtaTypes: modeOrConfig.requiredCtaTypes,
       requiredDestinationTypes: modeOrConfig.requiredDestinationTypes,
+      requireWebsiteFound: modeOrConfig.requireWebsiteFound,
       ...options
     };
-  } else {
-    mode = modeOrConfig;
-    cleanKeywords = (keywords || []).map(k => k.trim()).filter(Boolean);
   }
 
   if (mode === 'PRESET' && pId) {
@@ -557,7 +561,8 @@ export function compileResearchIntent(
         strictLocalMode: opts?.strictLocalMode,
         allowProbableLocal: opts?.allowProbableLocal,
         requiredCtaTypes: opts?.requiredCtaTypes,
-        requiredDestinationTypes: opts?.requiredDestinationTypes
+        requiredDestinationTypes: opts?.requiredDestinationTypes,
+        requireWebsiteFound: opts?.requireWebsiteFound
       };
     }
   }
@@ -572,7 +577,8 @@ export function compileResearchIntent(
     strictLocalMode: opts?.strictLocalMode,
     allowProbableLocal: opts?.allowProbableLocal,
     requiredCtaTypes: opts?.requiredCtaTypes,
-    requiredDestinationTypes: opts?.requiredDestinationTypes
+    requiredDestinationTypes: opts?.requiredDestinationTypes,
+    requireWebsiteFound: opts?.requireWebsiteFound
   };
 }
 

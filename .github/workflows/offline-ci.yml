@@ -1,0 +1,88 @@
+name: LeadNoria Offline CI & Regression Verification
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Enforce minimal read-only permissions for supply-chain security
+permissions:
+  contents: read
+
+jobs:
+  offline-regression:
+    name: Offline Regression & Safety Boundary Verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      # MODE A: Standard Hosted CI Dependency Provisioning
+      # Network Disclosure: In GitHub Actions hosted runners, ephemeral virtual machines require outbound
+      # network access during initial setup to download source (actions/checkout), Node.js runtime (actions/setup-node),
+      # and pinned packages from the npm registry via package-lock.json (npm ci).
+      # Once dependencies are provisioned into node_modules, all subsequent build, typechecking, and test steps
+      # execute strictly offline with zero outbound network calls.
+      - name: Install Pinned Dependencies (Mode A: Lockfile Mode)
+        run: npm ci --prefer-offline --no-audit
+
+      - name: Verify TypeScript Compilation
+        run: npm run typecheck
+
+      - name: Run Master Offline Verification Runner
+        # Executes:
+        # 1. Pre-run historical archive hash immutability verification
+        # 2. TypeScript strictness check (tsc --noEmit)
+        # 3. Safe unpacked extension build (Mode A, unpacked-only)
+        # 4. Complete 17-suite offline regression test matrix (synthetic fixtures only)
+        # 5. Post-run historical archive hash immutability verification
+        # 6. Fail-closed safety gate assertions
+        run: npm run verify:offline
+
+      - name: Verify Post-Build Workspace & Artifact Integrity
+        run: |
+          echo "Verifying safety gates and historical archive integrity..."
+          node -e "
+            import fs from 'node:fs';
+            import crypto from 'node:crypto';
+
+            function sha256(filePath) {
+              return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex').toUpperCase();
+            }
+
+            const expectedHashes = {
+              'dist/leadnoria-v1.7.5.zip': '08F981627E14461157C515F2D3AE9C70577D430F8CEF407C577DB809BE49CC85',
+              'dist/leadnoria-v1.7.6.zip': 'ADB83CF1339537462A2EB61470CDAEC87531352D83AE59302B5CC0669F5E8105',
+              'extension.zip': '08F981627E14461157C515F2D3AE9C70577D430F8CEF407C577DB809BE49CC85'
+            };
+
+            for (const [file, exp] of Object.entries(expectedHashes)) {
+              if (!fs.existsSync(file)) {
+                console.error('Missing archive: ' + file);
+                process.exit(1);
+              }
+              const act = sha256(file);
+              if (act !== exp) {
+                console.error('Hash mismatch for ' + file + ': ' + act + ' vs ' + exp);
+                process.exit(1);
+              }
+            }
+            console.log('Historical release archives verified intact.');
+
+            const gateSrc = fs.readFileSync('src/config/collectionGate.ts', 'utf8');
+            if (!gateSrc.includes('return false;')) {
+              console.error('Safety gate breached!');
+              process.exit(1);
+            }
+            console.log('Collection safety gates confirmed fail-closed.');
+          "

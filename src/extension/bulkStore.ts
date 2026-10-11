@@ -107,8 +107,24 @@ export function normalizeStoredLead(raw: any): ExtensionLead {
     webState = raw.destinationUrl ? 'found' : 'unknown';
   }
 
-  const adIds = Array.isArray(raw.adLibraryIds) ? Array.from(new Set(raw.adLibraryIds.filter((id: any) => typeof id === 'string' && /^[0-9]{5,25}$/.test(id)))) : [];
-  const activeAdIds = Array.isArray(raw.activeAdLibraryIds) ? Array.from(new Set(raw.activeAdLibraryIds.filter((id: any) => adIds.includes(id)))) : [...adIds];
+  const adIds: string[] = Array.isArray(raw.adLibraryIds)
+    ? Array.from(new Set(raw.adLibraryIds.filter((id: any): id is string => typeof id === 'string' && /^[0-9]{5,25}$/.test(id))))
+    : [];
+  const activeAdIds: string[] = Array.isArray(raw.activeAdLibraryIds)
+    ? Array.from(new Set(raw.activeAdLibraryIds.filter((id: any): id is string => typeof id === 'string' && adIds.includes(id))))
+    : [...adIds];
+
+  const qualResult = evaluateLeadQualificationGates({
+    name: cleanName,
+    adLibraryIds: adIds,
+    relevanceDecision,
+    geographicClassification: geoClassification,
+    primaryCtaType: ctaSummary.primaryCtaType,
+    observedCtaTypes: ctaSummary.observedCtaTypes,
+    primaryDestinationType: ctaSummary.primaryDestinationType,
+    observedDestinationTypes: ctaSummary.observedDestinationTypes,
+    websiteState: webState
+  });
 
   return {
     ...raw,
@@ -138,39 +154,9 @@ export function normalizeStoredLead(raw: any): ExtensionLead {
     relevanceDecision,
     relevanceConfidence: raw.relevanceConfidence || (relevanceDecision === 'RELEVANT' ? 'HIGH' : 'LOW'),
     relevanceScore: raw.relevanceScore,
-    status: evaluateLeadQualificationGates({
-      name: cleanName,
-      adLibraryIds: adIds,
-      relevanceDecision,
-      geographicClassification: geoClassification,
-      primaryCtaType: ctaSummary.primaryCtaType,
-      observedCtaTypes: ctaSummary.observedCtaTypes,
-      primaryDestinationType: ctaSummary.primaryDestinationType,
-      observedDestinationTypes: ctaSummary.observedDestinationTypes,
-      websiteState: webState
-    }).status,
-    qualificationFailedGates: evaluateLeadQualificationGates({
-      name: cleanName,
-      adLibraryIds: adIds,
-      relevanceDecision,
-      geographicClassification: geoClassification,
-      primaryCtaType: ctaSummary.primaryCtaType,
-      observedCtaTypes: ctaSummary.observedCtaTypes,
-      primaryDestinationType: ctaSummary.primaryDestinationType,
-      observedDestinationTypes: ctaSummary.observedDestinationTypes,
-      websiteState: webState
-    }).failedGates,
-    qualificationReasons: evaluateLeadQualificationGates({
-      name: cleanName,
-      adLibraryIds: adIds,
-      relevanceDecision,
-      geographicClassification: geoClassification,
-      primaryCtaType: ctaSummary.primaryCtaType,
-      observedCtaTypes: ctaSummary.observedCtaTypes,
-      primaryDestinationType: ctaSummary.primaryDestinationType,
-      observedDestinationTypes: ctaSummary.observedDestinationTypes,
-      websiteState: webState
-    }).reasons,
+    status: qualResult.status,
+    qualificationFailedGates: qualResult.failedGates,
+    qualificationReasons: qualResult.reasons,
     schemaVersion: 2
   };
 }

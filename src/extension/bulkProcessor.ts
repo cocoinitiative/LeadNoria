@@ -467,7 +467,13 @@ export async function processBatch(
         evidenceExplanation: v3Result?.explanation,
         uniqueEvidenceSignals: v3Result?.uniqueEvidenceSignals,
         observedEvidenceOccurrences: v3Result?.observedEvidenceOccurrences,
-        evaluationStatus: (v3Result?.decision ?? evalResult?.decision) === 'RELEVANT' ? 'RELEVANT' : 'UNASSESSED',
+        evaluationStatus: (v3Result?.decision ?? evalResult?.decision) === 'RELEVANT'
+          ? 'RELEVANT'
+          : (v3Result?.decision ?? evalResult?.decision) === 'NOT_RELEVANT'
+            ? 'REJECTED'
+            : (v3Result?.decision ?? evalResult?.decision) === 'UNCERTAIN'
+              ? 'UNCERTAIN'
+              : undefined,
         creativeSignals: extractCreativeSignalsFromCandidate(cand)
       };
 
