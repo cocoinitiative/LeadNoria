@@ -77,6 +77,9 @@ export interface PlanReviewViewModel {
   keywords?: string[];
   countryCode?: string;
   locationName?: string;
+  strictLocal?: boolean;
+  requiredCta?: string;
+  requiredDestination?: string;
 }
 
 export interface StageStatusViewModel {
@@ -125,7 +128,7 @@ export interface ResultRowViewModel {
   primarySource: SourceType;
   provenance: string;
   isMixedProvenance: boolean;
-  relevanceDecision: 'RELEVANT' | 'UNCERTAIN' | 'NOT_RELEVANT';
+  relevanceDecision: 'RELEVANT' | 'UNCERTAIN' | 'NOT_RELEVANT' | 'UNASSESSED';
   websiteState: string;
   websiteUrl?: string;
   contactSummary: {
@@ -137,9 +140,17 @@ export interface ResultRowViewModel {
     phoneText?: string;
     emailText?: string;
   };
-  qualificationState: 'QUALIFIED' | 'NOT_QUALIFIED' | 'UNCERTAIN' | 'BLOCKED' | 'NOT_STARTED';
+  qualificationState: 'QUALIFIED' | 'NOT_QUALIFIED' | 'UNCERTAIN' | 'BLOCKED' | 'NOT_STARTED' | 'REVIEW_REQUIRED' | 'UNASSESSED';
   qualificationScore?: number;
+  scoreConfidence?: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
   geographicContext?: string;
+  targetCountryCode?: string;
+  businessCountryCode?: string;
+  geographicClassification?: string;
+  ctaType?: string;
+  destinationType?: string;
+  qualificationFailedGates?: string[];
+  qualificationReasons?: string[];
   isRestricted: boolean;
   isExportable: boolean;
   isPersistable: boolean;
@@ -213,7 +224,7 @@ export interface ResultDetailViewModel {
   provenanceClassification: 'DIRECT_SOURCE' | 'DERIVED' | 'MIXED';
 
   // Relevance
-  relevanceDecision: 'RELEVANT' | 'UNCERTAIN' | 'NOT_RELEVANT';
+  relevanceDecision: 'RELEVANT' | 'UNCERTAIN' | 'NOT_RELEVANT' | 'UNASSESSED';
   relevanceConfidence: string;
   relevanceExplanation: string;
   relevanceMatchedTerms: string[];
@@ -232,10 +243,19 @@ export interface ResultDetailViewModel {
   socialLinks: Array<{ platform: string; url: string }>;
 
   // Qualification
-  qualificationState: 'QUALIFIED' | 'NOT_QUALIFIED' | 'UNCERTAIN' | 'BLOCKED' | 'NOT_STARTED';
+  qualificationState: 'QUALIFIED' | 'NOT_QUALIFIED' | 'UNCERTAIN' | 'BLOCKED' | 'NOT_STARTED' | 'REVIEW_REQUIRED' | 'UNASSESSED';
   qualificationProfileName: string;
   qualificationProfileVersion: string;
+  qualificationScore?: number;
   qualificationScoreText?: string;
+  scoreConfidence?: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
+  targetCountryCode?: string;
+  businessCountryCode?: string;
+  geographicClassification?: string;
+  ctaType?: string;
+  destinationType?: string;
+  qualificationFailedGates?: string[];
+  qualificationReasons?: string[];
   mandatoryCriteria: QualificationCriterionViewModel[];
   optionalCriteria: QualificationCriterionViewModel[];
   qualificationSummaryExplanation: string;

@@ -19,6 +19,10 @@ export function toFriendlyStatus(status: string | null | undefined): string {
     // Qualification States
     case 'QUALIFIED':
       return 'Qualified';
+    case 'REVIEW_REQUIRED':
+      return 'Review required';
+    case 'UNASSESSED':
+      return 'Unassessed';
     case 'NOT_QUALIFIED':
       return 'Does not meet current criteria';
     case 'UNCERTAIN':
@@ -29,6 +33,84 @@ export function toFriendlyStatus(status: string | null | undefined): string {
       return 'Not evaluated';
     case 'DISQUALIFIED':
       return 'Does not meet current criteria';
+
+    // Geographic Classifications
+    case 'LOCAL_VERIFIED':
+      return 'Locally verified';
+    case 'LOCAL_PROBABLE':
+      return 'Probable local (unverified)';
+    case 'FOREIGN_VERIFIED':
+      return 'Foreign verified';
+    case 'LOCATION_UNKNOWN':
+      return 'Location unknown';
+
+    // CTA Types
+    case 'LEARN_MORE':
+      return 'Learn More';
+    case 'SHOP_NOW':
+      return 'Shop Now';
+    case 'SEND_MESSAGE':
+      return 'Send Message';
+    case 'WHATSAPP_MESSAGE':
+      return 'WhatsApp';
+    case 'CALL_NOW':
+      return 'Call Now';
+    case 'SIGN_UP':
+      return 'Sign Up';
+    case 'BOOK_NOW':
+      return 'Book Now';
+    case 'APPLY_NOW':
+      return 'Apply Now';
+    case 'GET_OFFER':
+      return 'Get Offer';
+    case 'GET_QUOTE':
+      return 'Get Quote';
+    case 'DOWNLOAD':
+      return 'Download';
+    case 'CONTACT_US':
+      return 'Contact Us';
+    case 'NO_CTA':
+      return 'No CTA';
+
+    // Destination Types
+    case 'EXTERNAL_WEBSITE':
+      return 'External website';
+    case 'INSTANT_FORM':
+      return 'Meta instant form';
+    case 'MESSAGING':
+      return 'Messaging';
+    case 'CALL':
+      return 'Phone call';
+    case 'APP_STORE':
+      return 'App Store';
+    case 'NO_VISIBLE_DESTINATION':
+      return 'No visible destination';
+    case 'OTHER':
+      return 'Other destination';
+
+    // Qualification Reason Codes
+    case 'QUALIFIED_ALL_GATES_PASSED':
+      return 'Meets all qualification requirements';
+    case 'GATE_FAIL_RELEVANCE_NOT_MET':
+      return 'Niche relevance not established';
+    case 'GATE_FAIL_RELEVANCE_UNCERTAIN':
+      return 'Niche relevance uncertain';
+    case 'GATE_FAIL_RELEVANCE_UNASSESSED':
+      return 'Niche relevance not assessed';
+    case 'GATE_FAIL_FOREIGN_VERIFIED':
+      return 'Business physically verified in foreign country';
+    case 'GATE_FAIL_LOCAL_UNVERIFIED':
+      return 'Physical location unverified (probable local)';
+    case 'GATE_FAIL_LOCATION_UNKNOWN':
+      return 'Physical business location unknown';
+    case 'GATE_FAIL_REQUIRED_CTA_MISSING':
+      return 'Required call-to-action (CTA) not observed';
+    case 'GATE_FAIL_REQUIRED_DESTINATION_MISSING':
+      return 'Required destination type not observed';
+    case 'GATE_FAIL_WEBSITE_MISSING':
+      return 'Verified business website not observed';
+    case 'GATE_FAIL_DATA_INTEGRITY':
+      return 'Essential business candidate evidence missing';
 
     // Freshness & Change States
     case 'CURRENT':

@@ -20,3 +20,6 @@ export * from './qualificationEvaluator.ts';
 // Phase 23 Business Intelligence Exports
 export * from './businessIntelligence.ts';
 
+// Phase 0.6 Qualification Gate Exports
+export * from '../qualificationGate.ts';
+

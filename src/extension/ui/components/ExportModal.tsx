@@ -10,13 +10,13 @@
  * - Accessible modal: Escape to close, focus management, disabled submission guard
  */
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ExportPreviewViewModel } from '../types.ts';
 
 interface ExportModalProps {
   isOpen: boolean;
   preview: ExportPreviewViewModel;
-  onConfirmExport: () => void;
+  onConfirmExport: (qualifiedOnly: boolean) => void;
   onCancel: () => void;
   isExporting?: boolean;
 }
@@ -28,6 +28,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   onCancel,
   isExporting = false
 }) => {
+  const [qualifiedOnly, setQualifiedOnly] = useState<boolean>(true);
   const confirmBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -100,6 +101,22 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </div>
           )}
 
+          {/* Qualification Filter Option */}
+          <label className="flex items-center gap-2 p-2 bg-slate-950/60 rounded border border-slate-800 text-[11px] text-slate-300 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={qualifiedOnly}
+              onChange={e => setQualifiedOnly(e.target.checked)}
+              className="rounded border-slate-700 bg-slate-950 text-emerald-500 focus:ring-0 cursor-pointer"
+            />
+            <div>
+              <span className="font-semibold text-slate-100 block">Strict Qualified Export</span>
+              <span className="text-[10px] text-slate-400">
+                Enforce fail-closed qualification gates (relevance, strict-local, CTA/destination)
+              </span>
+            </div>
+          </label>
+
           {/* Eligible Fields */}
           <div>
             <span className="text-[10px] uppercase tracking-wider text-slate-400 block mb-1">
@@ -142,7 +159,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             ref={confirmBtnRef}
             type="button"
             disabled={!preview.isExportReady || isExporting}
-            onClick={onConfirmExport}
+            onClick={() => onConfirmExport(qualifiedOnly)}
             className={`px-4 py-1.5 text-xs font-semibold rounded transition-colors flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer ${
               preview.isExportReady && !isExporting
                 ? 'bg-emerald-600 hover:bg-emerald-500 text-white'

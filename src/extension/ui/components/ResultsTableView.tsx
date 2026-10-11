@@ -332,8 +332,10 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
             >
               <option value="ALL">All Qualifications</option>
               <option value="QUALIFIED">Qualified</option>
+              <option value="REVIEW_REQUIRED">Review Required</option>
               <option value="NOT_QUALIFIED">Does not meet criteria</option>
               <option value="UNCERTAIN">Needs review</option>
+              <option value="UNASSESSED">Unassessed</option>
               <option value="BLOCKED">Unavailable</option>
             </select>
 
@@ -529,12 +531,27 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
                       {r.category && (
                         <span className="text-slate-300 font-medium">{r.category}</span>
                       )}
-                      {r.geographicContext && (
+                      {r.geographicClassification ? (
+                        <>
+                          <span className="text-slate-600">•</span>
+                          <span className={`text-[10px] font-medium ${
+                            r.geographicClassification === 'LOCAL_VERIFIED'
+                              ? 'text-emerald-400'
+                              : (r.geographicClassification === 'FOREIGN_VERIFIED'
+                                  ? 'text-rose-400'
+                                  : 'text-amber-400')
+                          }`}>
+                            {r.geographicClassification === 'LOCAL_VERIFIED' ? '📍' : (r.geographicClassification === 'FOREIGN_VERIFIED' ? '🌐' : '❓')} {toFriendlyStatus(r.geographicClassification)}
+                            {r.businessCountryCode ? ` [${r.businessCountryCode}]` : ''}
+                            {r.targetCountryCode && r.targetCountryCode !== r.businessCountryCode ? ` (Target: ${r.targetCountryCode})` : ''}
+                          </span>
+                        </>
+                      ) : r.geographicContext ? (
                         <>
                           <span className="text-slate-600">•</span>
                           <span>📍 {r.geographicContext}</span>
                         </>
-                      )}
+                      ) : null}
 
                       {/* Source Badges */}
                       <span className="text-slate-600">•</span>
@@ -564,6 +581,17 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
 
                 {/* Status Badges */}
                 <div className="flex flex-wrap items-center gap-1.5 justify-end">
+                  {r.qualificationScore !== undefined && (
+                    <span
+                      className="px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-300 bg-slate-800 border border-slate-700 rounded"
+                      title={`Lead Score: ${(r.qualificationScore * 100).toFixed(0)}% (Ranking aid only; does not determine eligibility)`}
+                    >
+                      Score: {(r.qualificationScore * 100).toFixed(0)}%
+                      {r.scoreConfidence && r.scoreConfidence !== 'NONE' && (
+                        <span className="text-slate-400 font-sans ml-1 text-[9px]">({r.scoreConfidence})</span>
+                      )}
+                    </span>
+                  )}
                   <StatusBadge
                     status={r.qualificationState}
                     customLabel={r.friendlyQualificationState || toFriendlyStatus(r.qualificationState)}
@@ -631,6 +659,18 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
                       {r.dataSignals.freshnessLabel}
                     </span>
                   )}
+
+                  {/* CTA & Destination Signals */}
+                  {r.ctaType && r.ctaType !== 'UNKNOWN' && (
+                    <span className="px-1.5 py-0.2 text-[9px] bg-slate-800 text-slate-300 rounded border border-slate-700">
+                      CTA: {toFriendlyStatus(r.ctaType)}
+                    </span>
+                  )}
+                  {r.destinationType && r.destinationType !== 'UNKNOWN' && (
+                    <span className="px-1.5 py-0.2 text-[9px] bg-slate-800 text-slate-300 rounded border border-slate-700">
+                      Dest: {toFriendlyStatus(r.destinationType)}
+                    </span>
+                  )}
                 </div>
 
                 {/* Quality Summary */}
@@ -646,6 +686,21 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
                   </div>
                 )}
               </div>
+
+              {/* Actionable Review Reasons for Review-Required candidates */}
+              {r.qualificationState === 'REVIEW_REQUIRED' && (
+                <div className="w-full mt-0.5 p-1.5 bg-amber-950/30 border border-amber-500/30 rounded text-[10px] text-amber-200 flex items-start gap-1.5">
+                  <span className="text-amber-400 font-bold mt-0.5" aria-hidden="true">⚠</span>
+                  <div className="flex-1">
+                    <span className="font-semibold text-amber-300 block mb-0.5">Review Required:</span>
+                    <span>
+                      {r.qualificationReasons && r.qualificationReasons.length > 0
+                        ? r.qualificationReasons.join('. ')
+                        : 'Qualification reason unavailable; review required.'}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}

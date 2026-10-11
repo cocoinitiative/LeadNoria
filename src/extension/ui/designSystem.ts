@@ -108,6 +108,48 @@ export function getSemanticStatusBadge(status: string): {
         accessibleLabel: `Status: ${status} (Excluded)`
       };
 
+    case 'REVIEW_REQUIRED':
+      return {
+        colorClass: 'text-amber-400 bg-amber-950/50 border-amber-500/40',
+        iconSymbol: '⚠',
+        accessibleLabel: `Status: Review Required`
+      };
+
+    case 'UNASSESSED':
+      return {
+        colorClass: 'text-slate-400 bg-slate-900 border-slate-700',
+        iconSymbol: '○',
+        accessibleLabel: `Status: Unassessed`
+      };
+
+    case 'LOCAL_VERIFIED':
+      return {
+        colorClass: 'text-emerald-400 bg-emerald-950/50 border-emerald-500/40',
+        iconSymbol: '📍',
+        accessibleLabel: `Geography: Local Verified`
+      };
+
+    case 'FOREIGN_VERIFIED':
+      return {
+        colorClass: 'text-rose-400 bg-rose-950/50 border-rose-500/40',
+        iconSymbol: '🌐',
+        accessibleLabel: `Geography: Foreign Verified`
+      };
+
+    case 'LOCAL_PROBABLE':
+      return {
+        colorClass: 'text-amber-400 bg-amber-950/50 border-amber-500/40',
+        iconSymbol: '?',
+        accessibleLabel: `Geography: Local Probable`
+      };
+
+    case 'LOCATION_UNKNOWN':
+      return {
+        colorClass: 'text-slate-400 bg-slate-900 border-slate-700',
+        iconSymbol: '—',
+        accessibleLabel: `Geography: Location Unknown`
+      };
+
     case 'UNCERTAIN':
     case 'AMBIGUOUS':
     case 'UNKNOWN':

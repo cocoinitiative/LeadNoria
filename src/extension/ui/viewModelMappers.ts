@@ -22,6 +22,7 @@ import {
   PipelineStageId
 } from '../pipeline/pipelineTypes.ts';
 import { MultiSourceRun } from '../pipeline/multiSourceRun.ts';
+import { ExtensionLead } from '../types.ts';
 import {
   ResultRowViewModel,
   LeadResultRowViewModel,
@@ -47,6 +48,97 @@ export function isCanonicalLeadRecord(record: any): record is CanonicalLeadRecor
     (record.schemaVersion === 'lead-intelligence-v1' ||
      ('canonicalEntityId' in record && 'canonicalBusinessName' in record && 'policy' in record))
   );
+}
+
+/**
+ * Type guard for ExtensionLead (Phase 0 - 0.6 Meta Ad Library lead).
+ */
+export function isExtensionLead(record: any): record is ExtensionLead {
+  return Boolean(
+    record &&
+    typeof record === 'object' &&
+    !isCanonicalLeadRecord(record) &&
+    ('leadId' in record || ('status' in record && ('advertiserName' in record || 'adCount' in record || 'adLibraryIds' in record)))
+  );
+}
+
+/**
+ * Maps an ExtensionLead directly into a ResultRowViewModel preserving Phase 0.6 qualification.
+ */
+export function extensionLeadToResultRowViewModel(lead: ExtensionLead): ResultRowViewModel {
+  const recordId = lead.leadId || (lead as any).entityId || `rec_${Date.now()}`;
+  const entityId = (lead as any).pageId || lead.leadId || recordId;
+  const displayName = lead.name || lead.advertiserName || 'Unknown Business';
+  const category = (lead as any).category || (lead.matchedKeywords && lead.matchedKeywords[0]) || undefined;
+
+  const rawUrl = lead.destinationUrl || (lead as any).websiteUrl;
+  const safeWeb = getSafeExternalUrl(rawUrl);
+
+  const phone = (lead as any).businessPhone || (lead as any).phone || ((lead as any).phones && (lead as any).phones[0]);
+  const email = (lead as any).businessEmail || (lead as any).email || ((lead as any).emails && (lead as any).emails[0]);
+
+  const hasPhone = Boolean(phone);
+  const hasEmail = Boolean(email);
+  const hasAddress = Boolean((lead.businessLocationEvidence && lead.businessLocationEvidence.length > 0) || lead.businessCountryCode);
+  const hasContactForm = Boolean((lead.destinationTypes || []).includes('INSTANT_FORM' as any) || lead.primaryDestinationType === 'INSTANT_FORM');
+  const hasSocialLinks = Boolean(lead.facebookPageUrl);
+
+  const qualState = (lead.status as any) || 'REVIEW_REQUIRED';
+
+  let geoContext = lead.locationName || lead.targetCountryCode || 'Global';
+  if (lead.geographicClassification) {
+    const busCountry = lead.businessCountryCode ? ` [${lead.businessCountryCode}]` : '';
+    const targetDiff = (lead.targetCountryCode && lead.targetCountryCode !== lead.businessCountryCode) ? ` (Target: ${lead.targetCountryCode})` : '';
+    geoContext = `${lead.geographicClassification}${busCountry}${targetDiff}`;
+  }
+
+  return {
+    recordId,
+    entityId,
+    displayName,
+    primarySource: 'META',
+    provenance: 'META_DERIVED',
+    isMixedProvenance: false,
+    relevanceDecision: (lead.relevanceDecision as any) || 'UNASSESSED',
+    websiteState: lead.websiteState === 'found' ? 'found' : (lead.destinationUrl ? 'WEBSITE_PRESENT_UNVERIFIED' : 'NOT_OBSERVED'),
+    websiteUrl: safeWeb,
+    contactSummary: {
+      hasPhone,
+      hasEmail,
+      hasAddress,
+      hasContactForm,
+      hasSocialLinks,
+      phoneText: phone,
+      emailText: email
+    },
+    qualificationState: qualState,
+    qualificationScore: lead.leadScore,
+    scoreConfidence: (lead.scoreConfidence as any) || (lead.relevanceConfidence as any) || 'NONE',
+    geographicContext: geoContext,
+    targetCountryCode: lead.targetCountryCode,
+    businessCountryCode: lead.businessCountryCode,
+    geographicClassification: lead.geographicClassification,
+    ctaType: lead.primaryCtaType || (lead.ctaTypes && lead.ctaTypes[0]) || 'UNKNOWN',
+    destinationType: lead.primaryDestinationType || (lead.destinationTypes && lead.destinationTypes[0]) || 'UNKNOWN',
+    qualificationFailedGates: lead.qualificationFailedGates || [],
+    qualificationReasons: lead.qualificationReasons || [],
+    friendlyQualificationState: toFriendlyStatus(qualState),
+    isRestricted: false,
+    isExportable: true,
+    isPersistable: true,
+    corroborationCount: lead.adCount || 1,
+    category,
+    sourceBadges: [{ sourceType: 'META', label: 'Meta', isRestricted: false }],
+    dataSignals: {
+      websiteVerified: Boolean(lead.destinationUrl && lead.websiteState === 'found'),
+      contactAvailable: hasPhone || hasEmail,
+      publicPersonAvailable: false,
+      advertisingEvidence: true,
+      freshness: 'CURRENT',
+      freshnessLabel: 'Recently observed'
+    },
+    canonicalRecord: lead
+  };
 }
 
 /**
@@ -500,11 +592,14 @@ export function canonicalLeadToResultDetailViewModel(record: CanonicalLeadRecord
 }
 
 /**
- * Maps a UnifiedResearchRecord, CandidateEnvelope, or CanonicalLeadRecord into a compact ResultRowViewModel.
+ * Maps a UnifiedResearchRecord, CandidateEnvelope, CanonicalLeadRecord, or ExtensionLead into a compact ResultRowViewModel.
  */
-export function toResultRowViewModel(record: UnifiedResearchRecord | CandidateEnvelope | CanonicalLeadRecord): ResultRowViewModel {
+export function toResultRowViewModel(record: UnifiedResearchRecord | CandidateEnvelope | CanonicalLeadRecord | ExtensionLead): ResultRowViewModel {
   if (isCanonicalLeadRecord(record)) {
     return canonicalLeadToResultRowViewModel(record);
+  }
+  if (isExtensionLead(record)) {
+    return extensionLeadToResultRowViewModel(record);
   }
 
   const isUnified = 'entityId' in record && 'corroborationCount' in record;
@@ -666,11 +761,242 @@ export function toResultRowViewModel(record: UnifiedResearchRecord | CandidateEn
 }
 
 /**
- * Maps a UnifiedResearchRecord into a full ResultDetailViewModel.
+ * Maps an ExtensionLead into a full ResultDetailViewModel.
  */
-export function toResultDetailViewModel(record: UnifiedResearchRecord | CanonicalLeadRecord): ResultDetailViewModel {
+export function extensionLeadToResultDetailViewModel(lead: ExtensionLead): ResultDetailViewModel {
+  const row = extensionLeadToResultRowViewModel(lead);
+
+  const aliases = (lead.historicalNames || []).map(h => h.name);
+  const mandatoryCriteria: any[] = [];
+  const optionalCriteria: any[] = [];
+
+  // 1. Candidate Data Integrity
+  mandatoryCriteria.push({
+    criterionId: 'DATA_INTEGRITY',
+    name: 'Candidate Data Integrity',
+    isMandatory: true,
+    status: (lead.name || lead.advertiserName) ? 'PASS' : 'FAIL',
+    scoreAwarded: (lead.name || lead.advertiserName) ? 20 : 0,
+    explanation: (lead.name || lead.advertiserName) ? 'Candidate entity identity corroborated.' : 'Missing advertiser name.',
+    reasonCode: (lead.name || lead.advertiserName) ? 'PASS_NAME_VERIFIED' : 'GATE_FAIL_DATA_INTEGRITY',
+    referencedEvidence: [lead.name || lead.advertiserName || '']
+  });
+
+  // 2. Niche Relevance
+  const relPassed = lead.relevanceDecision === 'RELEVANT';
+  const relStatus = relPassed ? 'PASS' : (lead.relevanceDecision === 'NOT_RELEVANT' ? 'FAIL' : 'UNKNOWN');
+  mandatoryCriteria.push({
+    criterionId: 'NICHE_RELEVANCE',
+    name: 'Niche Relevance',
+    isMandatory: true,
+    status: relStatus,
+    scoreAwarded: relPassed ? 35 : 0,
+    explanation: (lead.relevanceReasons && lead.relevanceReasons.length > 0) ? lead.relevanceReasons.join('; ') : (relPassed ? 'Candidate matches target niche keywords.' : 'Relevance criteria not satisfied.'),
+    reasonCode: relPassed ? 'ACCEPT_RELEVANT' : (lead.relevanceDecision === 'NOT_RELEVANT' ? 'GATE_FAIL_RELEVANCE_NOT_MET' : 'GATE_FAIL_RELEVANCE_UNASSESSED'),
+    referencedEvidence: lead.relevanceMatchedTerms || []
+  });
+
+  // 3. Geographic Eligibility (Strict-Local)
+  const geoPassed = lead.geographicClassification === 'LOCAL_VERIFIED';
+  const geoStatus = geoPassed ? 'PASS' : (lead.geographicClassification === 'FOREIGN_VERIFIED' ? 'FAIL' : 'UNKNOWN');
+  mandatoryCriteria.push({
+    criterionId: 'GEOGRAPHIC_ELIGIBILITY',
+    name: 'Geographic Eligibility (Strict-Local)',
+    isMandatory: true,
+    status: geoStatus,
+    scoreAwarded: geoPassed ? 25 : 0,
+    explanation: geoPassed ? `Locally verified in ${lead.targetCountryCode || lead.businessCountryCode || 'target country'}.` : (lead.geographicClassification === 'FOREIGN_VERIFIED' ? `Business physically located in foreign country (${lead.businessCountryCode || 'abroad'}).` : 'Business physical location unverified (probable or unknown).'),
+    reasonCode: geoPassed ? 'PASS_LOCAL_VERIFIED' : (lead.geographicClassification === 'FOREIGN_VERIFIED' ? 'GATE_FAIL_FOREIGN_VERIFIED' : 'GATE_FAIL_LOCAL_UNVERIFIED'),
+    referencedEvidence: lead.businessLocationEvidence || []
+  });
+
+  // 4. Observed Destination
+  const destPassed = Boolean(lead.destinationUrl || lead.websiteState === 'found');
+  optionalCriteria.push({
+    criterionId: 'DESTINATION_OBSERVED',
+    name: 'Observed Destination',
+    isMandatory: false,
+    status: destPassed ? 'PASS' : 'UNKNOWN',
+    scoreAwarded: destPassed ? 20 : 0,
+    explanation: destPassed ? `Observed: ${lead.primaryDestinationType || 'External Website'}` : 'Missing destination URL. (Missing evidence does not prove business has no website).',
+    reasonCode: destPassed ? 'PASS_DESTINATION_OBSERVED' : 'DESTINATION_NOT_OBSERVED',
+    referencedEvidence: lead.destinationUrl ? [lead.destinationUrl] : []
+  });
+
+  const whyReasons: Array<{ label: string; passed: boolean; explanation?: string }> = [];
+  const potentialIssues: Array<{ label: string; explanation?: string }> = [];
+
+  if (lead.status === 'QUALIFIED') {
+    whyReasons.push({ label: 'Niche Relevance Confirmed', passed: true, explanation: lead.relevanceReasons?.join('; ') || 'Target keywords confirmed' });
+    whyReasons.push({ label: 'Strict Local Presence', passed: true, explanation: `Physical business location verified in ${lead.targetCountryCode || 'target country'}` });
+    if (lead.destinationUrl) {
+      whyReasons.push({ label: 'Destination Observed', passed: true, explanation: `Observed ${lead.primaryDestinationType || 'destination'}` });
+    }
+  }
+
+  if (lead.qualificationReasons && lead.qualificationReasons.length > 0) {
+    for (let i = 0; i < lead.qualificationReasons.length; i++) {
+      const code = lead.qualificationFailedGates?.[i] || 'REVIEW_REQUIRED';
+      potentialIssues.push({
+        label: toFriendlyStatus(code),
+        explanation: lead.qualificationReasons[i]
+      });
+    }
+  } else if (lead.status === 'REVIEW_REQUIRED') {
+    potentialIssues.push({
+      label: 'Review Required',
+      explanation: 'Qualification reason unavailable; review required.'
+    });
+  }
+
+  const scoreText = lead.leadScore !== undefined ? `${(lead.leadScore * 100).toFixed(0)}%` : undefined;
+
+  const identityDetails = {
+    canonicalBusinessName: row.displayName,
+    aliases,
+    entityType: 'LOCAL_BUSINESS',
+    entityTypeLabel: toFriendlyStatus('LOCAL_BUSINESS')
+  };
+
+  const businessDetails = {
+    categories: lead.matchedKeywords || [],
+    services: [],
+    serviceAreas: [lead.locationName || lead.targetCountryCode || 'Global'],
+    businessStatus: toFriendlyStatus('OPERATIONAL')
+  };
+
+  const locationDetails = {
+    address: (lead.businessLocationEvidence && lead.businessLocationEvidence[0]) || undefined,
+    city: lead.locationName,
+    region: undefined,
+    country: lead.businessCountryCode || lead.targetCountryCode,
+    addresses: lead.businessLocationEvidence || []
+  };
+
+  const digitalPresence = {
+    websiteUrl: row.websiteUrl,
+    domain: lead.destinationDomain,
+    socialLinks: lead.facebookPageUrl ? [{ platform: 'Facebook', url: lead.facebookPageUrl }] : []
+  };
+
+  const contactsDetails = {
+    emails: (lead as any).businessEmail ? [{ address: (lead as any).businessEmail, classification: 'Business Email', source: 'Meta' }] : [],
+    phones: (lead as any).businessPhone ? [{ number: (lead as any).businessPhone, type: 'Business Phone', source: 'Meta' }] : [],
+    forms: (lead.destinationTypes || []).includes('INSTANT_FORM' as any) ? ['Meta Instant Form Observed'] : []
+  };
+
+  const qualificationDetails = {
+    finalState: row.qualificationState,
+    friendlyFinalState: toFriendlyStatus(row.qualificationState),
+    profileId: 'STRICT_QUALIFICATION_GATES',
+    profileName: 'Strict Qualification Gates (Phase 0.6)',
+    explanation: lead.qualificationReasons && lead.qualificationReasons.length > 0
+      ? lead.qualificationReasons.join('. ')
+      : (lead.status === 'QUALIFIED' ? 'Candidate meets all mandatory qualification criteria.' : 'Candidate does not satisfy strict qualification criteria; review required.'),
+    whyReasons,
+    potentialIssues,
+    criteria: [...mandatoryCriteria, ...optionalCriteria].map(c => ({
+      ...c,
+      friendlyStatus: toFriendlyStatus(c.status)
+    }))
+  };
+
+  const evidenceItems: EvidenceItemViewModel[] = [];
+  if (lead.adLibraryIds) {
+    for (let i = 0; i < lead.adLibraryIds.length; i++) {
+      evidenceItems.push({
+        id: `ev_${i + 1}`,
+        fact: `Observed Meta Ad Library ID: ${lead.adLibraryIds[i]}`,
+        sourceFamily: 'META',
+        evidenceType: 'AD_LIBRARY_CARD',
+        pageOrSourceReference: lead.adLibraryUrl || 'Meta Ad Library',
+        observationState: 'OBSERVED',
+        provenance: 'META_DERIVED',
+        isRestricted: false
+      });
+    }
+  }
+
+  return {
+    recordId: row.recordId,
+    entityId: row.entityId,
+    displayName: row.displayName,
+    aliases,
+    identityConfidence: (lead.businessLocationConfidence as any) || 'HIGH',
+    contradictionFlags: [],
+    primarySource: 'META',
+    contributingSources: ['META'],
+    provenanceLineage: 'META_DERIVED',
+    provenanceClassification: 'DIRECT_SOURCE',
+    relevanceDecision: row.relevanceDecision,
+    relevanceConfidence: (lead.relevanceConfidence as any) || 'NONE',
+    relevanceExplanation: (lead.relevanceReasons && lead.relevanceReasons.length > 0) ? lead.relevanceReasons.join('; ') : 'Relevance evaluated via strict rules.',
+    relevanceMatchedTerms: lead.relevanceMatchedTerms || [],
+    websiteUrl: row.websiteUrl,
+    websiteVerificationStatus: lead.websiteState === 'found' ? 'FOUND' : 'NOT_OBSERVED',
+    phones: (lead as any).businessPhone ? [{ number: (lead as any).businessPhone, type: 'BUSINESS', observation: 'Observed on Ad Card' }] : [],
+    emails: (lead as any).businessEmail ? [{ address: (lead as any).businessEmail, classification: 'BUSINESS', observation: 'Observed on Ad Card' }] : [],
+    addresses: (lead.businessLocationEvidence || []).map(a => ({ addressLine: a, isBranch: false })),
+    hasContactForm: Boolean((lead.destinationTypes || []).includes('INSTANT_FORM' as any)),
+    socialLinks: lead.facebookPageUrl ? [{ platform: 'Facebook', url: lead.facebookPageUrl }] : [],
+    qualificationState: row.qualificationState,
+    qualificationProfileName: 'Strict Qualification Gates (Phase 0.6)',
+    qualificationProfileVersion: '0.6.0',
+    qualificationScore: lead.leadScore,
+    qualificationScoreText: scoreText,
+    scoreConfidence: row.scoreConfidence,
+    targetCountryCode: lead.targetCountryCode,
+    businessCountryCode: lead.businessCountryCode,
+    geographicClassification: lead.geographicClassification,
+    ctaType: row.ctaType,
+    destinationType: row.destinationType,
+    qualificationFailedGates: lead.qualificationFailedGates || [],
+    qualificationReasons: lead.qualificationReasons || [],
+    mandatoryCriteria,
+    optionalCriteria,
+    qualificationSummaryExplanation: qualificationDetails.explanation,
+    evidenceItems,
+    isRestricted: false,
+    isExportable: true,
+    isPersistable: true,
+    fieldEligibility: {},
+    runId: 'active_run',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    category: row.category,
+    sourceBadges: row.sourceBadges,
+    identityDetails,
+    businessDetails,
+    locationDetails,
+    digitalPresence,
+    contactsDetails,
+    peopleDetails: [],
+    qualificationDetails,
+    evidenceDetails: {
+      totalCount: evidenceItems.length,
+      items: evidenceItems.map(e => ({
+        id: e.id,
+        fact: e.fact,
+        source: e.sourceFamily,
+        sourceUrl: e.pageOrSourceReference,
+        observedAt: new Date().toISOString(),
+        isRestricted: false
+      })),
+      fieldEvidence: [],
+      conflicts: []
+    }
+  };
+}
+
+/**
+ * Maps a UnifiedResearchRecord, CanonicalLeadRecord, or ExtensionLead into a full ResultDetailViewModel.
+ */
+export function toResultDetailViewModel(record: UnifiedResearchRecord | CanonicalLeadRecord | ExtensionLead): ResultDetailViewModel {
   if (isCanonicalLeadRecord(record)) {
     return canonicalLeadToResultDetailViewModel(record);
+  }
+  if (isExtensionLead(record)) {
+    return extensionLeadToResultDetailViewModel(record);
   }
 
   const u = record as UnifiedResearchRecord;
@@ -1024,8 +1350,14 @@ export function toExportPreviewViewModel(records: (UnifiedResearchRecord | Canon
         restrictedRecordsCount++;
       }
     } else {
-      const u = r as UnifiedResearchRecord;
-      if (u.restrictions?.exportEligible && !u.restrictions?.isRestricted) {
+      const u = r as any;
+      if (u.isExportable !== undefined) {
+        if (u.isExportable && !u.isRestricted) {
+          exportableRecordsCount++;
+        } else {
+          restrictedRecordsCount++;
+        }
+      } else if (u.restrictions?.exportEligible && !u.restrictions?.isRestricted) {
         exportableRecordsCount++;
       } else {
         restrictedRecordsCount++;

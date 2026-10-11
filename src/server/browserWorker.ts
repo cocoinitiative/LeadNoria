@@ -17,6 +17,7 @@ import {
   PRESET_CATALOGUE_VERSION 
 } from '../data/presetCatalogue.ts';
 import { researchJobStore, ResearchExecutionResult } from './researchJobStore.ts';
+import { isLiveCollectionPermitted } from '../config/collectionGate.ts';
 
 export type { ResearchExecutionResult };
 
@@ -451,6 +452,59 @@ export async function runBrowserWorker(
   }> = [];
 
   if (!isFixtureMode) {
+    // Fail-Closed Safety Gate (Phase 0.1): Live Playwright Meta scraping is unauthorized and disabled
+    if (!isLiveCollectionPermitted()) {
+      emitEvent({
+        jobId,
+        stage: 'INGESTION',
+        stageLabel: 'Browser Worker: BLOCKED',
+        percent: 0,
+        processedCount: 0,
+        totalLimit: targetLimit,
+        logMessage: `[00:00:01] Browser worker ${workerId} BLOCKED: Live automated collection from Meta Ad Library is unauthorized and disabled by product policy (Phase 0A gate: NO-GO).`
+      });
+
+      const blockedJob: ResearchJobModel = {
+        ...initialJob,
+        state: 'BLOCKED',
+        progressPercent: 0,
+        challengeReason: 'Live automated collection from Meta Ad Library is disabled and unauthorized.',
+        stopReason: 'COLLECTION_NOT_AUTHORIZED',
+        updatedAt: new Date().toISOString()
+      };
+      researchJobStore.saveJob(blockedJob);
+
+      const blockedResult: ResearchExecutionResult = {
+        job: blockedJob,
+        newAdvertisers: [],
+        newAds: [],
+        summary: {
+          totalExtracted: 0,
+          qualifiedCount: 0,
+          reviewCount: 0,
+          disqualifiedCount: 0,
+          reachablePercent: 0,
+          averageScore: 0,
+          durationMs: Date.now() - startTime,
+          excludedNoWebsiteCount: 0,
+          keywordsProcessedCount: keywordsList.length
+        }
+      };
+      researchJobStore.saveResult(jobId, blockedResult);
+
+      emitEvent({
+        type: 'blocked',
+        jobId,
+        status: 'BLOCKED',
+        reason: 'Live automated collection from Meta Ad Library is disabled and unauthorized.',
+        message: 'Live automated collection from Meta Ad Library is disabled and unauthorized.',
+        job: blockedJob,
+        result: blockedResult
+      });
+
+      return blockedResult;
+    }
+
     // Check if live browser is available
     const browserOk = await checkBrowserAvailability();
     if (!browserOk) {

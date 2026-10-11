@@ -15,11 +15,13 @@ import type {
   ScrapedAdCandidate,
   ExtensionLead,
   RunCounters,
-  StructuredEvidence
+  StructuredEvidence,
+  AdLevelEvidence
 } from './types.ts';
 import { LeadRelevanceEngine } from './relevanceEngine.ts';
 import type { ResearchIntent } from './relevanceEngine.ts';
 import { evaluateGeographicOrigin } from './geographicClassifier.ts';
+import { classifyCta, classifyDestination, aggregateAdEvidence } from './destinationClassifier.ts';
 import {
   evaluateStrictRelevanceV3,
   recordCandidateEvidenceInProfile,
@@ -37,6 +39,7 @@ import {
 import { extractCreativeSignalsFromCandidate, aggregateCreativeSignals } from './creativeSignals.ts';
 import { classifyUncertainCandidate } from './uncertainQueue.ts';
 import { checkAdvertiserExpansionEligibility } from './advertiserExpander.ts';
+import { evaluateLeadQualificationGates } from './qualificationGate.ts';
 import type { UncertainEntityRecord } from './types.ts';
 
 export interface BatchProcessOptions {
@@ -165,7 +168,7 @@ export async function processBatch(
         if (existingEntity) {
           counters.duplicatesRemoved++;
           counters.entityMergesCount = (counters.entityMergesCount || 0) + 1;
-          mergeCandidateIntoEntity(existingEntity, cand, mergeDecision, currentKeyword);
+          mergeCandidateIntoEntity(existingEntity, cand, mergeDecision, currentKeyword, countryCode);
 
           // Aggregate creative signals into existing entity with anti-inflation
           const newSignals = extractCreativeSignalsFromCandidate(cand);
@@ -184,18 +187,41 @@ export async function processBatch(
             ctaText: [existingEntity.sampleCta, cand.ctaText].filter(Boolean).join(' ')
           }, countryCode);
 
-          if (
+          const shouldUpdateGeo =
             !existingEntity.geographicClassification ||
             existingEntity.geographicClassification === 'LOCATION_UNKNOWN' ||
-            (existingEntity.geographicClassification === 'LOCAL_PROBABLE' && updatedGeo.classification === 'LOCAL_VERIFIED')
-          ) {
+            updatedGeo.classification === 'FOREIGN_VERIFIED' ||
+            (existingEntity.geographicClassification === 'LOCAL_PROBABLE' && updatedGeo.classification === 'LOCAL_VERIFIED') ||
+            updatedGeo.reasonCode === 'CONFLICTING_LOCATION_EVIDENCE';
+
+          if (shouldUpdateGeo) {
             existingEntity.targetCountryCode = updatedGeo.targetCountryCode;
             existingEntity.businessCountryCode = updatedGeo.businessCountryCode;
             existingEntity.geographicClassification = updatedGeo.classification;
             existingEntity.businessLocationConfidence = updatedGeo.confidence;
-            existingEntity.businessLocationEvidence = updatedGeo.evidence;
+            existingEntity.businessLocationEvidence = Array.from(new Set([
+              ...(existingEntity.businessLocationEvidence || []),
+              ...updatedGeo.evidence
+            ]));
             existingEntity.businessLocationReason = updatedGeo.reason;
+            existingEntity.businessLocationReasonCode = updatedGeo.reasonCode;
           }
+
+          if (intent) {
+            const candEval = LeadRelevanceEngine.evaluateCandidate(cand, intent);
+            if (candEval.decision === 'NOT_RELEVANT' && candEval.conflicts.some(c => c.type === 'CONTRADICTION' && c.strength === 'STRONG')) {
+              existingEntity.relevanceDecision = 'NOT_RELEVANT';
+              existingEntity.evaluationStatus = 'REJECTED';
+              existingEntity.relevanceReasons = [...(existingEntity.relevanceReasons || []), ...candEval.reasons];
+            } else if (candEval.decision === 'RELEVANT') {
+              existingEntity.relevanceScore = Math.max(existingEntity.relevanceScore || 0, candEval.score);
+            }
+          }
+
+          const qualGate = evaluateLeadQualificationGates(existingEntity, intent);
+          existingEntity.status = qualGate.status;
+          existingEntity.qualificationFailedGates = qualGate.failedGates;
+          existingEntity.qualificationReasons = qualGate.reasons;
 
           entityIndex.indexEntity(mergeDecision.targetKey, existingEntity);
 
@@ -313,6 +339,48 @@ export async function processBatch(
         }
       }
 
+      // 5.5. CTA & Destination evaluation
+      const candCtaRes = cand.ctaType
+        ? { ctaType: cand.ctaType, normalizedText: cand.ctaText || '', reasonCode: 'CTA_TEXT_MATCH', reason: '' }
+        : classifyCta(cand.ctaText);
+      const candDestRes = cand.destinationType
+        ? { destinationType: cand.destinationType, confidence: cand.destinationConfidence || 'HIGH', reasonCode: cand.destinationReasonCode || 'VISIBLE_EXTERNAL_DESTINATION', reason: '' }
+        : classifyDestination({
+            destinationUrl: domainNorm.cleanUrl || cand.destinationUrl,
+            destinationDomain: domainNorm.canonicalDomain || cand.destinationDomain,
+            ctaText: cand.ctaText,
+            ctaType: candCtaRes.ctaType,
+            bodyCopy: cand.bodyCopy,
+            rawText: cand.rawText
+          });
+
+      cand.ctaType = candCtaRes.ctaType;
+      cand.destinationType = candDestRes.destinationType;
+      cand.destinationReasonCode = candDestRes.reasonCode;
+      cand.destinationConfidence = candDestRes.confidence;
+
+      if (intent?.requiredCtaTypes && intent.requiredCtaTypes.length > 0) {
+        if (!intent.requiredCtaTypes.includes(candCtaRes.ctaType)) {
+          counters.notRelevantCandidates++;
+          if (!existingEntitiesMap.has(entityKey)) {
+            seenRejectedEntityKeys.add(entityKey);
+            seenUncertainEntityKeys.delete(entityKey);
+          }
+          continue;
+        }
+      }
+
+      if (intent?.requiredDestinationTypes && intent.requiredDestinationTypes.length > 0) {
+        if (!intent.requiredDestinationTypes.includes(candDestRes.destinationType)) {
+          counters.notRelevantCandidates++;
+          if (!existingEntitiesMap.has(entityKey)) {
+            seenRejectedEntityKeys.add(entityKey);
+            seenUncertainEntityKeys.delete(entityKey);
+          }
+          continue;
+        }
+      }
+
       // 6. Qualified relevant entity
       counters.relevantCandidates++;
 
@@ -324,8 +392,22 @@ export async function processBatch(
       }
 
       // Construct unified ExtensionLead with identity metadata and evidence coverage
-      const webState = (domainNorm.cleanUrl || cand.destinationUrl) ? 'found' : 'not_found';
+      const webState = (domainNorm.cleanUrl || cand.destinationUrl)
+        ? 'found'
+        : (candDestRes.destinationType === 'NO_VISIBLE_DESTINATION' ? 'not_found' : 'unknown');
       const fbState = (pageNorm.canonicalUrl || cand.facebookPageUrl) ? 'found' : 'not_found';
+
+      const candAdEvidenceItem: AdLevelEvidence = {
+        libraryId: cand.libraryId,
+        ctaText: cand.ctaText,
+        ctaType: candCtaRes.ctaType,
+        destinationType: candDestRes.destinationType,
+        destinationUrl: domainNorm.cleanUrl || cand.destinationUrl,
+        destinationDomain: domainNorm.canonicalDomain || cand.destinationDomain,
+        reasonCode: candDestRes.reasonCode,
+        confidence: candDestRes.confidence,
+        observedAt: cand.startedRunning || new Date().toISOString()
+      };
 
       const newLead: ExtensionLead = {
         id: `lead_${runId}_${entityKey}`,
@@ -350,13 +432,22 @@ export async function processBatch(
         matchedQueries: currentKeyword ? [currentKeyword] : (intent?.primaryKeywords?.slice(0, 1) || []),
         locationCode: countryCode,
         locationName: locationName,
+        // Ad-level CTA & Destination Intelligence (Phase 0.4)
+        adEvidence: [candAdEvidenceItem],
+        observedCtaTexts: cand.ctaText ? [cand.ctaText] : [],
+        observedCtaTypes: [candCtaRes.ctaType],
+        observedDestinationTypes: [candDestRes.destinationType],
+        primaryCtaType: candCtaRes.ctaType,
+        primaryDestinationType: candDestRes.destinationType,
+        destinationReasonCode: candDestRes.reasonCode,
+        destinationConfidence: candDestRes.confidence,
         targetCountryCode: geoEval.targetCountryCode,
         businessCountryCode: geoEval.businessCountryCode,
         geographicClassification: geoEval.classification,
         businessLocationConfidence: geoEval.confidence,
         businessLocationEvidence: geoEval.evidence,
         businessLocationReason: geoEval.reason,
-        status: webState === 'found' ? 'QUALIFIED' : 'REVIEW_REQUIRED',
+        status: 'REVIEW_REQUIRED', // evaluated below via evaluateLeadQualificationGates
         discoveredAt: new Date().toISOString(),
         sampleCopy: cand.bodyCopy,
         sampleCta: cand.ctaText,
@@ -364,7 +455,7 @@ export async function processBatch(
         relationshipType: mergeDecision.relationshipType,
         mergeHistory: [],
         relevanceScore: v3Result?.score ?? evalResult?.score,
-        relevanceDecision: v3Result?.decision ?? evalResult?.decision ?? 'RELEVANT',
+        relevanceDecision: v3Result?.decision ?? evalResult?.decision ?? 'UNASSESSED',
         relevanceConfidence: v3Result?.confidence ?? evalResult?.confidence,
         relevanceReasons: v3Result?.reasons ?? evalResult?.reasons,
         relevanceMatchedTerms: v3Result?.matchedTerms ?? evalResult?.matchedTerms,
@@ -376,9 +467,14 @@ export async function processBatch(
         evidenceExplanation: v3Result?.explanation,
         uniqueEvidenceSignals: v3Result?.uniqueEvidenceSignals,
         observedEvidenceOccurrences: v3Result?.observedEvidenceOccurrences,
-        evaluationStatus: 'RELEVANT',
+        evaluationStatus: (v3Result?.decision ?? evalResult?.decision) === 'RELEVANT' ? 'RELEVANT' : 'UNASSESSED',
         creativeSignals: extractCreativeSignalsFromCandidate(cand)
       };
+
+    const qualGate = evaluateLeadQualificationGates(newLead, intent);
+    newLead.status = qualGate.status;
+    newLead.qualificationFailedGates = qualGate.failedGates;
+    newLead.qualificationReasons = qualGate.reasons;
 
     // Check advertiser expansion eligibility
     const expEligibility = checkAdvertiserExpansionEligibility(

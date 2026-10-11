@@ -27,7 +27,9 @@ import type {
   EvidenceStrength,
   EvidenceType,
   EvidenceSource,
-  StructuredEvidence
+  StructuredEvidence,
+  CtaType,
+  DestinationType
 } from './types.ts';
 import { RESEARCH_PRESETS } from '../data/presetCatalogue.ts';
 
@@ -57,6 +59,8 @@ export interface ResearchIntent {
   locationCode?: string;
   strictLocalMode?: boolean;
   allowProbableLocal?: boolean;
+  requiredCtaTypes?: CtaType[];
+  requiredDestinationTypes?: DestinationType[];
 }
 
 export interface CandidateEvidence {
@@ -123,14 +127,15 @@ export interface BoundedCategoryTaxonomy {
 export const BOUNDED_TAXONOMY: Record<string, BoundedCategoryTaxonomy> = {
   furniture: {
     category: 'furniture',
-    rootTerms: ['furniture', 'furnishing', 'furnishings', 'furnish'],
+    rootTerms: ['furniture', 'furnishing', 'furnishings', 'furnish', 'ফার্নিচার', 'আসবাবপত্র'],
     productServiceTerms: [
       'chair', 'table', 'desk', 'sofa', 'couch', 'bed', 'mattress', 'cabinet',
       'wardrobe', 'dining', 'bench', 'drawer', 'drawers', 'stool', 'bookshelf',
       'shelf', 'shelves', 'almirah', 'cupboard', 'recliner', 'credenza',
       'workstation', 'seating', 'lounge', 'headboard', 'nightstand', 'dresser',
       'vanity', 'sideboard', 'armchair', 'futon', 'loveseat', 'ottoman',
-      'sectional', 'ergonomic chair', 'standing desk', 'bedroom set'
+      'sectional', 'ergonomic chair', 'standing desk', 'bedroom set',
+      'চেয়ার', 'ডাইনিং', 'খাট', 'সোফা', 'টেবিল', 'আলমারি'
     ],
     industryDescriptors: [
       'furniture store', 'furniture retailer', 'furniture manufacturer',
@@ -431,8 +436,9 @@ export function stemToken(token: string): string {
 export function tokenizeText(text: string): string[] {
   if (!text) return [];
   return text
+    .normalize('NFC')
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
+    .replace(/[^\p{L}\p{M}\p{N}\s-]/gu, ' ')
     .split(/[\s-]+/)
     .map(w => w.trim())
     .filter(w => w.length >= 2 && !STOP_WORDS.has(w))
@@ -478,9 +484,9 @@ export function normalizeEvidence(evidence: CandidateEvidence): NormalizedEviden
     normalizedDomain: rawDomain,
     normalizedUrlSlug: evidence.destinationUrl ? extractUrlTokens(evidence.destinationUrl).join(' ') : '',
     normalizedPageNameTokens: tokenizeText(rawPageName),
-    normalizedCta: rawCta.toLowerCase(),
-    advertiserText: rawAdvertiser.toLowerCase(),
-    adCopyText: rawAdCopy.toLowerCase()
+    normalizedCta: rawCta.normalize('NFC').toLowerCase(),
+    advertiserText: rawAdvertiser.normalize('NFC').toLowerCase(),
+    adCopyText: rawAdCopy.normalize('NFC').toLowerCase()
   };
 }
 
@@ -488,16 +494,53 @@ export function normalizeEvidence(evidence: CandidateEvidence): NormalizedEviden
  * Compiles a comprehensive ResearchIntent from user input or preset.
  */
 export function compileResearchIntent(
-  mode: ResearchMode,
-  keywords: string[],
+  modeOrConfig: ResearchMode | {
+    mode?: ResearchMode;
+    keywords?: string[];
+    targetNiches?: string[];
+    presetId?: string;
+    locationCode?: string;
+    targetCountryCode?: string;
+    strictLocalMode?: boolean;
+    allowProbableLocal?: boolean;
+    requiredCtaTypes?: CtaType[];
+    requiredDestinationTypes?: DestinationType[];
+  },
+  keywords: string[] = [],
   presetId?: string,
   locationCode = 'US',
-  options?: { strictLocalMode?: boolean; allowProbableLocal?: boolean }
+  options?: {
+    strictLocalMode?: boolean;
+    allowProbableLocal?: boolean;
+    requiredCtaTypes?: CtaType[];
+    requiredDestinationTypes?: DestinationType[];
+  }
 ): ResearchIntent {
-  const cleanKeywords = keywords.map(k => k.trim()).filter(Boolean);
+  let mode: ResearchMode = 'CUSTOM';
+  let cleanKeywords: string[] = [];
+  let pId = presetId;
+  let loc = locationCode;
+  let opts = options;
 
-  if (mode === 'PRESET' && presetId) {
-    const preset = RESEARCH_PRESETS.find(p => p.preset_id === presetId);
+  if (typeof modeOrConfig === 'object' && modeOrConfig !== null) {
+    mode = modeOrConfig.mode || 'CUSTOM';
+    cleanKeywords = (modeOrConfig.keywords || modeOrConfig.targetNiches || []).map(k => k.trim()).filter(Boolean);
+    pId = modeOrConfig.presetId;
+    loc = modeOrConfig.locationCode || modeOrConfig.targetCountryCode || 'US';
+    opts = {
+      strictLocalMode: modeOrConfig.strictLocalMode,
+      allowProbableLocal: modeOrConfig.allowProbableLocal,
+      requiredCtaTypes: modeOrConfig.requiredCtaTypes,
+      requiredDestinationTypes: modeOrConfig.requiredDestinationTypes,
+      ...options
+    };
+  } else {
+    mode = modeOrConfig;
+    cleanKeywords = (keywords || []).map(k => k.trim()).filter(Boolean);
+  }
+
+  if (mode === 'PRESET' && pId) {
+    const preset = RESEARCH_PRESETS.find(p => p.preset_id === pId);
     if (preset) {
       return {
         mode: 'PRESET',
@@ -510,9 +553,11 @@ export function compileResearchIntent(
         primaryKeywords: preset.primary_keywords,
         secondaryKeywords: preset.secondary_keywords,
         exclusions: preset.optional_exclusions || [],
-        locationCode,
-        strictLocalMode: options?.strictLocalMode,
-        allowProbableLocal: options?.allowProbableLocal
+        locationCode: loc,
+        strictLocalMode: opts?.strictLocalMode,
+        allowProbableLocal: opts?.allowProbableLocal,
+        requiredCtaTypes: opts?.requiredCtaTypes,
+        requiredDestinationTypes: opts?.requiredDestinationTypes
       };
     }
   }
@@ -523,9 +568,11 @@ export function compileResearchIntent(
     primaryKeywords: cleanKeywords,
     secondaryKeywords: [],
     exclusions: [],
-    locationCode,
-    strictLocalMode: options?.strictLocalMode,
-    allowProbableLocal: options?.allowProbableLocal
+    locationCode: loc,
+    strictLocalMode: opts?.strictLocalMode,
+    allowProbableLocal: opts?.allowProbableLocal,
+    requiredCtaTypes: opts?.requiredCtaTypes,
+    requiredDestinationTypes: opts?.requiredDestinationTypes
   };
 }
 

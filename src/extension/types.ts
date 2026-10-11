@@ -44,7 +44,7 @@ export type ResearchStopReason =
   | 'END_OF_RESULTS'
   | 'TAB_TIMEOUT';
 
-export type RelevanceDecision = 'RELEVANT' | 'UNCERTAIN' | 'NOT_RELEVANT';
+export type RelevanceDecision = 'RELEVANT' | 'UNCERTAIN' | 'NOT_RELEVANT' | 'UNASSESSED';
 export type RelevanceConfidence = 'HIGH' | 'MEDIUM' | 'LOW';
 export type EvidenceStrength = 'STRONG' | 'MODERATE' | 'WEAK' | 'CONTRADICTORY';
 
@@ -300,6 +300,40 @@ export interface KeywordFrontierState {
   checkpointTimestamp: string;
 }
 
+export type CtaType =
+  | 'SHOP_NOW'
+  | 'LEARN_MORE'
+  | 'SIGN_UP'
+  | 'CONTACT_US'
+  | 'SEND_MESSAGE'
+  | 'CALL_NOW'
+  | 'DOWNLOAD'
+  | 'GET_QUOTE'
+  | 'OTHER'
+  | 'UNKNOWN';
+
+export type DestinationType =
+  | 'EXTERNAL_WEBSITE'
+  | 'INSTANT_FORM'
+  | 'MESSAGING'
+  | 'CALL'
+  | 'APP'
+  | 'OTHER'
+  | 'UNKNOWN'
+  | 'NO_VISIBLE_DESTINATION';
+
+export interface AdLevelEvidence {
+  libraryId: string;
+  ctaText?: string;
+  ctaType: CtaType;
+  destinationType: DestinationType;
+  destinationUrl?: string;
+  destinationDomain?: string;
+  reasonCode: string;
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
+  observedAt?: string;
+}
+
 export interface ScrapedAdCandidate {
   libraryId: string;
   pageName: string;
@@ -312,6 +346,10 @@ export interface ScrapedAdCandidate {
   hasMultipleVersions?: boolean;
   bodyCopy?: string;
   ctaText?: string;
+  ctaType?: CtaType;
+  destinationType?: DestinationType;
+  destinationReasonCode?: string;
+  destinationConfidence?: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
   observedKeyword?: string;
   rawText?: string;
 }
@@ -336,9 +374,20 @@ export interface ExtensionLead {
   locationCode: string;
   locationName: string;
   status: 'QUALIFIED' | 'REVIEW_REQUIRED' | 'NEEDS_DATA';
+  qualificationFailedGates?: string[];
+  qualificationReasons?: string[];
   discoveredAt: string;
   sampleCopy?: string;
   sampleCta?: string;
+  // Ad-level CTA & Destination Intelligence (Phase 0.4)
+  adEvidence?: AdLevelEvidence[];
+  observedCtaTexts?: string[];
+  observedCtaTypes?: CtaType[];
+  observedDestinationTypes?: DestinationType[];
+  primaryCtaType?: CtaType;
+  primaryDestinationType?: DestinationType;
+  destinationReasonCode?: string;
+  destinationConfidence?: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
   // Geographic Qualification (v1.7.5 Hardening)
   targetCountryCode?: string;
   businessCountryCode?: string;
@@ -346,6 +395,7 @@ export interface ExtensionLead {
   businessLocationConfidence?: LocationConfidence;
   businessLocationEvidence?: string[];
   businessLocationReason?: string;
+  businessLocationReasonCode?: string;
   // Relevance evaluation fields
   relevanceScore?: number;
   relevanceDecision?: RelevanceDecision;
@@ -379,6 +429,16 @@ export interface ExtensionLead {
   // Prompt 6: Website Deep Verification
   websiteVerificationStatus?: WebsiteVerificationStatus;
   websiteVerification?: WebsiteVerificationRecord;
+  // View model and legacy convenience aliases
+  leadId?: string;
+  advertiserName?: string;
+  leadScore?: number;
+  scoreConfidence?: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
+  ctaTypes?: CtaType[];
+  destinationTypes?: DestinationType[];
+  ctaType?: CtaType;
+  destinationType?: DestinationType;
+  historicalNames?: Array<{ name: string; observedAt?: string; sourceTokenId?: string }>;
 }
 
 export type GeographicClassification =
@@ -396,6 +456,7 @@ export interface GeographicEvaluation {
   confidence: LocationConfidence;
   evidence: string[];
   reason: string;
+  reasonCode?: string;
   isLocal: boolean;
   isForeign: boolean;
   isUnknown: boolean;
@@ -475,10 +536,11 @@ export interface StartResearchPayload {
   researchMode?: 'AUTO_DISCOVERY';
   maxFinalUniqueRelevantLeads?: number;
   // Legacy backward-compatibility
-  maxResults?: number;
   // Geographic qualification mode
   strictLocalMode?: boolean;
   allowProbableLocal?: boolean;
+  requiredCtaTypes?: string[];
+  requiredDestinationTypes?: string[];
 }
 
 export interface ExtensionMessage {

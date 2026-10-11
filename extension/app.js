@@ -16031,7 +16031,7 @@ function stemToken(token) {
 }
 function tokenizeText(text) {
   if (!text) return [];
-  return text.toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, " ").split(/[\s-]+/).map((w) => w.trim()).filter((w) => w.length >= 2 && !STOP_WORDS.has(w)).map(stemToken);
+  return text.normalize("NFC").toLowerCase().replace(/[^\p{L}\p{M}\p{N}\s-]/gu, " ").split(/[\s-]+/).map((w) => w.trim()).filter((w) => w.length >= 2 && !STOP_WORDS.has(w)).map(stemToken);
 }
 function extractUrlTokens(urlStr) {
   if (!urlStr) return [];
@@ -16063,15 +16063,35 @@ function normalizeEvidence(evidence) {
     normalizedDomain: rawDomain,
     normalizedUrlSlug: evidence.destinationUrl ? extractUrlTokens(evidence.destinationUrl).join(" ") : "",
     normalizedPageNameTokens: tokenizeText(rawPageName),
-    normalizedCta: rawCta.toLowerCase(),
-    advertiserText: rawAdvertiser.toLowerCase(),
-    adCopyText: rawAdCopy.toLowerCase()
+    normalizedCta: rawCta.normalize("NFC").toLowerCase(),
+    advertiserText: rawAdvertiser.normalize("NFC").toLowerCase(),
+    adCopyText: rawAdCopy.normalize("NFC").toLowerCase()
   };
 }
-function compileResearchIntent(mode, keywords, presetId, locationCode = "US", options) {
-  const cleanKeywords = keywords.map((k) => k.trim()).filter(Boolean);
-  if (mode === "PRESET" && presetId) {
-    const preset = RESEARCH_PRESETS.find((p) => p.preset_id === presetId);
+function compileResearchIntent(modeOrConfig, keywords = [], presetId, locationCode = "US", options) {
+  let mode = "CUSTOM";
+  let cleanKeywords = [];
+  let pId = presetId;
+  let loc = locationCode;
+  let opts = options;
+  if (typeof modeOrConfig === "object" && modeOrConfig !== null) {
+    mode = modeOrConfig.mode || "CUSTOM";
+    cleanKeywords = (modeOrConfig.keywords || modeOrConfig.targetNiches || []).map((k) => k.trim()).filter(Boolean);
+    pId = modeOrConfig.presetId;
+    loc = modeOrConfig.locationCode || modeOrConfig.targetCountryCode || "US";
+    opts = {
+      strictLocalMode: modeOrConfig.strictLocalMode,
+      allowProbableLocal: modeOrConfig.allowProbableLocal,
+      requiredCtaTypes: modeOrConfig.requiredCtaTypes,
+      requiredDestinationTypes: modeOrConfig.requiredDestinationTypes,
+      ...options
+    };
+  } else {
+    mode = modeOrConfig;
+    cleanKeywords = (keywords || []).map((k) => k.trim()).filter(Boolean);
+  }
+  if (mode === "PRESET" && pId) {
+    const preset = RESEARCH_PRESETS.find((p) => p.preset_id === pId);
     if (preset) {
       return {
         mode: "PRESET",
@@ -16084,9 +16104,11 @@ function compileResearchIntent(mode, keywords, presetId, locationCode = "US", op
         primaryKeywords: preset.primary_keywords,
         secondaryKeywords: preset.secondary_keywords,
         exclusions: preset.optional_exclusions || [],
-        locationCode,
-        strictLocalMode: options?.strictLocalMode,
-        allowProbableLocal: options?.allowProbableLocal
+        locationCode: loc,
+        strictLocalMode: opts?.strictLocalMode,
+        allowProbableLocal: opts?.allowProbableLocal,
+        requiredCtaTypes: opts?.requiredCtaTypes,
+        requiredDestinationTypes: opts?.requiredDestinationTypes
       };
     }
   }
@@ -16096,9 +16118,11 @@ function compileResearchIntent(mode, keywords, presetId, locationCode = "US", op
     primaryKeywords: cleanKeywords,
     secondaryKeywords: [],
     exclusions: [],
-    locationCode,
-    strictLocalMode: options?.strictLocalMode,
-    allowProbableLocal: options?.allowProbableLocal
+    locationCode: loc,
+    strictLocalMode: opts?.strictLocalMode,
+    allowProbableLocal: opts?.allowProbableLocal,
+    requiredCtaTypes: opts?.requiredCtaTypes,
+    requiredDestinationTypes: opts?.requiredDestinationTypes
   };
 }
 var RELEVANCE_STRATEGY_VERSION, RELEVANCE_ENGINE_VERSION, BOUNDED_TAXONOMY, NEGATIVE_CATEGORIES, ACCESSORY_ONLY_INDICATORS, STOP_WORDS, LeadRelevanceEngine;
@@ -16110,7 +16134,7 @@ var init_relevanceEngine = __esm({
     BOUNDED_TAXONOMY = {
       furniture: {
         category: "furniture",
-        rootTerms: ["furniture", "furnishing", "furnishings", "furnish"],
+        rootTerms: ["furniture", "furnishing", "furnishings", "furnish", "\u09AB\u09BE\u09B0\u09CD\u09A8\u09BF\u099A\u09BE\u09B0", "\u0986\u09B8\u09AC\u09BE\u09AC\u09AA\u09A4\u09CD\u09B0"],
         productServiceTerms: [
           "chair",
           "table",
@@ -16148,7 +16172,13 @@ var init_relevanceEngine = __esm({
           "sectional",
           "ergonomic chair",
           "standing desk",
-          "bedroom set"
+          "bedroom set",
+          "\u099A\u09C7\u09DF\u09BE\u09B0",
+          "\u09A1\u09BE\u0987\u09A8\u09BF\u0982",
+          "\u0996\u09BE\u099F",
+          "\u09B8\u09CB\u09AB\u09BE",
+          "\u099F\u09C7\u09AC\u09BF\u09B2",
+          "\u0986\u09B2\u09AE\u09BE\u09B0\u09BF"
         ],
         industryDescriptors: [
           "furniture store",
@@ -17589,6 +17619,9 @@ var ResearchConfigView = ({
   const [customKeywords, setCustomKeywords] = (0, import_react.useState)("Furniture, Home Decor");
   const [countryCode, setCountryCode] = (0, import_react.useState)("BD");
   const [maxCandidates, setMaxCandidates] = (0, import_react.useState)(200);
+  const [strictLocal, setStrictLocal] = (0, import_react.useState)(true);
+  const [requiredCta, setRequiredCta] = (0, import_react.useState)("ANY");
+  const [requiredDestination, setRequiredDestination] = (0, import_react.useState)("ANY");
   const selectedPreset = RESEARCH_PRESETS.find((p) => p.preset_id === presetId) || RESEARCH_PRESETS[0];
   const handleReviewClick = () => {
     let keywords = [];
@@ -17607,7 +17640,10 @@ var ResearchConfigView = ({
       countryCode,
       locationName: selectedLoc?.displayName || countryCode,
       maxCandidates,
-      presetName
+      presetName,
+      strictLocal,
+      requiredCta: requiredCta !== "ANY" ? requiredCta : void 0,
+      requiredDestination: requiredDestination !== "ANY" ? requiredDestination : void 0
     });
   };
   return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "flex flex-col gap-4 p-4 bg-slate-900 border border-slate-800 rounded-xl", children: [
@@ -17699,6 +17735,70 @@ var ResearchConfigView = ({
         /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { className: "text-[10px] text-slate-500", children: "Separate multiple search terms with commas or newlines." })
       ] })
     ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "p-3 bg-slate-950/60 rounded-lg border border-slate-800 flex flex-col gap-2.5", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "text-xs font-semibold uppercase tracking-wider text-slate-400", children: "Qualification Rules" }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("label", { className: "flex items-center gap-2 text-xs text-slate-300 cursor-pointer", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+          "input",
+          {
+            type: "checkbox",
+            checked: strictLocal,
+            onChange: (e) => setStrictLocal(e.target.checked),
+            disabled,
+            className: "rounded border-slate-700 bg-slate-950 text-sky-500 focus:ring-0"
+          }
+        ),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("span", { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("strong", { className: "text-slate-200", children: "Strict-Local Verification" }),
+          " (Foreign & unknown locations fail gate)"
+        ] })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "grid grid-cols-2 gap-2 text-xs", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("label", { htmlFor: "required-cta-select", className: "text-[10px] uppercase text-slate-400 block mb-0.5", children: "Required CTA" }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
+            "select",
+            {
+              id: "required-cta-select",
+              value: requiredCta,
+              onChange: (e) => setRequiredCta(e.target.value),
+              disabled,
+              className: "w-full px-2 py-1 text-xs bg-slate-950 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-1 focus:ring-sky-400",
+              children: [
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "ANY", children: "Any Observed CTA" }),
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "LEARN_MORE", children: "Learn More" }),
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "SHOP_NOW", children: "Shop Now" }),
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "SIGN_UP", children: "Sign Up" }),
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "SEND_MESSAGE", children: "Send Message" }),
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "WHATSAPP_MESSAGE", children: "WhatsApp" }),
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "CALL_NOW", children: "Call Now" })
+              ]
+            }
+          )
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("label", { htmlFor: "required-dest-select", className: "text-[10px] uppercase text-slate-400 block mb-0.5", children: "Required Destination" }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
+            "select",
+            {
+              id: "required-dest-select",
+              value: requiredDestination,
+              onChange: (e) => setRequiredDestination(e.target.value),
+              disabled,
+              className: "w-full px-2 py-1 text-xs bg-slate-950 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-1 focus:ring-sky-400",
+              children: [
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "ANY", children: "Any Destination" }),
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "EXTERNAL_WEBSITE", children: "External Website" }),
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "INSTANT_FORM", children: "Meta Instant Form" }),
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "MESSAGING", children: "Messaging" }),
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "CALL", children: "Phone Call" }),
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "APP_STORE", children: "App Store" })
+              ]
+            }
+          )
+        ] })
+      ] })
+    ] }),
     /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "p-3 bg-slate-950/60 rounded-lg border border-slate-800 flex flex-col gap-2", children: [
       /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("label", { htmlFor: "max-candidates-input", className: "text-xs font-semibold uppercase tracking-wider text-slate-400", children: "Max Leads Target" }),
       /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "flex items-center gap-3", children: [
@@ -17760,6 +17860,42 @@ function getSemanticStatusBadge(status) {
         colorClass: "text-rose-400 bg-rose-950/50 border-rose-500/40",
         iconSymbol: "\u2715",
         accessibleLabel: `Status: ${status} (Excluded)`
+      };
+    case "REVIEW_REQUIRED":
+      return {
+        colorClass: "text-amber-400 bg-amber-950/50 border-amber-500/40",
+        iconSymbol: "\u26A0",
+        accessibleLabel: `Status: Review Required`
+      };
+    case "UNASSESSED":
+      return {
+        colorClass: "text-slate-400 bg-slate-900 border-slate-700",
+        iconSymbol: "\u25CB",
+        accessibleLabel: `Status: Unassessed`
+      };
+    case "LOCAL_VERIFIED":
+      return {
+        colorClass: "text-emerald-400 bg-emerald-950/50 border-emerald-500/40",
+        iconSymbol: "\u{1F4CD}",
+        accessibleLabel: `Geography: Local Verified`
+      };
+    case "FOREIGN_VERIFIED":
+      return {
+        colorClass: "text-rose-400 bg-rose-950/50 border-rose-500/40",
+        iconSymbol: "\u{1F310}",
+        accessibleLabel: `Geography: Foreign Verified`
+      };
+    case "LOCAL_PROBABLE":
+      return {
+        colorClass: "text-amber-400 bg-amber-950/50 border-amber-500/40",
+        iconSymbol: "?",
+        accessibleLabel: `Geography: Local Probable`
+      };
+    case "LOCATION_UNKNOWN":
+      return {
+        colorClass: "text-slate-400 bg-slate-900 border-slate-700",
+        iconSymbol: "\u2014",
+        accessibleLabel: `Geography: Location Unknown`
       };
     case "UNCERTAIN":
     case "AMBIGUOUS":
@@ -17924,6 +18060,21 @@ var PlanReviewModal = ({
               /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "p-2.5 bg-slate-950/40 rounded border border-slate-800 flex items-center justify-between", children: [
                 /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "text-slate-400", children: "Qualification Profile:" }),
                 /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "font-semibold text-slate-200", children: plan.qualificationProfileName })
+              ] }),
+              /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "p-2.5 bg-slate-950/40 rounded border border-slate-800 flex flex-col gap-1 text-[11px]", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "text-slate-400 font-semibold uppercase tracking-wider text-[10px]", children: "Configured Qualification Rules:" }),
+                /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "flex items-center justify-between", children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "text-slate-400", children: "Strict-Local Verification:" }),
+                  /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: `font-medium ${plan.strictLocal !== false ? "text-emerald-400" : "text-amber-400"}`, children: plan.strictLocal !== false ? "Enabled (Foreign/Unknown fails)" : "Disabled" })
+                ] }),
+                plan.requiredCta && /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "flex items-center justify-between", children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "text-slate-400", children: "Required CTA:" }),
+                  /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "font-medium text-sky-400", children: plan.requiredCta })
+                ] }),
+                plan.requiredDestination && /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "flex items-center justify-between", children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "text-slate-400", children: "Required Destination:" }),
+                  /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "font-medium text-sky-400", children: plan.requiredDestination })
+                ] })
               ] }),
               !plan.canExecuteLive && /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(
                 "div",
@@ -18142,6 +18293,10 @@ function toFriendlyStatus(status) {
     // Qualification States
     case "QUALIFIED":
       return "Qualified";
+    case "REVIEW_REQUIRED":
+      return "Review required";
+    case "UNASSESSED":
+      return "Unassessed";
     case "NOT_QUALIFIED":
       return "Does not meet current criteria";
     case "UNCERTAIN":
@@ -18152,6 +18307,80 @@ function toFriendlyStatus(status) {
       return "Not evaluated";
     case "DISQUALIFIED":
       return "Does not meet current criteria";
+    // Geographic Classifications
+    case "LOCAL_VERIFIED":
+      return "Locally verified";
+    case "LOCAL_PROBABLE":
+      return "Probable local (unverified)";
+    case "FOREIGN_VERIFIED":
+      return "Foreign verified";
+    case "LOCATION_UNKNOWN":
+      return "Location unknown";
+    // CTA Types
+    case "LEARN_MORE":
+      return "Learn More";
+    case "SHOP_NOW":
+      return "Shop Now";
+    case "SEND_MESSAGE":
+      return "Send Message";
+    case "WHATSAPP_MESSAGE":
+      return "WhatsApp";
+    case "CALL_NOW":
+      return "Call Now";
+    case "SIGN_UP":
+      return "Sign Up";
+    case "BOOK_NOW":
+      return "Book Now";
+    case "APPLY_NOW":
+      return "Apply Now";
+    case "GET_OFFER":
+      return "Get Offer";
+    case "GET_QUOTE":
+      return "Get Quote";
+    case "DOWNLOAD":
+      return "Download";
+    case "CONTACT_US":
+      return "Contact Us";
+    case "NO_CTA":
+      return "No CTA";
+    // Destination Types
+    case "EXTERNAL_WEBSITE":
+      return "External website";
+    case "INSTANT_FORM":
+      return "Meta instant form";
+    case "MESSAGING":
+      return "Messaging";
+    case "CALL":
+      return "Phone call";
+    case "APP_STORE":
+      return "App Store";
+    case "NO_VISIBLE_DESTINATION":
+      return "No visible destination";
+    case "OTHER":
+      return "Other destination";
+    // Qualification Reason Codes
+    case "QUALIFIED_ALL_GATES_PASSED":
+      return "Meets all qualification requirements";
+    case "GATE_FAIL_RELEVANCE_NOT_MET":
+      return "Niche relevance not established";
+    case "GATE_FAIL_RELEVANCE_UNCERTAIN":
+      return "Niche relevance uncertain";
+    case "GATE_FAIL_RELEVANCE_UNASSESSED":
+      return "Niche relevance not assessed";
+    case "GATE_FAIL_FOREIGN_VERIFIED":
+      return "Business physically verified in foreign country";
+    case "GATE_FAIL_LOCAL_UNVERIFIED":
+      return "Physical location unverified (probable local)";
+    case "GATE_FAIL_LOCATION_UNKNOWN":
+      return "Physical business location unknown";
+    case "GATE_FAIL_REQUIRED_CTA_MISSING":
+      return "Required call-to-action (CTA) not observed";
+    case "GATE_FAIL_REQUIRED_DESTINATION_MISSING":
+      return "Required destination type not observed";
+    case "GATE_FAIL_WEBSITE_MISSING":
+      return "Verified business website not observed";
+    case "GATE_FAIL_DATA_INTEGRITY":
+      return "Essential business candidate evidence missing";
     // Freshness & Change States
     case "CURRENT":
       return "Recently observed";
@@ -18675,8 +18904,10 @@ var ResultsTableView = ({
               children: [
                 /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "ALL", children: "All Qualifications" }),
                 /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "QUALIFIED", children: "Qualified" }),
+                /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "REVIEW_REQUIRED", children: "Review Required" }),
                 /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "NOT_QUALIFIED", children: "Does not meet criteria" }),
                 /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "UNCERTAIN", children: "Needs review" }),
+                /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "UNASSESSED", children: "Unassessed" }),
                 /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "BLOCKED", children: "Unavailable" })
               ]
             }
@@ -18890,13 +19121,22 @@ var ResultsTableView = ({
                   /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("h4", { className: "text-sm font-semibold text-slate-100 leading-tight hover:text-sky-300", children: r.displayName }),
                   /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "flex items-center gap-1.5 flex-wrap mt-1 text-[11px] text-slate-400", children: [
                     r.category && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "text-slate-300 font-medium", children: r.category }),
-                    r.geographicContext && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
+                    r.geographicClassification ? /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "text-slate-600", children: "\u2022" }),
+                      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: `text-[10px] font-medium ${r.geographicClassification === "LOCAL_VERIFIED" ? "text-emerald-400" : r.geographicClassification === "FOREIGN_VERIFIED" ? "text-rose-400" : "text-amber-400"}`, children: [
+                        r.geographicClassification === "LOCAL_VERIFIED" ? "\u{1F4CD}" : r.geographicClassification === "FOREIGN_VERIFIED" ? "\u{1F310}" : "\u2753",
+                        " ",
+                        toFriendlyStatus(r.geographicClassification),
+                        r.businessCountryCode ? ` [${r.businessCountryCode}]` : "",
+                        r.targetCountryCode && r.targetCountryCode !== r.businessCountryCode ? ` (Target: ${r.targetCountryCode})` : ""
+                      ] })
+                    ] }) : r.geographicContext ? /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
                       /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "text-slate-600", children: "\u2022" }),
                       /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { children: [
                         "\u{1F4CD} ",
                         r.geographicContext
                       ] })
-                    ] }),
+                    ] }) : null,
                     /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "text-slate-600", children: "\u2022" }),
                     /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "flex items-center gap-1", children: r.sourceBadges && r.sourceBadges.length > 0 ? r.sourceBadges.map((badge, bIdx) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
                       "span",
@@ -18910,6 +19150,23 @@ var ResultsTableView = ({
                 ] })
               ] }),
               /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "flex flex-wrap items-center gap-1.5 justify-end", children: [
+                r.qualificationScore !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+                  "span",
+                  {
+                    className: "px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-300 bg-slate-800 border border-slate-700 rounded",
+                    title: `Lead Score: ${(r.qualificationScore * 100).toFixed(0)}% (Ranking aid only; does not determine eligibility)`,
+                    children: [
+                      "Score: ",
+                      (r.qualificationScore * 100).toFixed(0),
+                      "%",
+                      r.scoreConfidence && r.scoreConfidence !== "NONE" && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "text-slate-400 font-sans ml-1 text-[9px]", children: [
+                        "(",
+                        r.scoreConfidence,
+                        ")"
+                      ] })
+                    ]
+                  }
+                ),
                 /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
                   StatusBadge,
                   {
@@ -18949,7 +19206,15 @@ var ResultsTableView = ({
                   /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { children: "\u{1F464}" }),
                   " Person"
                 ] }),
-                r.dataSignals?.freshness && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: `px-1.5 py-0.2 text-[9px] rounded font-medium ${r.dataSignals.freshness === "CURRENT" ? "bg-slate-800 text-slate-400" : "bg-amber-950/50 text-amber-300 border border-amber-500/30"}`, children: r.dataSignals.freshnessLabel })
+                r.dataSignals?.freshness && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: `px-1.5 py-0.2 text-[9px] rounded font-medium ${r.dataSignals.freshness === "CURRENT" ? "bg-slate-800 text-slate-400" : "bg-amber-950/50 text-amber-300 border border-amber-500/30"}`, children: r.dataSignals.freshnessLabel }),
+                r.ctaType && r.ctaType !== "UNKNOWN" && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "px-1.5 py-0.2 text-[9px] bg-slate-800 text-slate-300 rounded border border-slate-700", children: [
+                  "CTA: ",
+                  toFriendlyStatus(r.ctaType)
+                ] }),
+                r.destinationType && r.destinationType !== "UNKNOWN" && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "px-1.5 py-0.2 text-[9px] bg-slate-800 text-slate-300 rounded border border-slate-700", children: [
+                  "Dest: ",
+                  toFriendlyStatus(r.destinationType)
+                ] })
               ] }),
               r.qualityMetrics && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "flex items-center gap-2 text-[10px] text-slate-500 ml-auto", children: [
                 /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { children: [
@@ -18968,6 +19233,13 @@ var ResultsTableView = ({
                   r.qualityMetrics.contradictionCount,
                   " conflict"
                 ] })
+              ] })
+            ] }),
+            r.qualificationState === "REVIEW_REQUIRED" && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "w-full mt-0.5 p-1.5 bg-amber-950/30 border border-amber-500/30 rounded text-[10px] text-amber-200 flex items-start gap-1.5", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "text-amber-400 font-bold mt-0.5", "aria-hidden": "true", children: "\u26A0" }),
+              /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "flex-1", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "font-semibold text-amber-300 block mb-0.5", children: "Review Required:" }),
+                /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { children: r.qualificationReasons && r.qualificationReasons.length > 0 ? r.qualificationReasons.join(". ") : "Qualification reason unavailable; review required." })
               ] })
             ] })
           ]
@@ -19268,6 +19540,23 @@ var ResultDetailDrawer = ({
                     /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { children: "Geographic Scope: " }),
                     /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("strong", { className: "text-slate-200", children: [location.city, location.region, location.country].filter(Boolean).join(", ") })
                   ] }),
+                  lead.geographicClassification && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "mt-1.5 p-2 bg-slate-900 rounded border border-slate-800 text-[11px] flex flex-col gap-1", children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "flex items-center justify-between", children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "text-slate-400 font-semibold text-[10px] uppercase", children: "Geographic Classification:" }),
+                      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(StatusBadge, { status: lead.geographicClassification, customLabel: toFriendlyStatus(lead.geographicClassification), size: "sm" })
+                    ] }),
+                    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "grid grid-cols-2 gap-2 text-[10px] mt-0.5", children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { children: [
+                        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "text-slate-500 block", children: "Target Country:" }),
+                        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("strong", { className: "text-slate-200", children: lead.targetCountryCode || "Global / Unspecified" })
+                      ] }),
+                      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { children: [
+                        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "text-slate-500 block", children: "Physical Business Country:" }),
+                        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("strong", { className: "text-slate-200", children: lead.businessCountryCode || "Unknown" })
+                      ] })
+                    ] }),
+                    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "text-[9px] text-slate-500 mt-0.5", children: "* Targeting intent, ad delivery, or currency is not treated as proof of physical business location." })
+                  ] }),
                   location.coordinates && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "text-slate-500 font-mono text-[10px]", children: [
                     "Coordinates: ",
                     location.coordinates
@@ -19293,7 +19582,20 @@ var ResultDetailDrawer = ({
                       }
                     ),
                     lead.dataSignals?.websiteVerified && /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "px-1.5 py-0.2 text-[9px] bg-emerald-950/60 text-emerald-400 border border-emerald-500/40 rounded font-semibold ml-auto", children: "\u2713 VERIFIED" })
-                  ] }) : /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "text-slate-500", children: "Website data not available." }),
+                  ] }) : /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "p-1.5 bg-slate-900/60 rounded border border-slate-800 text-slate-400 text-[10px]", children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { children: "No external destination observed in card. " }),
+                    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "text-slate-500 block mt-0.5", children: "(Missing destination evidence does not prove that a business has no website)." })
+                  ] }),
+                  /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "grid grid-cols-2 gap-2 mt-0.5 p-1.5 bg-slate-900 rounded border border-slate-800 text-[10px]", children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "text-slate-500 block", children: "Observed CTA:" }),
+                      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("strong", { className: "text-slate-200", children: lead.ctaType ? toFriendlyStatus(lead.ctaType) : "None / Not observed" })
+                    ] }),
+                    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "text-slate-500 block", children: "Observed Destination:" }),
+                      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("strong", { className: "text-slate-200", children: lead.destinationType ? toFriendlyStatus(lead.destinationType) : "Unknown" })
+                    ] })
+                  ] }),
                   /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "flex flex-wrap gap-1.5 mt-0.5", children: [
                     digital.cms && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("span", { className: "px-1.5 py-0.5 bg-slate-900 text-slate-300 rounded border border-slate-800 text-[10px]", children: [
                       "CMS: ",
@@ -19447,11 +19749,39 @@ var ResultDetailDrawer = ({
                     }
                   )
                 ] }),
-                /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "text-[11px] text-slate-400", children: [
-                  "Profile: ",
-                  /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("strong", { className: "text-slate-200", children: qualification.profileName })
+                /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "text-[11px] text-slate-400 flex items-center justify-between", children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { children: [
+                    "Profile: ",
+                    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("strong", { className: "text-slate-200", children: qualification.profileName })
+                  ] }),
+                  lead.qualificationScore !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "text-[10px] font-mono text-slate-300", children: [
+                    "Score: ",
+                    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("strong", { className: "text-sky-400", children: lead.qualificationScoreText || `${(lead.qualificationScore * 100).toFixed(0)}%` }),
+                    lead.scoreConfidence && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("span", { className: "text-slate-400 font-sans ml-1", children: [
+                      "(",
+                      lead.scoreConfidence,
+                      " conf)"
+                    ] })
+                  ] })
                 ] }),
                 /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "text-[11px] text-slate-300 leading-relaxed bg-slate-900/60 p-2 rounded border border-slate-800", children: qualification.explanation }),
+                /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "text-[9px] text-slate-500 -mt-1", children: "* Lead score is a ranking metric and cannot override failed qualification gates." }),
+                lead.qualificationFailedGates && lead.qualificationFailedGates.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "p-2 bg-rose-950/40 border border-rose-500/40 rounded text-[11px] text-rose-200 flex flex-col gap-1", children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("span", { className: "text-[10px] font-semibold uppercase text-rose-300 flex items-center gap-1", children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { children: "\u2715" }),
+                    " Failed Qualification Gates (",
+                    lead.qualificationFailedGates.length,
+                    "):"
+                  ] }),
+                  /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("ul", { className: "list-disc list-inside space-y-0.5 text-[10px] text-rose-200", children: lead.qualificationFailedGates.map((gate, gIdx) => /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("li", { children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("strong", { children: toFriendlyStatus(gate) }),
+                    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("span", { className: "font-mono text-[9px] text-rose-400 ml-1", children: [
+                      "[",
+                      gate,
+                      "]"
+                    ] })
+                  ] }, gIdx)) })
+                ] }),
                 qualification.whyReasons && qualification.whyReasons.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { children: [
                   /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "text-[10px] font-semibold uppercase text-emerald-400 block mb-1", children: "Why Qualified:" }),
                   /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("ul", { className: "space-y-1 text-[11px]", children: qualification.whyReasons.map((r, i) => /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("li", { className: "flex items-start gap-1.5 text-slate-200", children: [
@@ -19601,6 +19931,7 @@ var ExportModal = ({
   onCancel,
   isExporting = false
 }) => {
+  const [qualifiedOnly, setQualifiedOnly] = (0, import_react5.useState)(true);
   const confirmBtnRef = (0, import_react5.useRef)(null);
   (0, import_react5.useEffect)(() => {
     if (!isOpen) return;
@@ -19664,6 +19995,21 @@ var ExportModal = ({
             preview.totalSelectedRecords,
             " selected records satisfy export policy requirements."
           ] }),
+          /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("label", { className: "flex items-center gap-2 p-2 bg-slate-950/60 rounded border border-slate-800 text-[11px] text-slate-300 cursor-pointer", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+              "input",
+              {
+                type: "checkbox",
+                checked: qualifiedOnly,
+                onChange: (e) => setQualifiedOnly(e.target.checked),
+                className: "rounded border-slate-700 bg-slate-950 text-emerald-500 focus:ring-0 cursor-pointer"
+              }
+            ),
+            /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { children: [
+              /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "font-semibold text-slate-100 block", children: "Strict Qualified Export" }),
+              /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "text-[10px] text-slate-400", children: "Enforce fail-closed qualification gates (relevance, strict-local, CTA/destination)" })
+            ] })
+          ] }),
           /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { children: [
             /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "text-[10px] uppercase tracking-wider text-slate-400 block mb-1", children: "Included Export Fields:" }),
             /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "flex flex-wrap gap-1", children: preview.eligibleFields.map((f) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "px-1.5 py-0.2 text-[10px] font-mono bg-slate-800 text-slate-300 rounded", children: f }, f)) })
@@ -19689,7 +20035,7 @@ var ExportModal = ({
               ref: confirmBtnRef,
               type: "button",
               disabled: !preview.isExportReady || isExporting,
-              onClick: onConfirmExport,
+              onClick: () => onConfirmExport(qualifiedOnly),
               className: `px-4 py-1.5 text-xs font-semibold rounded transition-colors flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer ${preview.isExportReady && !isExporting ? "bg-emerald-600 hover:bg-emerald-500 text-white" : "bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed opacity-50"}`,
               children: isExporting ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { children: "Exporting CSV..." }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("span", { children: [
                 "Download CSV (",
@@ -20861,6 +21207,80 @@ function isCanonicalLeadRecord(record) {
     record && typeof record === "object" && (record.schemaVersion === "lead-intelligence-v1" || "canonicalEntityId" in record && "canonicalBusinessName" in record && "policy" in record)
   );
 }
+function isExtensionLead(record) {
+  return Boolean(
+    record && typeof record === "object" && !isCanonicalLeadRecord(record) && ("leadId" in record || "status" in record && ("advertiserName" in record || "adCount" in record || "adLibraryIds" in record))
+  );
+}
+function extensionLeadToResultRowViewModel(lead) {
+  const recordId = lead.leadId || lead.entityId || `rec_${Date.now()}`;
+  const entityId = lead.pageId || lead.leadId || recordId;
+  const displayName = lead.name || lead.advertiserName || "Unknown Business";
+  const category = lead.category || lead.matchedKeywords && lead.matchedKeywords[0] || void 0;
+  const rawUrl = lead.destinationUrl || lead.websiteUrl;
+  const safeWeb = getSafeExternalUrl(rawUrl);
+  const phone = lead.businessPhone || lead.phone || lead.phones && lead.phones[0];
+  const email = lead.businessEmail || lead.email || lead.emails && lead.emails[0];
+  const hasPhone = Boolean(phone);
+  const hasEmail = Boolean(email);
+  const hasAddress = Boolean(lead.businessLocationEvidence && lead.businessLocationEvidence.length > 0 || lead.businessCountryCode);
+  const hasContactForm = Boolean((lead.destinationTypes || []).includes("INSTANT_FORM") || lead.primaryDestinationType === "INSTANT_FORM");
+  const hasSocialLinks = Boolean(lead.facebookPageUrl);
+  const qualState = lead.status || "REVIEW_REQUIRED";
+  let geoContext = lead.locationName || lead.targetCountryCode || "Global";
+  if (lead.geographicClassification) {
+    const busCountry = lead.businessCountryCode ? ` [${lead.businessCountryCode}]` : "";
+    const targetDiff = lead.targetCountryCode && lead.targetCountryCode !== lead.businessCountryCode ? ` (Target: ${lead.targetCountryCode})` : "";
+    geoContext = `${lead.geographicClassification}${busCountry}${targetDiff}`;
+  }
+  return {
+    recordId,
+    entityId,
+    displayName,
+    primarySource: "META",
+    provenance: "META_DERIVED",
+    isMixedProvenance: false,
+    relevanceDecision: lead.relevanceDecision || "UNASSESSED",
+    websiteState: lead.websiteState === "found" ? "found" : lead.destinationUrl ? "WEBSITE_PRESENT_UNVERIFIED" : "NOT_OBSERVED",
+    websiteUrl: safeWeb,
+    contactSummary: {
+      hasPhone,
+      hasEmail,
+      hasAddress,
+      hasContactForm,
+      hasSocialLinks,
+      phoneText: phone,
+      emailText: email
+    },
+    qualificationState: qualState,
+    qualificationScore: lead.leadScore,
+    scoreConfidence: lead.scoreConfidence || lead.relevanceConfidence || "NONE",
+    geographicContext: geoContext,
+    targetCountryCode: lead.targetCountryCode,
+    businessCountryCode: lead.businessCountryCode,
+    geographicClassification: lead.geographicClassification,
+    ctaType: lead.primaryCtaType || lead.ctaTypes && lead.ctaTypes[0] || "UNKNOWN",
+    destinationType: lead.primaryDestinationType || lead.destinationTypes && lead.destinationTypes[0] || "UNKNOWN",
+    qualificationFailedGates: lead.qualificationFailedGates || [],
+    qualificationReasons: lead.qualificationReasons || [],
+    friendlyQualificationState: toFriendlyStatus(qualState),
+    isRestricted: false,
+    isExportable: true,
+    isPersistable: true,
+    corroborationCount: lead.adCount || 1,
+    category,
+    sourceBadges: [{ sourceType: "META", label: "Meta", isRestricted: false }],
+    dataSignals: {
+      websiteVerified: Boolean(lead.destinationUrl && lead.websiteState === "found"),
+      contactAvailable: hasPhone || hasEmail,
+      publicPersonAvailable: false,
+      advertisingEvidence: true,
+      freshness: "CURRENT",
+      freshnessLabel: "Recently observed"
+    },
+    canonicalRecord: lead
+  };
+}
 function canonicalLeadToResultRowViewModel(record) {
   const recordId = `rec_${record.canonicalEntityId}`;
   const entityId = record.canonicalEntityId;
@@ -21242,6 +21662,9 @@ function toResultRowViewModel(record) {
   if (isCanonicalLeadRecord(record)) {
     return canonicalLeadToResultRowViewModel(record);
   }
+  if (isExtensionLead(record)) {
+    return extensionLeadToResultRowViewModel(record);
+  }
   const isUnified = "entityId" in record && "corroborationCount" in record;
   const u = record;
   const c = record;
@@ -21370,9 +21793,213 @@ function toResultRowViewModel(record) {
     websiteAvailability: record.websiteUrl?.availability || (record.digital?.verifiedWebsite?.value || websiteUrl ? "PRESENT" : "UNKNOWN")
   };
 }
+function extensionLeadToResultDetailViewModel(lead) {
+  const row = extensionLeadToResultRowViewModel(lead);
+  const aliases = (lead.historicalNames || []).map((h) => h.name);
+  const mandatoryCriteria = [];
+  const optionalCriteria = [];
+  mandatoryCriteria.push({
+    criterionId: "DATA_INTEGRITY",
+    name: "Candidate Data Integrity",
+    isMandatory: true,
+    status: lead.name || lead.advertiserName ? "PASS" : "FAIL",
+    scoreAwarded: lead.name || lead.advertiserName ? 20 : 0,
+    explanation: lead.name || lead.advertiserName ? "Candidate entity identity corroborated." : "Missing advertiser name.",
+    reasonCode: lead.name || lead.advertiserName ? "PASS_NAME_VERIFIED" : "GATE_FAIL_DATA_INTEGRITY",
+    referencedEvidence: [lead.name || lead.advertiserName || ""]
+  });
+  const relPassed = lead.relevanceDecision === "RELEVANT";
+  const relStatus = relPassed ? "PASS" : lead.relevanceDecision === "NOT_RELEVANT" ? "FAIL" : "UNKNOWN";
+  mandatoryCriteria.push({
+    criterionId: "NICHE_RELEVANCE",
+    name: "Niche Relevance",
+    isMandatory: true,
+    status: relStatus,
+    scoreAwarded: relPassed ? 35 : 0,
+    explanation: lead.relevanceReasons && lead.relevanceReasons.length > 0 ? lead.relevanceReasons.join("; ") : relPassed ? "Candidate matches target niche keywords." : "Relevance criteria not satisfied.",
+    reasonCode: relPassed ? "ACCEPT_RELEVANT" : lead.relevanceDecision === "NOT_RELEVANT" ? "GATE_FAIL_RELEVANCE_NOT_MET" : "GATE_FAIL_RELEVANCE_UNASSESSED",
+    referencedEvidence: lead.relevanceMatchedTerms || []
+  });
+  const geoPassed = lead.geographicClassification === "LOCAL_VERIFIED";
+  const geoStatus = geoPassed ? "PASS" : lead.geographicClassification === "FOREIGN_VERIFIED" ? "FAIL" : "UNKNOWN";
+  mandatoryCriteria.push({
+    criterionId: "GEOGRAPHIC_ELIGIBILITY",
+    name: "Geographic Eligibility (Strict-Local)",
+    isMandatory: true,
+    status: geoStatus,
+    scoreAwarded: geoPassed ? 25 : 0,
+    explanation: geoPassed ? `Locally verified in ${lead.targetCountryCode || lead.businessCountryCode || "target country"}.` : lead.geographicClassification === "FOREIGN_VERIFIED" ? `Business physically located in foreign country (${lead.businessCountryCode || "abroad"}).` : "Business physical location unverified (probable or unknown).",
+    reasonCode: geoPassed ? "PASS_LOCAL_VERIFIED" : lead.geographicClassification === "FOREIGN_VERIFIED" ? "GATE_FAIL_FOREIGN_VERIFIED" : "GATE_FAIL_LOCAL_UNVERIFIED",
+    referencedEvidence: lead.businessLocationEvidence || []
+  });
+  const destPassed = Boolean(lead.destinationUrl || lead.websiteState === "found");
+  optionalCriteria.push({
+    criterionId: "DESTINATION_OBSERVED",
+    name: "Observed Destination",
+    isMandatory: false,
+    status: destPassed ? "PASS" : "UNKNOWN",
+    scoreAwarded: destPassed ? 20 : 0,
+    explanation: destPassed ? `Observed: ${lead.primaryDestinationType || "External Website"}` : "Missing destination URL. (Missing evidence does not prove business has no website).",
+    reasonCode: destPassed ? "PASS_DESTINATION_OBSERVED" : "DESTINATION_NOT_OBSERVED",
+    referencedEvidence: lead.destinationUrl ? [lead.destinationUrl] : []
+  });
+  const whyReasons = [];
+  const potentialIssues = [];
+  if (lead.status === "QUALIFIED") {
+    whyReasons.push({ label: "Niche Relevance Confirmed", passed: true, explanation: lead.relevanceReasons?.join("; ") || "Target keywords confirmed" });
+    whyReasons.push({ label: "Strict Local Presence", passed: true, explanation: `Physical business location verified in ${lead.targetCountryCode || "target country"}` });
+    if (lead.destinationUrl) {
+      whyReasons.push({ label: "Destination Observed", passed: true, explanation: `Observed ${lead.primaryDestinationType || "destination"}` });
+    }
+  }
+  if (lead.qualificationReasons && lead.qualificationReasons.length > 0) {
+    for (let i = 0; i < lead.qualificationReasons.length; i++) {
+      const code = lead.qualificationFailedGates?.[i] || "REVIEW_REQUIRED";
+      potentialIssues.push({
+        label: toFriendlyStatus(code),
+        explanation: lead.qualificationReasons[i]
+      });
+    }
+  } else if (lead.status === "REVIEW_REQUIRED") {
+    potentialIssues.push({
+      label: "Review Required",
+      explanation: "Qualification reason unavailable; review required."
+    });
+  }
+  const scoreText = lead.leadScore !== void 0 ? `${(lead.leadScore * 100).toFixed(0)}%` : void 0;
+  const identityDetails = {
+    canonicalBusinessName: row.displayName,
+    aliases,
+    entityType: "LOCAL_BUSINESS",
+    entityTypeLabel: toFriendlyStatus("LOCAL_BUSINESS")
+  };
+  const businessDetails = {
+    categories: lead.matchedKeywords || [],
+    services: [],
+    serviceAreas: [lead.locationName || lead.targetCountryCode || "Global"],
+    businessStatus: toFriendlyStatus("OPERATIONAL")
+  };
+  const locationDetails = {
+    address: lead.businessLocationEvidence && lead.businessLocationEvidence[0] || void 0,
+    city: lead.locationName,
+    region: void 0,
+    country: lead.businessCountryCode || lead.targetCountryCode,
+    addresses: lead.businessLocationEvidence || []
+  };
+  const digitalPresence = {
+    websiteUrl: row.websiteUrl,
+    domain: lead.destinationDomain,
+    socialLinks: lead.facebookPageUrl ? [{ platform: "Facebook", url: lead.facebookPageUrl }] : []
+  };
+  const contactsDetails = {
+    emails: lead.businessEmail ? [{ address: lead.businessEmail, classification: "Business Email", source: "Meta" }] : [],
+    phones: lead.businessPhone ? [{ number: lead.businessPhone, type: "Business Phone", source: "Meta" }] : [],
+    forms: (lead.destinationTypes || []).includes("INSTANT_FORM") ? ["Meta Instant Form Observed"] : []
+  };
+  const qualificationDetails = {
+    finalState: row.qualificationState,
+    friendlyFinalState: toFriendlyStatus(row.qualificationState),
+    profileId: "STRICT_QUALIFICATION_GATES",
+    profileName: "Strict Qualification Gates (Phase 0.6)",
+    explanation: lead.qualificationReasons && lead.qualificationReasons.length > 0 ? lead.qualificationReasons.join(". ") : lead.status === "QUALIFIED" ? "Candidate meets all mandatory qualification criteria." : "Candidate does not satisfy strict qualification criteria; review required.",
+    whyReasons,
+    potentialIssues,
+    criteria: [...mandatoryCriteria, ...optionalCriteria].map((c) => ({
+      ...c,
+      friendlyStatus: toFriendlyStatus(c.status)
+    }))
+  };
+  const evidenceItems = [];
+  if (lead.adLibraryIds) {
+    for (let i = 0; i < lead.adLibraryIds.length; i++) {
+      evidenceItems.push({
+        id: `ev_${i + 1}`,
+        fact: `Observed Meta Ad Library ID: ${lead.adLibraryIds[i]}`,
+        sourceFamily: "META",
+        evidenceType: "AD_LIBRARY_CARD",
+        pageOrSourceReference: lead.adLibraryUrl || "Meta Ad Library",
+        observationState: "OBSERVED",
+        provenance: "META_DERIVED",
+        isRestricted: false
+      });
+    }
+  }
+  return {
+    recordId: row.recordId,
+    entityId: row.entityId,
+    displayName: row.displayName,
+    aliases,
+    identityConfidence: lead.businessLocationConfidence || "HIGH",
+    contradictionFlags: [],
+    primarySource: "META",
+    contributingSources: ["META"],
+    provenanceLineage: "META_DERIVED",
+    provenanceClassification: "DIRECT_SOURCE",
+    relevanceDecision: row.relevanceDecision,
+    relevanceConfidence: lead.relevanceConfidence || "NONE",
+    relevanceExplanation: lead.relevanceReasons && lead.relevanceReasons.length > 0 ? lead.relevanceReasons.join("; ") : "Relevance evaluated via strict rules.",
+    relevanceMatchedTerms: lead.relevanceMatchedTerms || [],
+    websiteUrl: row.websiteUrl,
+    websiteVerificationStatus: lead.websiteState === "found" ? "FOUND" : "NOT_OBSERVED",
+    phones: lead.businessPhone ? [{ number: lead.businessPhone, type: "BUSINESS", observation: "Observed on Ad Card" }] : [],
+    emails: lead.businessEmail ? [{ address: lead.businessEmail, classification: "BUSINESS", observation: "Observed on Ad Card" }] : [],
+    addresses: (lead.businessLocationEvidence || []).map((a) => ({ addressLine: a, isBranch: false })),
+    hasContactForm: Boolean((lead.destinationTypes || []).includes("INSTANT_FORM")),
+    socialLinks: lead.facebookPageUrl ? [{ platform: "Facebook", url: lead.facebookPageUrl }] : [],
+    qualificationState: row.qualificationState,
+    qualificationProfileName: "Strict Qualification Gates (Phase 0.6)",
+    qualificationProfileVersion: "0.6.0",
+    qualificationScore: lead.leadScore,
+    qualificationScoreText: scoreText,
+    scoreConfidence: row.scoreConfidence,
+    targetCountryCode: lead.targetCountryCode,
+    businessCountryCode: lead.businessCountryCode,
+    geographicClassification: lead.geographicClassification,
+    ctaType: row.ctaType,
+    destinationType: row.destinationType,
+    qualificationFailedGates: lead.qualificationFailedGates || [],
+    qualificationReasons: lead.qualificationReasons || [],
+    mandatoryCriteria,
+    optionalCriteria,
+    qualificationSummaryExplanation: qualificationDetails.explanation,
+    evidenceItems,
+    isRestricted: false,
+    isExportable: true,
+    isPersistable: true,
+    fieldEligibility: {},
+    runId: "active_run",
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    category: row.category,
+    sourceBadges: row.sourceBadges,
+    identityDetails,
+    businessDetails,
+    locationDetails,
+    digitalPresence,
+    contactsDetails,
+    peopleDetails: [],
+    qualificationDetails,
+    evidenceDetails: {
+      totalCount: evidenceItems.length,
+      items: evidenceItems.map((e) => ({
+        id: e.id,
+        fact: e.fact,
+        source: e.sourceFamily,
+        sourceUrl: e.pageOrSourceReference,
+        observedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        isRestricted: false
+      })),
+      fieldEvidence: [],
+      conflicts: []
+    }
+  };
+}
 function toResultDetailViewModel(record) {
   if (isCanonicalLeadRecord(record)) {
     return canonicalLeadToResultDetailViewModel(record);
+  }
+  if (isExtensionLead(record)) {
+    return extensionLeadToResultDetailViewModel(record);
   }
   const u = record;
   const row = toResultRowViewModel(u);
@@ -24250,6 +24877,848 @@ function computeResearchOptimization(runs = [], canonicalRecords = [], geographi
 
 // src/extension/metaAdapter.ts
 init_relevanceEngine();
+
+// src/extension/countryProfiles/profiles/bd.ts
+var BD_PROFILE = {
+  countryCode: "BD",
+  countryName: "Bangladesh",
+  aliases: ["BD", "BANGLADESH", "BENGAL"],
+  phone: {
+    internationalPrefixes: ["+880"],
+    phoneRegex: /(?:\+880[\s\-]*1[3-9][\s\-]?\d{2}[\s\-]?\d{6}|880[\s\-]*1[3-9][\s\-]?\d{2}[\s\-]?\d{6}|\+880\s*1[3-9]\d{8}|8801[3-9]\d{8})/,
+    domesticRegex: /(?:\b01[3-9][\s\-]?\d{2}[\s\-]?\d{6}\b|\b01[3-9]\d{8}\b)/
+  },
+  majorCities: [
+    "dhaka",
+    "chittagong",
+    "chattogram",
+    "sylhet",
+    "rajshahi",
+    "khulna",
+    "barishal",
+    "rangpur",
+    "mymensingh",
+    "gazipur",
+    "narayanganj",
+    "comilla",
+    "savar",
+    "uttara",
+    "banani",
+    "gulshan",
+    "dhanmondi",
+    "mirpur",
+    "motijheel",
+    "badda",
+    "mohammadpur",
+    "bashundhara",
+    "mohakhali",
+    "khilkhet",
+    "tejgaon"
+  ],
+  addressKeywords: [
+    "house",
+    "road",
+    "sector",
+    "block",
+    "lane",
+    "plot",
+    "holding",
+    "floor",
+    "avenue",
+    "street"
+  ],
+  operationalPhrases: [
+    "all over bangladesh",
+    "delivery all over bangladesh",
+    "inside dhaka",
+    "outside dhaka",
+    "free delivery in dhaka",
+    "free delivery inside dhaka",
+    "cash on delivery in bangladesh",
+    "home delivery inside dhaka",
+    "bangladesh delivery",
+    "deliver all over bangladesh",
+    "all over bd"
+  ],
+  domainSuffixes: [".bd", ".com.bd", ".org.bd", ".edu.bd", ".gov.bd"],
+  knownCommercialDomains: [
+    "regalfurniturebd.com",
+    "htbazarbd.com",
+    "daraz.com.bd",
+    "othoba.com",
+    "chaldal.com"
+  ],
+  nativeScriptRegex: /[\u0980-\u09FF]/,
+  keywords: ["bangladesh", "bdt", "taka", "cash on delivery"]
+};
+
+// src/extension/countryProfiles/profiles/us.ts
+var US_PROFILE = {
+  countryCode: "US",
+  countryName: "United States",
+  aliases: ["US", "USA", "UNITED STATES", "UNITED STATES OF AMERICA", "AMERICA"],
+  phone: {
+    internationalPrefixes: ["+1"],
+    phoneRegex: /(?:\+1[\s\-]?[2-9]\d{2}[\s\-]?[2-9]\d{2}[\s\-]?\d{4})/,
+    domesticRegex: /\b[2-9]\d{2}[\s\-]?[2-9]\d{2}[\s\-]?\d{4}\b/,
+    sharedPrefixes: ["+1"],
+    tollFreeAreaCodes: ["800", "888", "877", "866", "855", "844", "833"]
+  },
+  regions: {
+    statesOrProvinces: [
+      "alabama",
+      "alaska",
+      "arizona",
+      "arkansas",
+      "california",
+      "colorado",
+      "connecticut",
+      "delaware",
+      "florida",
+      "georgia",
+      "hawaii",
+      "idaho",
+      "illinois",
+      "indiana",
+      "iowa",
+      "kansas",
+      "kentucky",
+      "louisiana",
+      "maine",
+      "maryland",
+      "massachusetts",
+      "michigan",
+      "minnesota",
+      "mississippi",
+      "missouri",
+      "montana",
+      "nebraska",
+      "nevada",
+      "new hampshire",
+      "new jersey",
+      "new mexico",
+      "new york",
+      "north carolina",
+      "north dakota",
+      "ohio",
+      "oklahoma",
+      "oregon",
+      "pennsylvania",
+      "rhode island",
+      "south carolina",
+      "south dakota",
+      "tennessee",
+      "texas",
+      "utah",
+      "vermont",
+      "virginia",
+      "washington",
+      "west virginia",
+      "wisconsin",
+      "wyoming"
+    ],
+    stateCodes: [
+      "AL",
+      "AK",
+      "AZ",
+      "AR",
+      "CA",
+      "CO",
+      "CT",
+      "DE",
+      "FL",
+      "GA",
+      "HI",
+      "ID",
+      "IL",
+      "IN",
+      "IA",
+      "KS",
+      "KY",
+      "LA",
+      "ME",
+      "MD",
+      "MA",
+      "MI",
+      "MN",
+      "MS",
+      "MO",
+      "MT",
+      "NE",
+      "NV",
+      "NH",
+      "NJ",
+      "NM",
+      "NY",
+      "NC",
+      "ND",
+      "OH",
+      "OK",
+      "OR",
+      "PA",
+      "RI",
+      "SC",
+      "SD",
+      "TN",
+      "TX",
+      "UT",
+      "VT",
+      "VA",
+      "WA",
+      "WV",
+      "WI",
+      "WY",
+      "DC"
+    ],
+    postalCodeRegex: /\b\d{5}(?:-\d{4})?\b/
+  },
+  majorCities: [
+    "new york",
+    "los angeles",
+    "chicago",
+    "houston",
+    "phoenix",
+    "philadelphia",
+    "san antonio",
+    "san diego",
+    "dallas",
+    "austin",
+    "san jose",
+    "fort worth",
+    "jacksonville",
+    "columbus",
+    "charlotte",
+    "indianapolis",
+    "san francisco",
+    "seattle",
+    "denver",
+    "washington",
+    "boston",
+    "utica",
+    "miami",
+    "atlanta"
+  ],
+  addressKeywords: [
+    "street",
+    "st.",
+    "st",
+    "avenue",
+    "ave.",
+    "ave",
+    "boulevard",
+    "blvd.",
+    "blvd",
+    "road",
+    "rd.",
+    "rd",
+    "suite",
+    "ste.",
+    "ste",
+    "drive",
+    "dr.",
+    "dr",
+    "court",
+    "ct.",
+    "ct",
+    "lane",
+    "ln.",
+    "ln",
+    "highway",
+    "hwy",
+    "parkway",
+    "pkwy"
+  ],
+  operationalPhrases: [
+    "free shipping in us",
+    "us nationwide delivery",
+    "ships within us",
+    "continental us",
+    "lower 48",
+    "made in usa",
+    "us shipping",
+    "nationwide delivery"
+  ],
+  domainSuffixes: [".us", ".gov", ".mil"],
+  knownCommercialDomains: [
+    "raymourflanigan.com",
+    "officedepot.com",
+    "tahans.com",
+    "ashleyfurniture.com",
+    "target.com",
+    "walmart.com",
+    "homedepot.com"
+  ],
+  keywords: ["labor day", "nationwide delivery", "special financing", "us shipping", "usd", "veterans day", "memorial day"]
+};
+
+// src/extension/countryProfiles/profiles/gb.ts
+var GB_PROFILE = {
+  countryCode: "GB",
+  countryName: "United Kingdom",
+  aliases: [
+    "GB",
+    "UK",
+    "UNITED KINGDOM",
+    "GREAT BRITAIN",
+    "ENGLAND",
+    "SCOTLAND",
+    "WALES",
+    "NORTHERN IRELAND"
+  ],
+  phone: {
+    internationalPrefixes: ["+44"],
+    phoneRegex: /(?:\+44[\s\-]?[1-9](?:[\s\-]?\d){8,9})/,
+    domesticRegex: /\b0[12378](?:[\s\-]?\d){8,9}\b/
+  },
+  regions: {
+    statesOrProvinces: [
+      "england",
+      "scotland",
+      "wales",
+      "northern ireland",
+      "devon",
+      "north devon",
+      "cornwall",
+      "yorkshire",
+      "kent",
+      "essex",
+      "surrey",
+      "lancashire",
+      "hampshire",
+      "somerset"
+    ],
+    postalCodeRegex: /\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i
+  },
+  majorCities: [
+    "london",
+    "birmingham",
+    "manchester",
+    "leeds",
+    "glasgow",
+    "liverpool",
+    "newcastle",
+    "sheffield",
+    "bristol",
+    "edinburgh",
+    "belfast",
+    "cardiff",
+    "nottingham",
+    "southampton"
+  ],
+  addressKeywords: [
+    "high street",
+    "street",
+    "st",
+    "road",
+    "rd",
+    "lane",
+    "ln",
+    "avenue",
+    "ave",
+    "close",
+    "drive",
+    "way",
+    "walk",
+    "gardens",
+    "square",
+    "sq",
+    "unit",
+    "building",
+    "mews"
+  ],
+  operationalPhrases: [
+    "uk mainland delivery",
+    "free uk delivery",
+    "delivering across uk",
+    "nationwide uk delivery",
+    "uk delivery only",
+    "in-store & online"
+  ],
+  domainSuffixes: [".co.uk", ".uk", ".org.uk", ".gov.uk", ".ac.uk"],
+  knownCommercialDomains: [
+    "scs.co.uk",
+    "fairwayfurniture.co.uk",
+    "argos.co.uk",
+    "currys.co.uk",
+    "johnlewis.com",
+    "marksandspencer.com"
+  ],
+  keywords: [
+    "uk",
+    "gbp",
+    "interest free credit",
+    "registered in england",
+    "vat registered",
+    "hmrc",
+    "companies house"
+  ]
+};
+
+// src/extension/countryProfiles/profiles/ca.ts
+var CA_PROFILE = {
+  countryCode: "CA",
+  countryName: "Canada",
+  aliases: ["CA", "CANADA", "CAN"],
+  phone: {
+    internationalPrefixes: ["+1"],
+    phoneRegex: /(?:\+1[\s\-]?[2-9]\d{2}[\s\-]?[2-9]\d{2}[\s\-]?\d{4})/,
+    domesticRegex: /\b[2-9]\d{2}[\s\-]?[2-9]\d{2}[\s\-]?\d{4}\b/,
+    sharedPrefixes: ["+1"],
+    tollFreeAreaCodes: ["800", "888", "877", "866", "855", "844", "833"]
+  },
+  regions: {
+    statesOrProvinces: [
+      "ontario",
+      "quebec",
+      "british columbia",
+      "alberta",
+      "manitoba",
+      "saskatchewan",
+      "nova scotia",
+      "new brunswick",
+      "newfoundland",
+      "prince edward island",
+      "northwest territories",
+      "yukon",
+      "nunavut"
+    ],
+    stateCodes: [
+      "ON",
+      "QC",
+      "BC",
+      "AB",
+      "MB",
+      "SK",
+      "NS",
+      "NB",
+      "NL",
+      "PE",
+      "NT",
+      "YT",
+      "NU"
+    ],
+    postalCodeRegex: /\b[A-CEGHJ-NPR-TVXY]\d[A-CEGHJ-NPR-TV-Z]\s*\d[A-CEGHJ-NPR-TV-Z]\d\b/i
+  },
+  majorCities: [
+    "toronto",
+    "montreal",
+    "vancouver",
+    "calgary",
+    "edmonton",
+    "ottawa",
+    "winnipeg",
+    "quebec city",
+    "hamilton",
+    "kitchener",
+    "halifax",
+    "victoria",
+    "mississauga",
+    "brampton",
+    "surrey",
+    "laval",
+    "markham"
+  ],
+  addressKeywords: [
+    "street",
+    "st",
+    "rue",
+    "avenue",
+    "ave",
+    "boulevard",
+    "blvd",
+    "road",
+    "rd",
+    "chemin",
+    "suite",
+    "ste",
+    "drive",
+    "dr",
+    "court",
+    "ct"
+  ],
+  operationalPhrases: [
+    "canada-wide delivery",
+    "free shipping across canada",
+    "shipping across canada",
+    "canadian owned",
+    "made in canada",
+    "coast to coast delivery"
+  ],
+  domainSuffixes: [".ca"],
+  knownCommercialDomains: [
+    "canadiantire.ca",
+    "thebay.com",
+    "bestbuy.ca",
+    "leons.ca",
+    "brick.com"
+  ],
+  keywords: ["cad", "gst/hst", "canadian", "canada wide", "cra registered"]
+};
+
+// src/extension/countryProfiles/profiles/au.ts
+var AU_PROFILE = {
+  countryCode: "AU",
+  countryName: "Australia",
+  aliases: ["AU", "AUSTRALIA", "AUS", "OZ"],
+  phone: {
+    internationalPrefixes: ["+61"],
+    phoneRegex: /(?:\+61[\s\-]?[2-478](?:[\s\-]?\d){7,8})/,
+    domesticRegex: /\b0[2-478](?:[\s\-]?\d){7,8}\b/
+  },
+  regions: {
+    statesOrProvinces: [
+      "new south wales",
+      "victoria",
+      "queensland",
+      "western australia",
+      "south australia",
+      "tasmania",
+      "australian capital territory",
+      "northern territory"
+    ],
+    stateCodes: ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"],
+    postalCodeRegex: /\b(?:NSW|VIC|QLD|WA|SA|TAS|ACT|NT)\s*\d{4}\b/i
+  },
+  majorCities: [
+    "sydney",
+    "melbourne",
+    "brisbane",
+    "perth",
+    "adelaide",
+    "gold coast",
+    "canberra",
+    "newcastle",
+    "wollongong",
+    "hobart",
+    "geelong",
+    "darwin"
+  ],
+  addressKeywords: [
+    "street",
+    "st",
+    "road",
+    "rd",
+    "parade",
+    "pde",
+    "highway",
+    "hwy",
+    "avenue",
+    "ave",
+    "crescent",
+    "cres",
+    "court",
+    "ct",
+    "drive",
+    "dr",
+    "unit"
+  ],
+  operationalPhrases: [
+    "australia wide",
+    "australia-wide delivery",
+    "delivery across australia",
+    "aussie owned",
+    "australian made",
+    "free shipping australia wide"
+  ],
+  domainSuffixes: [".com.au", ".net.au", ".au", ".org.au", ".gov.au"],
+  knownCommercialDomains: [
+    "hospitalityfurniture.net.au",
+    "harveynorman.com.au",
+    "bunnings.com.au",
+    "thegoodguys.com.au",
+    "freedom.com.au"
+  ],
+  keywords: ["australia", "aud", "australia wide", "abn", "acn", "afterpay"]
+};
+
+// src/extension/countryProfiles/profiles/ie.ts
+var IE_PROFILE = {
+  countryCode: "IE",
+  countryName: "Ireland",
+  aliases: ["IE", "IRELAND", "EIRE", "REPUBLIC OF IRELAND"],
+  phone: {
+    internationalPrefixes: ["+353"],
+    phoneRegex: /(?:\+353[\s\-]?[1-9](?:[\s\-]?\d){6,8})/,
+    domesticRegex: /\b0[1-9](?:[\s\-]?\d){6,8}\b/
+  },
+  regions: {
+    statesOrProvinces: [
+      "county dublin",
+      "county cork",
+      "county galway",
+      "county kildare",
+      "county meath",
+      "county limerick",
+      "county waterford",
+      "county louth",
+      "county wicklow",
+      "county kerry",
+      "county clare",
+      "county mayo",
+      "county donegal",
+      "county tipperary",
+      "co. dublin",
+      "co. cork",
+      "co. galway"
+    ],
+    // Eircode routing keys (e.g. D02, T12, H91) followed by alphanumeric identifier
+    postalCodeRegex: /\b[A-W]\d{2}\s*[0-9A-Z]{4}\b/i
+  },
+  majorCities: [
+    "dublin",
+    "cork",
+    "galway",
+    "limerick",
+    "waterford",
+    "drogheda",
+    "dundalk",
+    "swords",
+    "bray",
+    "navan",
+    "kilkenny"
+  ],
+  addressKeywords: [
+    "street",
+    "st",
+    "road",
+    "rd",
+    "avenue",
+    "ave",
+    "lane",
+    "ln",
+    "terrace",
+    "tce",
+    "quay",
+    "park",
+    "square",
+    "sq",
+    "unit",
+    "industrial estate"
+  ],
+  operationalPhrases: [
+    "nationwide delivery ireland",
+    "delivery across ireland",
+    "irish owned",
+    "all 32 counties",
+    "republic of ireland delivery",
+    "free delivery ireland",
+    "ireland delivery"
+  ],
+  domainSuffixes: [".ie"],
+  knownCommercialDomains: [
+    "harveynorman.ie",
+    "woodies.ie",
+    "did.ie",
+    "currys.ie",
+    "ezlivingfurniture.ie"
+  ],
+  keywords: ["ireland", "eur", "cro registered", "eircode", "an post"]
+};
+
+// src/extension/countryProfiles/profiles/in.ts
+var IN_PROFILE = {
+  countryCode: "IN",
+  countryName: "India",
+  aliases: ["IN", "INDIA", "BHARAT"],
+  phone: {
+    internationalPrefixes: ["+91"],
+    phoneRegex: /(?:\+91[\s\-]?[6-9]\d{9})/,
+    domesticRegex: /\b[6-9]\d{9}\b/
+  },
+  majorCities: [
+    "jaipur",
+    "mumbai",
+    "delhi",
+    "bengaluru",
+    "bangalore",
+    "kolkata",
+    "chennai",
+    "hyderabad",
+    "pune",
+    "noida",
+    "gurgaon",
+    "ahmedabad",
+    "surat"
+  ],
+  addressKeywords: [
+    "road",
+    "rd",
+    "street",
+    "st",
+    "nagar",
+    "colony",
+    "marg",
+    "sector",
+    "phase",
+    "plot"
+  ],
+  operationalPhrases: [
+    "pan india",
+    "all over india",
+    "cash on delivery india",
+    "great indian festival"
+  ],
+  domainSuffixes: [".in", ".co.in", ".org.in", ".net.in"],
+  knownCommercialDomains: [
+    "amazon.in",
+    "interio.com",
+    "flipkart.com",
+    "myntra.com"
+  ],
+  keywords: ["india", "inr", "pan india", "great indian festival", "gstin"]
+};
+
+// src/extension/countryProfiles/profiles/cn.ts
+var CN_PROFILE = {
+  countryCode: "CN",
+  countryName: "China",
+  aliases: ["CN", "CHINA", "PRC"],
+  phone: {
+    internationalPrefixes: ["+86", "86"],
+    phoneRegex: /(?:\+86[\s\-]?[1-9]\d{9,10})/
+  },
+  majorCities: [
+    "guangzhou",
+    "foshan",
+    "shenzhen",
+    "dongguan",
+    "yiwu",
+    "zhejiang",
+    "shanghai",
+    "beijing",
+    "ningbo",
+    "hangzhou"
+  ],
+  addressKeywords: ["district", "road", "industrial park", "building", "street"],
+  operationalPhrases: [
+    "factory direct",
+    "factory-direct",
+    "oem and odm",
+    "square meter factory",
+    "china export"
+  ],
+  domainSuffixes: [".cn", ".com.cn"],
+  knownCommercialDomains: [
+    "alibaba.com",
+    "made-in-china.com",
+    "aliexpress.com",
+    "1688.com"
+  ],
+  keywords: [
+    "oem and odm",
+    "factory-direct",
+    "oem configurations",
+    "square meter factory",
+    "china manufacturer"
+  ]
+};
+
+// src/extension/countryProfiles/registry.ts
+var PROFILES = [
+  BD_PROFILE,
+  US_PROFILE,
+  GB_PROFILE,
+  CA_PROFILE,
+  AU_PROFILE,
+  IE_PROFILE,
+  IN_PROFILE,
+  CN_PROFILE
+];
+var CODE_MAP = /* @__PURE__ */ new Map();
+var ALIAS_MAP = /* @__PURE__ */ new Map();
+for (const profile of PROFILES) {
+  const code = profile.countryCode.toUpperCase();
+  CODE_MAP.set(code, profile);
+  ALIAS_MAP.set(code, code);
+  for (const alias of profile.aliases) {
+    ALIAS_MAP.set(alias.toUpperCase(), code);
+  }
+}
+
+// src/extension/qualificationGate.ts
+function evaluateLeadQualificationGates(lead, criteria) {
+  const failedGates = [];
+  const passedGates = [];
+  const reasons = [];
+  const cleanName = (lead.name || lead.canonicalName || "").trim();
+  if (!cleanName) {
+    failedGates.push("GATE_INTEGRITY_NAME");
+    reasons.push("Candidate lacks valid business or advertiser name.");
+  } else if (Array.isArray(lead.adLibraryIds) && lead.adLibraryIds.length === 0) {
+    failedGates.push("GATE_INTEGRITY_ADS");
+    reasons.push("Candidate has zero verified ad library identifiers.");
+  } else {
+    passedGates.push("GATE_INTEGRITY");
+  }
+  const relDecision = lead.relevanceDecision;
+  if (relDecision === "RELEVANT") {
+    passedGates.push("GATE_RELEVANCE");
+  } else {
+    failedGates.push("GATE_RELEVANCE");
+    if (!relDecision || relDecision === "UNASSESSED") {
+      reasons.push("Niche semantic relevance is unassessed (UNASSESSED).");
+    } else if (relDecision === "UNCERTAIN") {
+      reasons.push("Niche semantic relevance is ambiguous or uncertain (UNCERTAIN).");
+    } else if (relDecision === "NOT_RELEVANT") {
+      reasons.push("Candidate was rejected as not relevant to target niche (NOT_RELEVANT).");
+    }
+  }
+  const geo = lead.geographicClassification;
+  const isStrictLocal = criteria?.strictLocalMode !== false;
+  const allowProbable = criteria?.allowProbableLocal === true;
+  if (geo === "LOCAL_VERIFIED") {
+    passedGates.push("GATE_GEOGRAPHY");
+  } else if (geo === "LOCAL_PROBABLE") {
+    if (allowProbable || !isStrictLocal) {
+      passedGates.push("GATE_GEOGRAPHY");
+    } else {
+      failedGates.push("GATE_GEOGRAPHY");
+      reasons.push("Geographic location is probable (LOCAL_PROBABLE), but strict-local policy requires verified proof.");
+    }
+  } else if (geo === "FOREIGN_VERIFIED") {
+    failedGates.push("GATE_GEOGRAPHY");
+    reasons.push("Business is verified as foreign entity (FOREIGN_VERIFIED).");
+  } else {
+    failedGates.push("GATE_GEOGRAPHY");
+    reasons.push("Physical business location is unverified or unknown (LOCATION_UNKNOWN).");
+  }
+  if (criteria?.requiredCtaTypes && criteria.requiredCtaTypes.length > 0) {
+    const observedCtas = lead.observedCtaTypes || (lead.primaryCtaType ? [lead.primaryCtaType] : []);
+    const matchesCta = observedCtas.some((c) => criteria.requiredCtaTypes.includes(c));
+    if (matchesCta) {
+      passedGates.push("GATE_CTA");
+    } else {
+      failedGates.push("GATE_CTA");
+      reasons.push(`Observed CTAs (${observedCtas.join(", ") || "none"}) do not satisfy required CTA types: ${criteria.requiredCtaTypes.join(", ")}.`);
+    }
+  }
+  if (criteria?.requiredDestinationTypes && criteria.requiredDestinationTypes.length > 0) {
+    const observedDests = lead.observedDestinationTypes || (lead.primaryDestinationType ? [lead.primaryDestinationType] : []);
+    const matchesDest = observedDests.some((d) => criteria.requiredDestinationTypes.includes(d));
+    if (matchesDest) {
+      passedGates.push("GATE_DESTINATION");
+    } else {
+      failedGates.push("GATE_DESTINATION");
+      reasons.push(`Observed destinations (${observedDests.join(", ") || "none"}) do not satisfy required destination types: ${criteria.requiredDestinationTypes.join(", ")}.`);
+    }
+  }
+  const isWebsiteDestination = lead.primaryDestinationType === "EXTERNAL_WEBSITE" || lead.observedDestinationTypes && lead.observedDestinationTypes.includes("EXTERNAL_WEBSITE");
+  const requireWeb = criteria?.requireWebsiteFound ?? isWebsiteDestination;
+  if (requireWeb && lead.websiteState !== "found") {
+    failedGates.push("GATE_WEBSITE");
+    reasons.push("External website was required or classified as primary destination, but valid destination URL is missing.");
+  }
+  const isQualified = failedGates.length === 0;
+  return {
+    isQualified,
+    status: isQualified ? "QUALIFIED" : "REVIEW_REQUIRED",
+    failedGates,
+    passedGates,
+    reasons
+  };
+}
+
+// src/extension/metaAdapter.ts
 function sanitizeCsvField(val) {
   if (val === null || val === void 0) return "";
   let str = String(val).trim();
@@ -24260,11 +25729,25 @@ function sanitizeCsvField(val) {
   str = str.replace(/"/g, '""');
   return `"${str}"`;
 }
-function exportLeadsToCsv(leads, run) {
+function exportLeadsToCsv(leads, runOrOptions, options) {
+  let run;
+  let opts = options;
+  if (runOrOptions && typeof runOrOptions === "object" && "qualifiedOnly" in runOrOptions) {
+    opts = runOrOptions;
+  } else if (runOrOptions && typeof runOrOptions === "object") {
+    run = runOrOptions;
+  }
+  let exportLeads = leads;
+  if (opts?.qualifiedOnly) {
+    exportLeads = leads.filter((l) => {
+      const gateCriteria = run && "researchIntent" in run && run.researchIntent ? run.researchIntent : opts;
+      return evaluateLeadQualificationGates(l, gateCriteria).isQualified;
+    });
+  }
   let metaHeader = "";
   if (run) {
     const isAutoDiscovery = run.researchMode === "AUTO_DISCOVERY" || run.targetLeadCount === void 0;
-    const finalCount = run.leads ? run.leads.length : leads.length;
+    const finalCount = run.leads ? run.leads.length : exportLeads.length;
     if (isAutoDiscovery) {
       metaHeader = `# Research Run: ${run.researchName} | Mode: Auto Discovery (${run.mode}) | Source: Meta Ad Library | Keywords: ${(run.keywords || []).join("; ")} | Location: ${run.locationName} | Final Relevant Leads: ${finalCount} | Status: ${run.status} | Stop Reason: ${run.stopReason || "N/A"} | Engine Version: ${run.engineVersion || "strict-v2"}\r
 `;
@@ -24302,6 +25785,10 @@ function exportLeadsToCsv(leads, run) {
     "Discovered At",
     "Sample Copy",
     "Sample CTA",
+    "CTA Type",
+    "Destination Type",
+    "Destination Confidence",
+    "Destination Reason",
     "Website Verified URL",
     "Website Deep Verification Status",
     "Website Identity Match",
@@ -24310,7 +25797,7 @@ function exportLeadsToCsv(leads, run) {
     "Website Evidence Summary",
     "Website Verified At"
   ];
-  const rows = leads.map((l) => [
+  const rows = exportLeads.map((l) => [
     sanitizeCsvField(l.name),
     sanitizeCsvField(l.facebookPageName),
     sanitizeCsvField(l.facebookPageUrl || ""),
@@ -24329,9 +25816,9 @@ function exportLeadsToCsv(leads, run) {
     sanitizeCsvField((l.businessLocationEvidence || []).join(" | ")),
     sanitizeCsvField((l.adLibraryIds || []).join("; ")),
     sanitizeCsvField(l.adLibraryUrl || ""),
-    sanitizeCsvField(l.relevanceDecision || "RELEVANT"),
-    sanitizeCsvField(l.relevanceScore !== void 0 ? `${(l.relevanceScore * 100).toFixed(0)}%` : "100%"),
-    sanitizeCsvField(l.relevanceConfidence || "HIGH"),
+    sanitizeCsvField(l.relevanceDecision || "UNASSESSED"),
+    sanitizeCsvField(l.relevanceScore !== void 0 ? `${(l.relevanceScore * 100).toFixed(0)}%` : l.relevanceDecision === "RELEVANT" ? "100%" : "N/A"),
+    sanitizeCsvField(l.relevanceConfidence || (l.relevanceDecision ? "HIGH" : "NONE")),
     sanitizeCsvField(l.relevanceMatchedTerms ? l.relevanceMatchedTerms.join("; ") : ""),
     sanitizeCsvField(l.relevanceReasons ? l.relevanceReasons.slice(0, 2).join(" | ") : ""),
     sanitizeCsvField(l.engineVersion || "strict-v2"),
@@ -24339,6 +25826,10 @@ function exportLeadsToCsv(leads, run) {
     sanitizeCsvField(l.discoveredAt),
     sanitizeCsvField(l.sampleCopy || ""),
     sanitizeCsvField(l.sampleCta || ""),
+    sanitizeCsvField(l.primaryCtaType || "UNKNOWN"),
+    sanitizeCsvField(l.primaryDestinationType || "UNKNOWN"),
+    sanitizeCsvField(l.destinationConfidence || "NONE"),
+    sanitizeCsvField(l.destinationReasonCode || "DESTINATION_NOT_OBSERVED"),
     sanitizeCsvField(l.websiteVerification?.finalUrl || l.destinationUrl || ""),
     sanitizeCsvField(l.websiteVerificationStatus || l.websiteVerification?.status || (l.destinationUrl ? "NOT_VERIFIED" : "NO_WEBSITE")),
     sanitizeCsvField(l.websiteVerification?.identityMatch || "UNKNOWN"),
@@ -24528,7 +26019,7 @@ var ExtensionApp = () => {
   };
   const resultsVM = (0, import_react11.useMemo)(() => {
     return rawLeads.map((item, idx) => {
-      if (isCanonicalLeadRecord(item)) {
+      if (isCanonicalLeadRecord(item) || isExtensionLead(item)) {
         return toResultRowViewModel(item);
       }
       const candidateEnv = {
@@ -24605,7 +26096,7 @@ var ExtensionApp = () => {
         "RELEVANCE",
         "QUALIFICATION"
       ],
-      qualificationProfileName: "Default Commercial Profile",
+      qualificationProfileName: "Strict Qualification Gates (Phase 0.6)",
       maxCandidatesLimit: config.maxCandidates,
       timeoutSeconds: 30,
       checkpointEnabled: true,
@@ -24613,7 +26104,10 @@ var ExtensionApp = () => {
       canExecuteLive: true,
       keywords: config.keywords,
       countryCode: config.countryCode,
-      locationName: config.locationName
+      locationName: config.locationName,
+      strictLocal: config.strictLocal,
+      requiredCta: config.requiredCta,
+      requiredDestination: config.requiredDestination
     };
     setPendingPlan(planVM);
     setIsPlanReviewOpen(true);
@@ -24632,7 +26126,10 @@ var ExtensionApp = () => {
       keywords: userKeywords,
       countryCode: userCountry,
       locationName: userLocation,
-      maxFinalUniqueRelevantLeads: pendingPlan.maxCandidatesLimit
+      maxFinalUniqueRelevantLeads: pendingPlan.maxCandidatesLimit,
+      strictLocalMode: pendingPlan.strictLocal !== false,
+      requiredCtaTypes: pendingPlan.requiredCta ? [pendingPlan.requiredCta] : void 0,
+      requiredDestinationTypes: pendingPlan.requiredDestination ? [pendingPlan.requiredDestination] : void 0
     };
     if (typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
       chrome.runtime.sendMessage({ type: "START_RESEARCH", payload }, (res) => {
@@ -24660,7 +26157,7 @@ var ExtensionApp = () => {
       (l) => (l.canonicalEntityId || l.entityId || l.leadId || l.pageId) === recordId || `rec_${l.canonicalEntityId}` === recordId
     ) || rawLeads[0];
     if (raw) {
-      if (isCanonicalLeadRecord(raw)) {
+      if (isCanonicalLeadRecord(raw) || isExtensionLead(raw)) {
         setInspectedLead(toResultDetailViewModel(raw));
         setIsDetailDrawerOpen(true);
         return;
@@ -24772,7 +26269,7 @@ var ExtensionApp = () => {
       []
     );
   }, [rawLeads, historyRuns, activeRun]);
-  const handleConfirmExport = () => {
+  const handleConfirmExport = (qualifiedOnly = true) => {
     if (isExporting) return;
     setIsExporting(true);
     const eligibleLeads = rawLeads.filter((_, idx) => {
@@ -24782,7 +26279,7 @@ var ExtensionApp = () => {
       return isSelected && row.isExportable && !row.isRestricted;
     });
     if (eligibleLeads.length > 0) {
-      const csv = exportLeadsToCsv(eligibleLeads);
+      const csv = exportLeadsToCsv(eligibleLeads, { qualifiedOnly });
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");

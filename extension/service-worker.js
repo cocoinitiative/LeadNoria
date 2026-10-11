@@ -1470,7 +1470,7 @@ function stemToken(token) {
 }
 function tokenizeText(text) {
   if (!text) return [];
-  return text.toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, " ").split(/[\s-]+/).map((w) => w.trim()).filter((w) => w.length >= 2 && !STOP_WORDS.has(w)).map(stemToken);
+  return text.normalize("NFC").toLowerCase().replace(/[^\p{L}\p{M}\p{N}\s-]/gu, " ").split(/[\s-]+/).map((w) => w.trim()).filter((w) => w.length >= 2 && !STOP_WORDS.has(w)).map(stemToken);
 }
 function extractUrlTokens(urlStr) {
   if (!urlStr) return [];
@@ -1502,15 +1502,35 @@ function normalizeEvidence(evidence) {
     normalizedDomain: rawDomain,
     normalizedUrlSlug: evidence.destinationUrl ? extractUrlTokens(evidence.destinationUrl).join(" ") : "",
     normalizedPageNameTokens: tokenizeText(rawPageName),
-    normalizedCta: rawCta.toLowerCase(),
-    advertiserText: rawAdvertiser.toLowerCase(),
-    adCopyText: rawAdCopy.toLowerCase()
+    normalizedCta: rawCta.normalize("NFC").toLowerCase(),
+    advertiserText: rawAdvertiser.normalize("NFC").toLowerCase(),
+    adCopyText: rawAdCopy.normalize("NFC").toLowerCase()
   };
 }
-function compileResearchIntent(mode, keywords, presetId, locationCode = "US", options) {
-  const cleanKeywords = keywords.map((k) => k.trim()).filter(Boolean);
-  if (mode === "PRESET" && presetId) {
-    const preset = RESEARCH_PRESETS.find((p) => p.preset_id === presetId);
+function compileResearchIntent(modeOrConfig, keywords = [], presetId, locationCode = "US", options) {
+  let mode = "CUSTOM";
+  let cleanKeywords = [];
+  let pId = presetId;
+  let loc = locationCode;
+  let opts = options;
+  if (typeof modeOrConfig === "object" && modeOrConfig !== null) {
+    mode = modeOrConfig.mode || "CUSTOM";
+    cleanKeywords = (modeOrConfig.keywords || modeOrConfig.targetNiches || []).map((k) => k.trim()).filter(Boolean);
+    pId = modeOrConfig.presetId;
+    loc = modeOrConfig.locationCode || modeOrConfig.targetCountryCode || "US";
+    opts = {
+      strictLocalMode: modeOrConfig.strictLocalMode,
+      allowProbableLocal: modeOrConfig.allowProbableLocal,
+      requiredCtaTypes: modeOrConfig.requiredCtaTypes,
+      requiredDestinationTypes: modeOrConfig.requiredDestinationTypes,
+      ...options
+    };
+  } else {
+    mode = modeOrConfig;
+    cleanKeywords = (keywords || []).map((k) => k.trim()).filter(Boolean);
+  }
+  if (mode === "PRESET" && pId) {
+    const preset = RESEARCH_PRESETS.find((p) => p.preset_id === pId);
     if (preset) {
       return {
         mode: "PRESET",
@@ -1523,9 +1543,11 @@ function compileResearchIntent(mode, keywords, presetId, locationCode = "US", op
         primaryKeywords: preset.primary_keywords,
         secondaryKeywords: preset.secondary_keywords,
         exclusions: preset.optional_exclusions || [],
-        locationCode,
-        strictLocalMode: options?.strictLocalMode,
-        allowProbableLocal: options?.allowProbableLocal
+        locationCode: loc,
+        strictLocalMode: opts?.strictLocalMode,
+        allowProbableLocal: opts?.allowProbableLocal,
+        requiredCtaTypes: opts?.requiredCtaTypes,
+        requiredDestinationTypes: opts?.requiredDestinationTypes
       };
     }
   }
@@ -1535,9 +1557,11 @@ function compileResearchIntent(mode, keywords, presetId, locationCode = "US", op
     primaryKeywords: cleanKeywords,
     secondaryKeywords: [],
     exclusions: [],
-    locationCode,
-    strictLocalMode: options?.strictLocalMode,
-    allowProbableLocal: options?.allowProbableLocal
+    locationCode: loc,
+    strictLocalMode: opts?.strictLocalMode,
+    allowProbableLocal: opts?.allowProbableLocal,
+    requiredCtaTypes: opts?.requiredCtaTypes,
+    requiredDestinationTypes: opts?.requiredDestinationTypes
   };
 }
 var RELEVANCE_STRATEGY_VERSION, RELEVANCE_ENGINE_VERSION, BOUNDED_TAXONOMY, NEGATIVE_CATEGORIES, ACCESSORY_ONLY_INDICATORS, STOP_WORDS, LeadRelevanceEngine;
@@ -1549,7 +1573,7 @@ var init_relevanceEngine = __esm({
     BOUNDED_TAXONOMY = {
       furniture: {
         category: "furniture",
-        rootTerms: ["furniture", "furnishing", "furnishings", "furnish"],
+        rootTerms: ["furniture", "furnishing", "furnishings", "furnish", "\u09AB\u09BE\u09B0\u09CD\u09A8\u09BF\u099A\u09BE\u09B0", "\u0986\u09B8\u09AC\u09BE\u09AC\u09AA\u09A4\u09CD\u09B0"],
         productServiceTerms: [
           "chair",
           "table",
@@ -1587,7 +1611,13 @@ var init_relevanceEngine = __esm({
           "sectional",
           "ergonomic chair",
           "standing desk",
-          "bedroom set"
+          "bedroom set",
+          "\u099A\u09C7\u09DF\u09BE\u09B0",
+          "\u09A1\u09BE\u0987\u09A8\u09BF\u0982",
+          "\u0996\u09BE\u099F",
+          "\u09B8\u09CB\u09AB\u09BE",
+          "\u099F\u09C7\u09AC\u09BF\u09B2",
+          "\u0986\u09B2\u09AE\u09BE\u09B0\u09BF"
         ],
         industryDescriptors: [
           "furniture store",
@@ -2809,9 +2839,525 @@ var MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH = 5e3;
 // src/extension/service-worker.ts
 init_relevanceEngine();
 
+// src/extension/destinationClassifier.ts
+function classifyCta(rawCtaText) {
+  if (!rawCtaText) {
+    return {
+      ctaType: "UNKNOWN",
+      rawCtaText: void 0,
+      normalizedText: "",
+      reasonCode: "CTA_TEXT_MISSING",
+      reason: "No visible call-to-action button or text observed."
+    };
+  }
+  const rawPreserved = rawCtaText.trim();
+  const normalizedText = rawPreserved.replace(/\s+/g, " ");
+  if (!normalizedText) {
+    return {
+      ctaType: "UNKNOWN",
+      rawCtaText: void 0,
+      normalizedText: "",
+      reasonCode: "CTA_TEXT_MISSING",
+      reason: "Call-to-action text is whitespace-only."
+    };
+  }
+  const clean = normalizedText.replace(/^[\p{P}\s]+|[\p{P}\s]+$/gu, "").toLowerCase();
+  if (/^(?:shop(?:\s*now|\s*collection)?|buy(?:\s*now)?|order(?:\s*now)?)$/i.test(clean)) {
+    return {
+      ctaType: "SHOP_NOW",
+      rawCtaText: rawPreserved,
+      normalizedText,
+      reasonCode: "CTA_TEXT_MATCH",
+      reason: "Recognized call-to-action intent: SHOP_NOW."
+    };
+  }
+  if (/^(?:learn(?:\s*more)?|explore(?:\s*more)?|see(?:\s*more)?|read(?:\s*more)?|view(?:\s*more)?)$/i.test(clean)) {
+    return {
+      ctaType: "LEARN_MORE",
+      rawCtaText: rawPreserved,
+      normalizedText,
+      reasonCode: "CTA_TEXT_MATCH",
+      reason: "Recognized call-to-action intent: LEARN_MORE."
+    };
+  }
+  if (/^(?:sign(?:\s*up)?|register(?:\s*now)?|subscribe|join(?:\s*now|\s*us)?)$/i.test(clean)) {
+    return {
+      ctaType: "SIGN_UP",
+      rawCtaText: rawPreserved,
+      normalizedText,
+      reasonCode: "CTA_TEXT_MATCH",
+      reason: "Recognized call-to-action intent: SIGN_UP."
+    };
+  }
+  if (/^(?:contact(?:\s*us)?|inquire(?:\s*now)?|get(?:\s*in\s*touch)?|send(?:\s*inquiry)?)$/i.test(clean)) {
+    return {
+      ctaType: "CONTACT_US",
+      rawCtaText: rawPreserved,
+      normalizedText,
+      reasonCode: "CTA_TEXT_MATCH",
+      reason: "Recognized call-to-action intent: CONTACT_US."
+    };
+  }
+  if (/^(?:send(?:\s*message|\s*whatsapp(?:\s*message)?)?|message(?:\s*us)?|chat(?:\s*now)?|whatsapp)$/i.test(clean)) {
+    return {
+      ctaType: "SEND_MESSAGE",
+      rawCtaText: rawPreserved,
+      normalizedText,
+      reasonCode: "CTA_TEXT_MATCH",
+      reason: "Recognized call-to-action intent: SEND_MESSAGE."
+    };
+  }
+  if (/^(?:call(?:\s*now|\s*us)?|phone(?:\s*us)?)$/i.test(clean)) {
+    return {
+      ctaType: "CALL_NOW",
+      rawCtaText: rawPreserved,
+      normalizedText,
+      reasonCode: "CTA_TEXT_MATCH",
+      reason: "Recognized call-to-action intent: CALL_NOW."
+    };
+  }
+  if (/^(?:download(?:\s*now)?|install(?:\s*now)?|get(?:\s*app)?)$/i.test(clean)) {
+    return {
+      ctaType: "DOWNLOAD",
+      rawCtaText: rawPreserved,
+      normalizedText,
+      reasonCode: "CTA_TEXT_MATCH",
+      reason: "Recognized call-to-action intent: DOWNLOAD."
+    };
+  }
+  if (/^(?:get(?:\s*quote|\s*offer)?|request(?:\s*quote)?|apply(?:\s*now)?)$/i.test(clean)) {
+    return {
+      ctaType: "GET_QUOTE",
+      rawCtaText: rawPreserved,
+      normalizedText,
+      reasonCode: "CTA_TEXT_MATCH",
+      reason: "Recognized call-to-action intent: GET_QUOTE."
+    };
+  }
+  return {
+    ctaType: "OTHER",
+    rawCtaText: rawPreserved,
+    normalizedText,
+    reasonCode: "CTA_TEXT_OTHER",
+    reason: `Observed visible CTA text: "${normalizedText}".`
+  };
+}
+function classifyDestination(inputs) {
+  const rawUrl = (inputs.destinationUrl || "").trim();
+  const hasNoDest = Boolean(inputs.hasNoDestination || inputs.hasNoDestinationSignal);
+  if (hasNoDest && rawUrl) {
+    return {
+      destinationType: "UNKNOWN",
+      confidence: "LOW",
+      reasonCode: "CONFLICTING_DESTINATION_SIGNALS",
+      reason: "Ad marked with no destination signal but destination URL is present."
+    };
+  }
+  if (hasNoDest) {
+    return {
+      destinationType: "NO_VISIBLE_DESTINATION",
+      confidence: "HIGH",
+      reasonCode: "DESTINATION_NOT_OBSERVED",
+      reason: "Explicit observation that ad creative contains no clickable destination or action button."
+    };
+  }
+  if (inputs.hasLeadFormSignal && !rawUrl) {
+    return {
+      destinationType: "INSTANT_FORM",
+      confidence: "HIGH",
+      reasonCode: "EXPLICIT_INSTANT_FORM_SIGNAL",
+      reason: "Meta on-platform instant lead generation form signal detected."
+    };
+  }
+  const targetCtaType = inputs.ctaType || (inputs.ctaText ? classifyCta(inputs.ctaText).ctaType : "UNKNOWN");
+  let domain = (inputs.destinationDomain || "").toLowerCase().trim();
+  if (rawUrl) {
+    let lowerUrl = rawUrl.toLowerCase();
+    if (lowerUrl.includes("facebook.com/l.php")) {
+      try {
+        const u = new URL(rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`);
+        const shimmed = u.searchParams.get("u");
+        if (shimmed) {
+          lowerUrl = decodeURIComponent(shimmed).toLowerCase();
+        }
+      } catch {
+      }
+    }
+    if (!domain) {
+      try {
+        const u = new URL(lowerUrl.startsWith("http") ? lowerUrl : `https://${lowerUrl}`);
+        domain = u.hostname.replace(/^(?:www\.|m\.|l\.)/, "");
+      } catch {
+      }
+    }
+    const isAppUrl = /^(?:play\.google\.com|apps\.apple\.com|itunes\.apple\.com)$/i.test(domain);
+    if (isAppUrl && (targetCtaType === "CALL_NOW" || targetCtaType === "SEND_MESSAGE")) {
+      return {
+        destinationType: "OTHER",
+        confidence: "LOW",
+        reasonCode: "CONFLICTING_DESTINATION_SIGNALS",
+        reason: "Conflicting destination signals detected between action URL (App) and CTA intent."
+      };
+    }
+    if (domain === "wa.me" || domain === "api.whatsapp.com" || domain === "whatsapp.com" || domain === "m.me" || domain === "messenger.com" || lowerUrl.startsWith("whatsapp:") || lowerUrl.includes("facebook.com/messages")) {
+      return {
+        destinationType: "MESSAGING",
+        destinationDomain: domain || void 0,
+        confidence: "HIGH",
+        reasonCode: "EXPLICIT_MESSAGING_SIGNAL",
+        reason: "Verified messaging destination via WhatsApp or Messenger endpoint."
+      };
+    }
+    if (domain === "play.google.com" && lowerUrl.includes("/store/apps") || domain === "apps.apple.com" || domain === "itunes.apple.com") {
+      return {
+        destinationType: "APP",
+        destinationDomain: domain || void 0,
+        confidence: "HIGH",
+        reasonCode: "EXPLICIT_APP_SIGNAL",
+        reason: "Verified native application marketplace destination."
+      };
+    }
+    if (lowerUrl.includes("/lead_gen/") || lowerUrl.includes("fb.com/lead_gen") || lowerUrl.includes("/canvas_doc/") || lowerUrl.includes("instant_form")) {
+      return {
+        destinationType: "INSTANT_FORM",
+        destinationDomain: domain || void 0,
+        confidence: "HIGH",
+        reasonCode: "EXPLICIT_INSTANT_FORM_SIGNAL",
+        reason: "Verified Meta on-platform instant lead generation form."
+      };
+    }
+    const isInternalSocialDomain = domain === "facebook.com" || domain === "web.facebook.com" || domain === "m.facebook.com" || domain === "fb.com" || domain === "instagram.com" || domain === "meta.com";
+    if (!isInternalSocialDomain && domain.length > 3 && domain.includes(".")) {
+      return {
+        destinationType: "EXTERNAL_WEBSITE",
+        destinationDomain: domain,
+        confidence: "HIGH",
+        reasonCode: "VISIBLE_EXTERNAL_DESTINATION",
+        reason: `Positively identified external commercial website: "${domain}".`
+      };
+    }
+    if (isInternalSocialDomain) {
+      return {
+        destinationType: "OTHER",
+        destinationDomain: domain || void 0,
+        confidence: "MEDIUM",
+        reasonCode: "INTERNAL_PAGE_DESTINATION",
+        reason: "Destination directs to internal social page rather than external commercial website."
+      };
+    }
+  }
+  if (targetCtaType === "CALL_NOW") {
+    return {
+      destinationType: "CALL",
+      confidence: "MEDIUM",
+      reasonCode: "EXPLICIT_CALL_SIGNAL",
+      reason: "Direct telephone call action observed from call CTA."
+    };
+  }
+  if (targetCtaType === "SEND_MESSAGE") {
+    return {
+      destinationType: "MESSAGING",
+      confidence: "MEDIUM",
+      reasonCode: "EXPLICIT_MESSAGING_SIGNAL",
+      reason: "Direct messaging flow indicated by messaging CTA without external URL."
+    };
+  }
+  const combinedContext = [inputs.bodyCopy || "", inputs.rawText || ""].join(" ").toLowerCase();
+  if (combinedContext.includes("[instant form]") || combinedContext.includes("lead form")) {
+    return {
+      destinationType: "INSTANT_FORM",
+      confidence: "MEDIUM",
+      reasonCode: "EXPLICIT_INSTANT_FORM_SIGNAL",
+      reason: "Instant form destination indicated by ad metadata."
+    };
+  }
+  if (targetCtaType === "SHOP_NOW" || targetCtaType === "LEARN_MORE" || targetCtaType === "SIGN_UP" || targetCtaType === "GET_QUOTE") {
+    return {
+      destinationType: "UNKNOWN",
+      confidence: "LOW",
+      reasonCode: "INSUFFICIENT_DESTINATION_EVIDENCE",
+      reason: "Action button observed but destination URL was not extracted; destination type remains unverified."
+    };
+  }
+  return {
+    destinationType: "UNKNOWN",
+    confidence: "NONE",
+    reasonCode: "DESTINATION_NOT_OBSERVED",
+    reason: "No destination URL or destination metadata observed for this ad candidate."
+  };
+}
+var DESTINATION_PRECEDENCE = {
+  EXTERNAL_WEBSITE: 7,
+  INSTANT_FORM: 6,
+  MESSAGING: 5,
+  CALL: 4,
+  APP: 3,
+  OTHER: 2,
+  NO_VISIBLE_DESTINATION: 1,
+  UNKNOWN: 0
+};
+function aggregateAdEvidence(adEvidenceList) {
+  if (!adEvidenceList || adEvidenceList.length === 0) {
+    return {
+      observedCtaTexts: [],
+      observedCtaTypes: [],
+      observedDestinationTypes: [],
+      primaryCtaType: "UNKNOWN",
+      primaryDestinationType: "UNKNOWN",
+      destinationConfidence: "NONE",
+      destinationReasonCode: "DESTINATION_NOT_OBSERVED"
+    };
+  }
+  const ctaTexts = Array.from(new Set(adEvidenceList.map((e) => e.ctaText).filter(Boolean)));
+  const ctaTypes = Array.from(new Set(adEvidenceList.map((e) => e.ctaType).filter((t) => t !== "UNKNOWN")));
+  const destinationTypes = Array.from(new Set(adEvidenceList.map((e) => e.destinationType)));
+  const ctaCounts = /* @__PURE__ */ new Map();
+  for (const e of adEvidenceList) {
+    if (e.ctaType && e.ctaType !== "UNKNOWN") {
+      ctaCounts.set(e.ctaType, (ctaCounts.get(e.ctaType) || 0) + 1);
+    }
+  }
+  let primaryCta = "UNKNOWN";
+  let maxCtaCount = 0;
+  for (const [type, count] of ctaCounts.entries()) {
+    if (count > maxCtaCount) {
+      maxCtaCount = count;
+      primaryCta = type;
+    }
+  }
+  if (primaryCta === "UNKNOWN" && adEvidenceList.length > 0) {
+    primaryCta = adEvidenceList[0].ctaType;
+  }
+  let primaryDest = "UNKNOWN";
+  let maxPrec = -1;
+  let bestEvidence = adEvidenceList[0];
+  for (const e of adEvidenceList) {
+    const prec = DESTINATION_PRECEDENCE[e.destinationType] ?? 0;
+    if (prec > maxPrec) {
+      maxPrec = prec;
+      primaryDest = e.destinationType;
+      bestEvidence = e;
+    }
+  }
+  return {
+    observedCtaTexts: ctaTexts,
+    observedCtaTypes: ctaTypes.length > 0 ? ctaTypes : ["UNKNOWN"],
+    observedDestinationTypes: destinationTypes.length > 0 ? destinationTypes : ["UNKNOWN"],
+    primaryCtaType: primaryCta,
+    primaryDestinationType: primaryDest,
+    destinationConfidence: bestEvidence.confidence,
+    destinationReasonCode: bestEvidence.reasonCode
+  };
+}
+
+// src/extension/qualificationGate.ts
+function evaluateLeadQualificationGates(lead, criteria) {
+  const failedGates = [];
+  const passedGates = [];
+  const reasons = [];
+  const cleanName = (lead.name || lead.canonicalName || "").trim();
+  if (!cleanName) {
+    failedGates.push("GATE_INTEGRITY_NAME");
+    reasons.push("Candidate lacks valid business or advertiser name.");
+  } else if (Array.isArray(lead.adLibraryIds) && lead.adLibraryIds.length === 0) {
+    failedGates.push("GATE_INTEGRITY_ADS");
+    reasons.push("Candidate has zero verified ad library identifiers.");
+  } else {
+    passedGates.push("GATE_INTEGRITY");
+  }
+  const relDecision = lead.relevanceDecision;
+  if (relDecision === "RELEVANT") {
+    passedGates.push("GATE_RELEVANCE");
+  } else {
+    failedGates.push("GATE_RELEVANCE");
+    if (!relDecision || relDecision === "UNASSESSED") {
+      reasons.push("Niche semantic relevance is unassessed (UNASSESSED).");
+    } else if (relDecision === "UNCERTAIN") {
+      reasons.push("Niche semantic relevance is ambiguous or uncertain (UNCERTAIN).");
+    } else if (relDecision === "NOT_RELEVANT") {
+      reasons.push("Candidate was rejected as not relevant to target niche (NOT_RELEVANT).");
+    }
+  }
+  const geo = lead.geographicClassification;
+  const isStrictLocal = criteria?.strictLocalMode !== false;
+  const allowProbable = criteria?.allowProbableLocal === true;
+  if (geo === "LOCAL_VERIFIED") {
+    passedGates.push("GATE_GEOGRAPHY");
+  } else if (geo === "LOCAL_PROBABLE") {
+    if (allowProbable || !isStrictLocal) {
+      passedGates.push("GATE_GEOGRAPHY");
+    } else {
+      failedGates.push("GATE_GEOGRAPHY");
+      reasons.push("Geographic location is probable (LOCAL_PROBABLE), but strict-local policy requires verified proof.");
+    }
+  } else if (geo === "FOREIGN_VERIFIED") {
+    failedGates.push("GATE_GEOGRAPHY");
+    reasons.push("Business is verified as foreign entity (FOREIGN_VERIFIED).");
+  } else {
+    failedGates.push("GATE_GEOGRAPHY");
+    reasons.push("Physical business location is unverified or unknown (LOCATION_UNKNOWN).");
+  }
+  if (criteria?.requiredCtaTypes && criteria.requiredCtaTypes.length > 0) {
+    const observedCtas = lead.observedCtaTypes || (lead.primaryCtaType ? [lead.primaryCtaType] : []);
+    const matchesCta = observedCtas.some((c) => criteria.requiredCtaTypes.includes(c));
+    if (matchesCta) {
+      passedGates.push("GATE_CTA");
+    } else {
+      failedGates.push("GATE_CTA");
+      reasons.push(`Observed CTAs (${observedCtas.join(", ") || "none"}) do not satisfy required CTA types: ${criteria.requiredCtaTypes.join(", ")}.`);
+    }
+  }
+  if (criteria?.requiredDestinationTypes && criteria.requiredDestinationTypes.length > 0) {
+    const observedDests = lead.observedDestinationTypes || (lead.primaryDestinationType ? [lead.primaryDestinationType] : []);
+    const matchesDest = observedDests.some((d) => criteria.requiredDestinationTypes.includes(d));
+    if (matchesDest) {
+      passedGates.push("GATE_DESTINATION");
+    } else {
+      failedGates.push("GATE_DESTINATION");
+      reasons.push(`Observed destinations (${observedDests.join(", ") || "none"}) do not satisfy required destination types: ${criteria.requiredDestinationTypes.join(", ")}.`);
+    }
+  }
+  const isWebsiteDestination = lead.primaryDestinationType === "EXTERNAL_WEBSITE" || lead.observedDestinationTypes && lead.observedDestinationTypes.includes("EXTERNAL_WEBSITE");
+  const requireWeb = criteria?.requireWebsiteFound ?? isWebsiteDestination;
+  if (requireWeb && lead.websiteState !== "found") {
+    failedGates.push("GATE_WEBSITE");
+    reasons.push("External website was required or classified as primary destination, but valid destination URL is missing.");
+  }
+  const isQualified = failedGates.length === 0;
+  return {
+    isQualified,
+    status: isQualified ? "QUALIFIED" : "REVIEW_REQUIRED",
+    failedGates,
+    passedGates,
+    reasons
+  };
+}
+
 // src/extension/bulkStore.ts
 var DB_NAME = "leadnoria-research";
 var DB_VERSION = 2;
+function normalizeStoredLead(raw) {
+  if (!raw || typeof raw !== "object") {
+    throw new Error("INVALID_LEAD_RECORD: Cannot normalize non-object record");
+  }
+  const cleanName = (raw.name || raw.canonicalName || raw.facebookPageName || "Unknown Advertiser").trim();
+  const canonicalName = (raw.canonicalName || cleanName).trim();
+  let adEvidence = Array.isArray(raw.adEvidence) ? [...raw.adEvidence] : [];
+  const seenLibIds = /* @__PURE__ */ new Set();
+  adEvidence = adEvidence.filter((e) => {
+    if (!e || typeof e !== "object" || !e.libraryId) return false;
+    if (seenLibIds.has(e.libraryId)) return false;
+    seenLibIds.add(e.libraryId);
+    return true;
+  });
+  if (adEvidence.length === 0 && (raw.sampleCta || raw.destinationUrl || raw.adLibraryIds && raw.adLibraryIds.length > 0)) {
+    const rawCta = raw.sampleCta || raw.ctaText || "";
+    const ctaRes = classifyCta(rawCta);
+    const destRes = classifyDestination({
+      destinationUrl: raw.destinationUrl,
+      destinationDomain: raw.destinationDomain,
+      ctaText: rawCta,
+      ctaType: ctaRes.ctaType,
+      bodyCopy: raw.sampleCopy
+    });
+    const libId = Array.isArray(raw.adLibraryIds) && raw.adLibraryIds[0] ? raw.adLibraryIds[0] : `ad_legacy_${raw.id || "unknown"}`;
+    adEvidence.push({
+      libraryId: libId,
+      ctaText: rawCta || void 0,
+      ctaType: raw.primaryCtaType || ctaRes.ctaType,
+      destinationType: raw.primaryDestinationType || destRes.destinationType,
+      destinationUrl: raw.destinationUrl,
+      destinationDomain: raw.destinationDomain,
+      reasonCode: raw.destinationReasonCode || destRes.reasonCode,
+      confidence: raw.destinationConfidence || destRes.confidence,
+      observedAt: raw.discoveredAt || (/* @__PURE__ */ new Date()).toISOString()
+    });
+  }
+  const ctaSummary = aggregateAdEvidence(adEvidence);
+  let geoClassification = raw.geographicClassification;
+  if (!geoClassification) {
+    if (raw.businessCountryCode && raw.targetCountryCode && raw.businessCountryCode === raw.targetCountryCode) {
+      geoClassification = "LOCAL_PROBABLE";
+    } else if (raw.businessCountryCode && raw.targetCountryCode && raw.businessCountryCode !== raw.targetCountryCode) {
+      geoClassification = "FOREIGN_VERIFIED";
+    } else {
+      geoClassification = "LOCATION_UNKNOWN";
+    }
+  }
+  let relevanceDecision = raw.relevanceDecision;
+  if (!relevanceDecision) {
+    relevanceDecision = "UNASSESSED";
+  }
+  let webState = raw.websiteState;
+  if (!webState || webState === "not_found" && !raw.destinationUrl && ctaSummary.primaryDestinationType !== "NO_VISIBLE_DESTINATION") {
+    webState = raw.destinationUrl ? "found" : "unknown";
+  }
+  const adIds = Array.isArray(raw.adLibraryIds) ? Array.from(new Set(raw.adLibraryIds.filter((id) => typeof id === "string" && /^[0-9]{5,25}$/.test(id)))) : [];
+  const activeAdIds = Array.isArray(raw.activeAdLibraryIds) ? Array.from(new Set(raw.activeAdLibraryIds.filter((id) => adIds.includes(id)))) : [...adIds];
+  return {
+    ...raw,
+    name: cleanName,
+    canonicalName,
+    facebookPageName: raw.facebookPageName || cleanName,
+    facebookPageState: raw.facebookPageState || (raw.facebookPageUrl ? "found" : "unknown"),
+    destinationUrl: raw.destinationUrl,
+    destinationDomain: raw.destinationDomain,
+    websiteState: webState,
+    adCount: adIds.length || raw.adCount || 0,
+    activeAdCount: activeAdIds.length || raw.activeAdCount || 0,
+    adLibraryIds: adIds,
+    activeAdLibraryIds: activeAdIds,
+    adEvidence,
+    observedCtaTexts: ctaSummary.observedCtaTexts,
+    observedCtaTypes: ctaSummary.observedCtaTypes,
+    observedDestinationTypes: ctaSummary.observedDestinationTypes,
+    primaryCtaType: ctaSummary.primaryCtaType,
+    primaryDestinationType: ctaSummary.primaryDestinationType,
+    destinationReasonCode: ctaSummary.destinationReasonCode,
+    destinationConfidence: ctaSummary.destinationConfidence,
+    geographicClassification: geoClassification,
+    businessLocationConfidence: raw.businessLocationConfidence || "NONE",
+    businessLocationEvidence: Array.isArray(raw.businessLocationEvidence) ? raw.businessLocationEvidence : [],
+    businessLocationReason: raw.businessLocationReason || "Restored from persistent storage",
+    relevanceDecision,
+    relevanceConfidence: raw.relevanceConfidence || (relevanceDecision === "RELEVANT" ? "HIGH" : "LOW"),
+    relevanceScore: raw.relevanceScore,
+    status: evaluateLeadQualificationGates({
+      name: cleanName,
+      adLibraryIds: adIds,
+      relevanceDecision,
+      geographicClassification: geoClassification,
+      primaryCtaType: ctaSummary.primaryCtaType,
+      observedCtaTypes: ctaSummary.observedCtaTypes,
+      primaryDestinationType: ctaSummary.primaryDestinationType,
+      observedDestinationTypes: ctaSummary.observedDestinationTypes,
+      websiteState: webState
+    }).status,
+    qualificationFailedGates: evaluateLeadQualificationGates({
+      name: cleanName,
+      adLibraryIds: adIds,
+      relevanceDecision,
+      geographicClassification: geoClassification,
+      primaryCtaType: ctaSummary.primaryCtaType,
+      observedCtaTypes: ctaSummary.observedCtaTypes,
+      primaryDestinationType: ctaSummary.primaryDestinationType,
+      observedDestinationTypes: ctaSummary.observedDestinationTypes,
+      websiteState: webState
+    }).failedGates,
+    qualificationReasons: evaluateLeadQualificationGates({
+      name: cleanName,
+      adLibraryIds: adIds,
+      relevanceDecision,
+      geographicClassification: geoClassification,
+      primaryCtaType: ctaSummary.primaryCtaType,
+      observedCtaTypes: ctaSummary.observedCtaTypes,
+      primaryDestinationType: ctaSummary.primaryDestinationType,
+      observedDestinationTypes: ctaSummary.observedDestinationTypes,
+      websiteState: webState
+    }).reasons,
+    schemaVersion: 2
+  };
+}
 var MemoryStoreFallback = class {
   constructor() {
     this.runs = /* @__PURE__ */ new Map();
@@ -2874,9 +3420,18 @@ var MemoryStoreFallback = class {
     const results = [];
     for (const [key, ent] of this.entities.entries()) {
       if (key.startsWith(`${runId}_`)) {
-        if ((!ent.relevanceDecision || ent.relevanceDecision === "RELEVANT") && ent.evaluationStatus !== "UNCERTAIN" && ent.evaluationStatus !== "REJECTED") {
-          results.push(JSON.parse(JSON.stringify(ent)));
+        if (ent.relevanceDecision === "RELEVANT" && ent.evaluationStatus !== "UNCERTAIN" && ent.evaluationStatus !== "REJECTED") {
+          results.push(normalizeStoredLead(ent));
         }
+      }
+    }
+    return results;
+  }
+  async getAllStoredLeads(runId) {
+    const results = [];
+    for (const [key, ent] of this.entities.entries()) {
+      if (key.startsWith(`${runId}_`)) {
+        results.push(normalizeStoredLead(ent));
       }
     }
     return results;
@@ -2895,7 +3450,7 @@ var MemoryStoreFallback = class {
   }
   async getEntity(runId, canonicalKey) {
     const ent = this.entities.get(`${runId}_${canonicalKey.toLowerCase()}`);
-    return ent ? JSON.parse(JSON.stringify(ent)) : null;
+    return ent ? normalizeStoredLead(ent) : null;
   }
   async getSeenAdIds(runId) {
     return new Set(this.dedupAds.get(runId) || []);
@@ -2931,7 +3486,7 @@ var MemoryStoreFallback = class {
     for (const [k, v] of this.entities.entries()) {
       if (k.startsWith(`${runId}_`)) {
         totalEntities++;
-        if (!v.relevanceDecision || v.relevanceDecision === "RELEVANT") totalRelevant++;
+        if (v.relevanceDecision === "RELEVANT" && v.evaluationStatus !== "UNCERTAIN" && v.evaluationStatus !== "REJECTED") totalRelevant++;
         bytes += JSON.stringify(v).length;
       }
     }
@@ -3123,8 +3678,8 @@ async function getAllRelevantLeads(runId) {
         db.close();
         const records = request.result || [];
         const relevant = records.filter(
-          (r) => (!r.relevanceDecision || r.relevanceDecision === "RELEVANT") && r.evaluationStatus !== "UNCERTAIN" && r.evaluationStatus !== "REJECTED"
-        );
+          (r) => r.relevanceDecision === "RELEVANT" && r.evaluationStatus !== "UNCERTAIN" && r.evaluationStatus !== "REJECTED"
+        ).map((r) => normalizeStoredLead(r));
         resolve(relevant);
       };
       request.onerror = () => {
@@ -3134,6 +3689,31 @@ async function getAllRelevantLeads(runId) {
     });
   } catch {
     return memoryFallback.getAllRelevantLeads(runId);
+  }
+}
+async function getAllStoredLeads(runId) {
+  if (!hasIndexedDB()) {
+    return memoryFallback.getAllStoredLeads(runId);
+  }
+  try {
+    const db = await openDB();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction("entities", "readonly");
+      const store = tx.objectStore("entities");
+      const index = store.index("by_run");
+      const request = index.getAll(runId);
+      request.onsuccess = () => {
+        db.close();
+        const records = request.result || [];
+        resolve(records.map((r) => normalizeStoredLead(r)));
+      };
+      request.onerror = () => {
+        db.close();
+        reject(request.error);
+      };
+    });
+  } catch {
+    return memoryFallback.getAllStoredLeads(runId);
   }
 }
 async function getSeenAdIds(runId) {
@@ -3198,96 +3778,914 @@ async function getSeenEntityKeys(runId) {
 // src/extension/bulkProcessor.ts
 init_relevanceEngine();
 
-// src/extension/geographicClassifier.ts
-var BD_PHONE_REGEX = /(?:\+880\s*1[3-9]\d{8}|8801[3-9]\d{8}|\b01[3-9]\d{8}\b)/;
-var IN_PHONE_REGEX = /(?:\+91[\s\-]?[6-9]\d{9}|\b[6-9]\d{9}\b)/;
-var UK_PHONE_REGEX = /(?:\+44[\s\-]?[1-9]\d{8,9}|\b0[12378]\d{8,9}\b)/;
-var AU_PHONE_REGEX = /(?:\+61[\s\-]?[2-478]\d{8}|\b0[2-478]\d{8}\b)/;
-var BD_CITIES_DIVISIONS = [
-  "dhaka",
-  "chittagong",
-  "chattogram",
-  "sylhet",
-  "rajshahi",
-  "khulna",
-  "barishal",
-  "rangpur",
-  "mymensingh",
-  "gazipur",
-  "narayanganj",
-  "comilla",
-  "savar",
-  "uttara",
-  "banani",
-  "gulshan",
-  "dhanmondi",
-  "mirpur",
-  "motijheel",
-  "badda",
-  "mohammadpur",
-  "bashundhara",
-  "mohakhali",
-  "khilkhet",
-  "tejgaon"
+// src/extension/countryProfiles/profiles/bd.ts
+var BD_PROFILE = {
+  countryCode: "BD",
+  countryName: "Bangladesh",
+  aliases: ["BD", "BANGLADESH", "BENGAL"],
+  phone: {
+    internationalPrefixes: ["+880"],
+    phoneRegex: /(?:\+880[\s\-]*1[3-9][\s\-]?\d{2}[\s\-]?\d{6}|880[\s\-]*1[3-9][\s\-]?\d{2}[\s\-]?\d{6}|\+880\s*1[3-9]\d{8}|8801[3-9]\d{8})/,
+    domesticRegex: /(?:\b01[3-9][\s\-]?\d{2}[\s\-]?\d{6}\b|\b01[3-9]\d{8}\b)/
+  },
+  majorCities: [
+    "dhaka",
+    "chittagong",
+    "chattogram",
+    "sylhet",
+    "rajshahi",
+    "khulna",
+    "barishal",
+    "rangpur",
+    "mymensingh",
+    "gazipur",
+    "narayanganj",
+    "comilla",
+    "savar",
+    "uttara",
+    "banani",
+    "gulshan",
+    "dhanmondi",
+    "mirpur",
+    "motijheel",
+    "badda",
+    "mohammadpur",
+    "bashundhara",
+    "mohakhali",
+    "khilkhet",
+    "tejgaon"
+  ],
+  addressKeywords: [
+    "house",
+    "road",
+    "sector",
+    "block",
+    "lane",
+    "plot",
+    "holding",
+    "floor",
+    "avenue",
+    "street"
+  ],
+  operationalPhrases: [
+    "all over bangladesh",
+    "delivery all over bangladesh",
+    "inside dhaka",
+    "outside dhaka",
+    "free delivery in dhaka",
+    "free delivery inside dhaka",
+    "cash on delivery in bangladesh",
+    "home delivery inside dhaka",
+    "bangladesh delivery",
+    "deliver all over bangladesh",
+    "all over bd"
+  ],
+  domainSuffixes: [".bd", ".com.bd", ".org.bd", ".edu.bd", ".gov.bd"],
+  knownCommercialDomains: [
+    "regalfurniturebd.com",
+    "htbazarbd.com",
+    "daraz.com.bd",
+    "othoba.com",
+    "chaldal.com"
+  ],
+  nativeScriptRegex: /[\u0980-\u09FF]/,
+  keywords: ["bangladesh", "bdt", "taka", "cash on delivery"]
+};
+
+// src/extension/countryProfiles/profiles/us.ts
+var US_PROFILE = {
+  countryCode: "US",
+  countryName: "United States",
+  aliases: ["US", "USA", "UNITED STATES", "UNITED STATES OF AMERICA", "AMERICA"],
+  phone: {
+    internationalPrefixes: ["+1"],
+    phoneRegex: /(?:\+1[\s\-]?[2-9]\d{2}[\s\-]?[2-9]\d{2}[\s\-]?\d{4})/,
+    domesticRegex: /\b[2-9]\d{2}[\s\-]?[2-9]\d{2}[\s\-]?\d{4}\b/,
+    sharedPrefixes: ["+1"],
+    tollFreeAreaCodes: ["800", "888", "877", "866", "855", "844", "833"]
+  },
+  regions: {
+    statesOrProvinces: [
+      "alabama",
+      "alaska",
+      "arizona",
+      "arkansas",
+      "california",
+      "colorado",
+      "connecticut",
+      "delaware",
+      "florida",
+      "georgia",
+      "hawaii",
+      "idaho",
+      "illinois",
+      "indiana",
+      "iowa",
+      "kansas",
+      "kentucky",
+      "louisiana",
+      "maine",
+      "maryland",
+      "massachusetts",
+      "michigan",
+      "minnesota",
+      "mississippi",
+      "missouri",
+      "montana",
+      "nebraska",
+      "nevada",
+      "new hampshire",
+      "new jersey",
+      "new mexico",
+      "new york",
+      "north carolina",
+      "north dakota",
+      "ohio",
+      "oklahoma",
+      "oregon",
+      "pennsylvania",
+      "rhode island",
+      "south carolina",
+      "south dakota",
+      "tennessee",
+      "texas",
+      "utah",
+      "vermont",
+      "virginia",
+      "washington",
+      "west virginia",
+      "wisconsin",
+      "wyoming"
+    ],
+    stateCodes: [
+      "AL",
+      "AK",
+      "AZ",
+      "AR",
+      "CA",
+      "CO",
+      "CT",
+      "DE",
+      "FL",
+      "GA",
+      "HI",
+      "ID",
+      "IL",
+      "IN",
+      "IA",
+      "KS",
+      "KY",
+      "LA",
+      "ME",
+      "MD",
+      "MA",
+      "MI",
+      "MN",
+      "MS",
+      "MO",
+      "MT",
+      "NE",
+      "NV",
+      "NH",
+      "NJ",
+      "NM",
+      "NY",
+      "NC",
+      "ND",
+      "OH",
+      "OK",
+      "OR",
+      "PA",
+      "RI",
+      "SC",
+      "SD",
+      "TN",
+      "TX",
+      "UT",
+      "VT",
+      "VA",
+      "WA",
+      "WV",
+      "WI",
+      "WY",
+      "DC"
+    ],
+    postalCodeRegex: /\b\d{5}(?:-\d{4})?\b/
+  },
+  majorCities: [
+    "new york",
+    "los angeles",
+    "chicago",
+    "houston",
+    "phoenix",
+    "philadelphia",
+    "san antonio",
+    "san diego",
+    "dallas",
+    "austin",
+    "san jose",
+    "fort worth",
+    "jacksonville",
+    "columbus",
+    "charlotte",
+    "indianapolis",
+    "san francisco",
+    "seattle",
+    "denver",
+    "washington",
+    "boston",
+    "utica",
+    "miami",
+    "atlanta"
+  ],
+  addressKeywords: [
+    "street",
+    "st.",
+    "st",
+    "avenue",
+    "ave.",
+    "ave",
+    "boulevard",
+    "blvd.",
+    "blvd",
+    "road",
+    "rd.",
+    "rd",
+    "suite",
+    "ste.",
+    "ste",
+    "drive",
+    "dr.",
+    "dr",
+    "court",
+    "ct.",
+    "ct",
+    "lane",
+    "ln.",
+    "ln",
+    "highway",
+    "hwy",
+    "parkway",
+    "pkwy"
+  ],
+  operationalPhrases: [
+    "free shipping in us",
+    "us nationwide delivery",
+    "ships within us",
+    "continental us",
+    "lower 48",
+    "made in usa",
+    "us shipping",
+    "nationwide delivery"
+  ],
+  domainSuffixes: [".us", ".gov", ".mil"],
+  knownCommercialDomains: [
+    "raymourflanigan.com",
+    "officedepot.com",
+    "tahans.com",
+    "ashleyfurniture.com",
+    "target.com",
+    "walmart.com",
+    "homedepot.com"
+  ],
+  keywords: ["labor day", "nationwide delivery", "special financing", "us shipping", "usd", "veterans day", "memorial day"]
+};
+
+// src/extension/countryProfiles/profiles/gb.ts
+var GB_PROFILE = {
+  countryCode: "GB",
+  countryName: "United Kingdom",
+  aliases: [
+    "GB",
+    "UK",
+    "UNITED KINGDOM",
+    "GREAT BRITAIN",
+    "ENGLAND",
+    "SCOTLAND",
+    "WALES",
+    "NORTHERN IRELAND"
+  ],
+  phone: {
+    internationalPrefixes: ["+44"],
+    phoneRegex: /(?:\+44[\s\-]?[1-9](?:[\s\-]?\d){8,9})/,
+    domesticRegex: /\b0[12378](?:[\s\-]?\d){8,9}\b/
+  },
+  regions: {
+    statesOrProvinces: [
+      "england",
+      "scotland",
+      "wales",
+      "northern ireland",
+      "devon",
+      "north devon",
+      "cornwall",
+      "yorkshire",
+      "kent",
+      "essex",
+      "surrey",
+      "lancashire",
+      "hampshire",
+      "somerset"
+    ],
+    postalCodeRegex: /\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i
+  },
+  majorCities: [
+    "london",
+    "birmingham",
+    "manchester",
+    "leeds",
+    "glasgow",
+    "liverpool",
+    "newcastle",
+    "sheffield",
+    "bristol",
+    "edinburgh",
+    "belfast",
+    "cardiff",
+    "nottingham",
+    "southampton"
+  ],
+  addressKeywords: [
+    "high street",
+    "street",
+    "st",
+    "road",
+    "rd",
+    "lane",
+    "ln",
+    "avenue",
+    "ave",
+    "close",
+    "drive",
+    "way",
+    "walk",
+    "gardens",
+    "square",
+    "sq",
+    "unit",
+    "building",
+    "mews"
+  ],
+  operationalPhrases: [
+    "uk mainland delivery",
+    "free uk delivery",
+    "delivering across uk",
+    "nationwide uk delivery",
+    "uk delivery only",
+    "in-store & online"
+  ],
+  domainSuffixes: [".co.uk", ".uk", ".org.uk", ".gov.uk", ".ac.uk"],
+  knownCommercialDomains: [
+    "scs.co.uk",
+    "fairwayfurniture.co.uk",
+    "argos.co.uk",
+    "currys.co.uk",
+    "johnlewis.com",
+    "marksandspencer.com"
+  ],
+  keywords: [
+    "uk",
+    "gbp",
+    "interest free credit",
+    "registered in england",
+    "vat registered",
+    "hmrc",
+    "companies house"
+  ]
+};
+
+// src/extension/countryProfiles/profiles/ca.ts
+var CA_PROFILE = {
+  countryCode: "CA",
+  countryName: "Canada",
+  aliases: ["CA", "CANADA", "CAN"],
+  phone: {
+    internationalPrefixes: ["+1"],
+    phoneRegex: /(?:\+1[\s\-]?[2-9]\d{2}[\s\-]?[2-9]\d{2}[\s\-]?\d{4})/,
+    domesticRegex: /\b[2-9]\d{2}[\s\-]?[2-9]\d{2}[\s\-]?\d{4}\b/,
+    sharedPrefixes: ["+1"],
+    tollFreeAreaCodes: ["800", "888", "877", "866", "855", "844", "833"]
+  },
+  regions: {
+    statesOrProvinces: [
+      "ontario",
+      "quebec",
+      "british columbia",
+      "alberta",
+      "manitoba",
+      "saskatchewan",
+      "nova scotia",
+      "new brunswick",
+      "newfoundland",
+      "prince edward island",
+      "northwest territories",
+      "yukon",
+      "nunavut"
+    ],
+    stateCodes: [
+      "ON",
+      "QC",
+      "BC",
+      "AB",
+      "MB",
+      "SK",
+      "NS",
+      "NB",
+      "NL",
+      "PE",
+      "NT",
+      "YT",
+      "NU"
+    ],
+    postalCodeRegex: /\b[A-CEGHJ-NPR-TVXY]\d[A-CEGHJ-NPR-TV-Z]\s*\d[A-CEGHJ-NPR-TV-Z]\d\b/i
+  },
+  majorCities: [
+    "toronto",
+    "montreal",
+    "vancouver",
+    "calgary",
+    "edmonton",
+    "ottawa",
+    "winnipeg",
+    "quebec city",
+    "hamilton",
+    "kitchener",
+    "halifax",
+    "victoria",
+    "mississauga",
+    "brampton",
+    "surrey",
+    "laval",
+    "markham"
+  ],
+  addressKeywords: [
+    "street",
+    "st",
+    "rue",
+    "avenue",
+    "ave",
+    "boulevard",
+    "blvd",
+    "road",
+    "rd",
+    "chemin",
+    "suite",
+    "ste",
+    "drive",
+    "dr",
+    "court",
+    "ct"
+  ],
+  operationalPhrases: [
+    "canada-wide delivery",
+    "free shipping across canada",
+    "shipping across canada",
+    "canadian owned",
+    "made in canada",
+    "coast to coast delivery"
+  ],
+  domainSuffixes: [".ca"],
+  knownCommercialDomains: [
+    "canadiantire.ca",
+    "thebay.com",
+    "bestbuy.ca",
+    "leons.ca",
+    "brick.com"
+  ],
+  keywords: ["cad", "gst/hst", "canadian", "canada wide", "cra registered"]
+};
+
+// src/extension/countryProfiles/profiles/au.ts
+var AU_PROFILE = {
+  countryCode: "AU",
+  countryName: "Australia",
+  aliases: ["AU", "AUSTRALIA", "AUS", "OZ"],
+  phone: {
+    internationalPrefixes: ["+61"],
+    phoneRegex: /(?:\+61[\s\-]?[2-478](?:[\s\-]?\d){7,8})/,
+    domesticRegex: /\b0[2-478](?:[\s\-]?\d){7,8}\b/
+  },
+  regions: {
+    statesOrProvinces: [
+      "new south wales",
+      "victoria",
+      "queensland",
+      "western australia",
+      "south australia",
+      "tasmania",
+      "australian capital territory",
+      "northern territory"
+    ],
+    stateCodes: ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"],
+    postalCodeRegex: /\b(?:NSW|VIC|QLD|WA|SA|TAS|ACT|NT)\s*\d{4}\b/i
+  },
+  majorCities: [
+    "sydney",
+    "melbourne",
+    "brisbane",
+    "perth",
+    "adelaide",
+    "gold coast",
+    "canberra",
+    "newcastle",
+    "wollongong",
+    "hobart",
+    "geelong",
+    "darwin"
+  ],
+  addressKeywords: [
+    "street",
+    "st",
+    "road",
+    "rd",
+    "parade",
+    "pde",
+    "highway",
+    "hwy",
+    "avenue",
+    "ave",
+    "crescent",
+    "cres",
+    "court",
+    "ct",
+    "drive",
+    "dr",
+    "unit"
+  ],
+  operationalPhrases: [
+    "australia wide",
+    "australia-wide delivery",
+    "delivery across australia",
+    "aussie owned",
+    "australian made",
+    "free shipping australia wide"
+  ],
+  domainSuffixes: [".com.au", ".net.au", ".au", ".org.au", ".gov.au"],
+  knownCommercialDomains: [
+    "hospitalityfurniture.net.au",
+    "harveynorman.com.au",
+    "bunnings.com.au",
+    "thegoodguys.com.au",
+    "freedom.com.au"
+  ],
+  keywords: ["australia", "aud", "australia wide", "abn", "acn", "afterpay"]
+};
+
+// src/extension/countryProfiles/profiles/ie.ts
+var IE_PROFILE = {
+  countryCode: "IE",
+  countryName: "Ireland",
+  aliases: ["IE", "IRELAND", "EIRE", "REPUBLIC OF IRELAND"],
+  phone: {
+    internationalPrefixes: ["+353"],
+    phoneRegex: /(?:\+353[\s\-]?[1-9](?:[\s\-]?\d){6,8})/,
+    domesticRegex: /\b0[1-9](?:[\s\-]?\d){6,8}\b/
+  },
+  regions: {
+    statesOrProvinces: [
+      "county dublin",
+      "county cork",
+      "county galway",
+      "county kildare",
+      "county meath",
+      "county limerick",
+      "county waterford",
+      "county louth",
+      "county wicklow",
+      "county kerry",
+      "county clare",
+      "county mayo",
+      "county donegal",
+      "county tipperary",
+      "co. dublin",
+      "co. cork",
+      "co. galway"
+    ],
+    // Eircode routing keys (e.g. D02, T12, H91) followed by alphanumeric identifier
+    postalCodeRegex: /\b[A-W]\d{2}\s*[0-9A-Z]{4}\b/i
+  },
+  majorCities: [
+    "dublin",
+    "cork",
+    "galway",
+    "limerick",
+    "waterford",
+    "drogheda",
+    "dundalk",
+    "swords",
+    "bray",
+    "navan",
+    "kilkenny"
+  ],
+  addressKeywords: [
+    "street",
+    "st",
+    "road",
+    "rd",
+    "avenue",
+    "ave",
+    "lane",
+    "ln",
+    "terrace",
+    "tce",
+    "quay",
+    "park",
+    "square",
+    "sq",
+    "unit",
+    "industrial estate"
+  ],
+  operationalPhrases: [
+    "nationwide delivery ireland",
+    "delivery across ireland",
+    "irish owned",
+    "all 32 counties",
+    "republic of ireland delivery",
+    "free delivery ireland",
+    "ireland delivery"
+  ],
+  domainSuffixes: [".ie"],
+  knownCommercialDomains: [
+    "harveynorman.ie",
+    "woodies.ie",
+    "did.ie",
+    "currys.ie",
+    "ezlivingfurniture.ie"
+  ],
+  keywords: ["ireland", "eur", "cro registered", "eircode", "an post"]
+};
+
+// src/extension/countryProfiles/profiles/in.ts
+var IN_PROFILE = {
+  countryCode: "IN",
+  countryName: "India",
+  aliases: ["IN", "INDIA", "BHARAT"],
+  phone: {
+    internationalPrefixes: ["+91"],
+    phoneRegex: /(?:\+91[\s\-]?[6-9]\d{9})/,
+    domesticRegex: /\b[6-9]\d{9}\b/
+  },
+  majorCities: [
+    "jaipur",
+    "mumbai",
+    "delhi",
+    "bengaluru",
+    "bangalore",
+    "kolkata",
+    "chennai",
+    "hyderabad",
+    "pune",
+    "noida",
+    "gurgaon",
+    "ahmedabad",
+    "surat"
+  ],
+  addressKeywords: [
+    "road",
+    "rd",
+    "street",
+    "st",
+    "nagar",
+    "colony",
+    "marg",
+    "sector",
+    "phase",
+    "plot"
+  ],
+  operationalPhrases: [
+    "pan india",
+    "all over india",
+    "cash on delivery india",
+    "great indian festival"
+  ],
+  domainSuffixes: [".in", ".co.in", ".org.in", ".net.in"],
+  knownCommercialDomains: [
+    "amazon.in",
+    "interio.com",
+    "flipkart.com",
+    "myntra.com"
+  ],
+  keywords: ["india", "inr", "pan india", "great indian festival", "gstin"]
+};
+
+// src/extension/countryProfiles/profiles/cn.ts
+var CN_PROFILE = {
+  countryCode: "CN",
+  countryName: "China",
+  aliases: ["CN", "CHINA", "PRC"],
+  phone: {
+    internationalPrefixes: ["+86", "86"],
+    phoneRegex: /(?:\+86[\s\-]?[1-9]\d{9,10})/
+  },
+  majorCities: [
+    "guangzhou",
+    "foshan",
+    "shenzhen",
+    "dongguan",
+    "yiwu",
+    "zhejiang",
+    "shanghai",
+    "beijing",
+    "ningbo",
+    "hangzhou"
+  ],
+  addressKeywords: ["district", "road", "industrial park", "building", "street"],
+  operationalPhrases: [
+    "factory direct",
+    "factory-direct",
+    "oem and odm",
+    "square meter factory",
+    "china export"
+  ],
+  domainSuffixes: [".cn", ".com.cn"],
+  knownCommercialDomains: [
+    "alibaba.com",
+    "made-in-china.com",
+    "aliexpress.com",
+    "1688.com"
+  ],
+  keywords: [
+    "oem and odm",
+    "factory-direct",
+    "oem configurations",
+    "square meter factory",
+    "china manufacturer"
+  ]
+};
+
+// src/extension/countryProfiles/registry.ts
+var PROFILES = [
+  BD_PROFILE,
+  US_PROFILE,
+  GB_PROFILE,
+  CA_PROFILE,
+  AU_PROFILE,
+  IE_PROFILE,
+  IN_PROFILE,
+  CN_PROFILE
 ];
-var BD_OPERATIONAL_PHRASES = [
-  "all over bangladesh",
-  "delivery all over bangladesh",
-  "inside dhaka",
-  "outside dhaka",
-  "free delivery in dhaka",
-  "free delivery inside dhaka",
-  "cash on delivery in bangladesh",
-  "home delivery inside dhaka",
-  "bangladesh delivery",
-  "deliver all over bangladesh",
-  "all over bd"
-];
-var FOREIGN_INDICATORS = [
-  {
-    countryCode: "IN",
-    countryName: "India",
-    domainSuffixes: [".in", ".co.in"],
-    domains: ["amazon.in", "interio.com", "flipkart.com"],
-    cities: ["jaipur", "mumbai", "delhi", "bengaluru", "bangalore", "kolkata", "chennai", "hyderabad", "pune", "noida", "gurgaon"],
-    keywords: ["india", "inr", "great indian festival", "pan india"]
-  },
-  {
-    countryCode: "GB",
-    countryName: "United Kingdom",
-    domainSuffixes: [".co.uk", ".uk", ".org.uk"],
-    domains: ["scs.co.uk", "fairwayfurniture.co.uk"],
-    cities: ["london", "north devon", "manchester", "birmingham", "leeds", "glasgow", "devon", "bristol"],
-    keywords: ["uk", "gbp", "in-store & online", "interest free credit", "registered in england"]
-  },
-  {
-    countryCode: "US",
-    countryName: "United States",
-    domainSuffixes: [".us", ".gov", ".mil"],
-    domains: ["raymourflanigan.com", "officedepot.com", "tahans.com", "ashleyfurniture.com"],
-    cities: ["new york", "california", "texas", "florida", "chicago", "los angeles", "utica"],
-    keywords: ["labor day", "nationwide delivery", "special financing", "us shipping"]
-  },
-  {
-    countryCode: "AU",
-    countryName: "Australia",
-    domainSuffixes: [".com.au", ".net.au", ".au"],
-    domains: ["hospitalityfurniture.net.au"],
-    cities: ["sydney", "melbourne", "brisbane", "perth", "adelaide"],
-    keywords: ["australia", "aud", "australia wide"]
-  },
-  {
-    countryCode: "CN",
-    countryName: "China",
-    domainSuffixes: [".cn", ".com.cn"],
-    domains: ["alibaba.com", "made-in-china.com"],
-    cities: ["guangzhou", "foshan", "shenzhen", "dongguan", "yiwu", "zhejiang"],
-    keywords: ["oem and odm", "factory-direct", "oem configurations", "square meter factory"]
+var CODE_MAP = /* @__PURE__ */ new Map();
+var ALIAS_MAP = /* @__PURE__ */ new Map();
+for (const profile of PROFILES) {
+  const code = profile.countryCode.toUpperCase();
+  CODE_MAP.set(code, profile);
+  ALIAS_MAP.set(code, code);
+  for (const alias of profile.aliases) {
+    ALIAS_MAP.set(alias.toUpperCase(), code);
   }
-];
+}
+function normalizeCountryCode(codeOrAlias) {
+  if (!codeOrAlias) return void 0;
+  const clean = codeOrAlias.trim().toUpperCase();
+  return ALIAS_MAP.get(clean) || (clean.length === 2 ? clean : void 0);
+}
+function getCountryProfile(codeOrAlias) {
+  const normCode = normalizeCountryCode(codeOrAlias);
+  if (!normCode) return void 0;
+  return CODE_MAP.get(normCode);
+}
+function getForeignIndicatorProfiles(targetCountryCode) {
+  const normTarget = normalizeCountryCode(targetCountryCode);
+  return PROFILES.filter((p) => p.countryCode !== normTarget);
+}
+
+// src/extension/geographicClassifier.ts
+function detectSignalsForProfile(profile, inputs, textToScan) {
+  const body = inputs.bodyCopy || "";
+  const pageUrlLower = (inputs.pageUrl || "").toLowerCase();
+  const pageNameLower = (inputs.pageName || "").toLowerCase();
+  const destUrlLower = (inputs.destinationUrl || "").toLowerCase();
+  const destDom = (inputs.destinationDomain || "").toLowerCase();
+  const hasKnownDomain = !!(destDom && profile.knownCommercialDomains && profile.knownCommercialDomains.some((d) => destDom === d || destDom.endsWith("." + d)));
+  const hasCcTld = !!(destDom && profile.domainSuffixes.some((s) => destDom.endsWith(s)));
+  let hasIntlPhone = false;
+  let hasDomesticPhone = false;
+  let matchedPhone;
+  if (body) {
+    const phoneMatch = body.match(profile.phone.phoneRegex);
+    if (phoneMatch) {
+      matchedPhone = phoneMatch[0];
+      const hasPrefix = profile.phone.internationalPrefixes.some(
+        (p) => body.includes(p) || matchedPhone && matchedPhone.includes(p)
+      );
+      if (hasPrefix) {
+        hasIntlPhone = true;
+      } else {
+        hasDomesticPhone = true;
+      }
+    } else if (profile.phone.domesticRegex) {
+      const domMatch = body.match(profile.phone.domesticRegex);
+      if (domMatch) {
+        matchedPhone = domMatch[0];
+        hasDomesticPhone = true;
+      }
+    }
+  }
+  let hasPostalCode = false;
+  if (body && profile.regions?.postalCodeRegex) {
+    hasPostalCode = profile.regions.postalCodeRegex.test(body);
+  }
+  let hasCity = false;
+  let matchedCity;
+  for (const city of profile.majorCities) {
+    const cityRegex = new RegExp(`\\b${city}\\b`, "i");
+    if (cityRegex.test(body) || pageUrlLower.includes(city) || pageNameLower.includes(city) || destUrlLower.includes(city)) {
+      hasCity = true;
+      matchedCity = city;
+      break;
+    }
+  }
+  let hasStateOrProvince = false;
+  let matchedState;
+  if (profile.regions?.statesOrProvinces) {
+    for (const state of profile.regions.statesOrProvinces) {
+      const stateRegex = new RegExp(`\\b${state}\\b`, "i");
+      if (stateRegex.test(body) || pageUrlLower.includes(state)) {
+        hasStateOrProvince = true;
+        matchedState = state;
+        break;
+      }
+    }
+  }
+  if (!hasStateOrProvince && profile.regions?.stateCodes && body) {
+    for (const code of profile.regions.stateCodes) {
+      const codeRegex = new RegExp(`\\b${code}\\b`);
+      if (codeRegex.test(body)) {
+        hasStateOrProvince = true;
+        matchedState = code;
+        break;
+      }
+    }
+  }
+  let hasAddressKeyword = false;
+  if (body && profile.addressKeywords.length > 0) {
+    const addrPattern = new RegExp(`\\b(?:${profile.addressKeywords.map((k) => k.replace(".", "\\.")).join("|")})\\b`, "i");
+    hasAddressKeyword = addrPattern.test(body);
+  }
+  let hasOperationalPhrase = false;
+  let matchedOperationalPhrase;
+  for (const phrase of profile.operationalPhrases) {
+    if (textToScan.includes(phrase)) {
+      hasOperationalPhrase = true;
+      matchedOperationalPhrase = phrase;
+      break;
+    }
+  }
+  let hasNativeScript = false;
+  if (profile.nativeScriptRegex) {
+    hasNativeScript = profile.nativeScriptRegex.test(body) || profile.nativeScriptRegex.test(inputs.pageName || "");
+  }
+  let hasCommercialKeyword = false;
+  let matchedCommercialKeyword;
+  if (profile.keywords) {
+    for (const kw of profile.keywords) {
+      if (textToScan.includes(kw)) {
+        hasCommercialKeyword = true;
+        matchedCommercialKeyword = kw;
+        break;
+      }
+    }
+  }
+  const hasExplicitPhysicalAddress = (hasCity || hasStateOrProvince || hasPostalCode) && (hasAddressKeyword || hasPostalCode);
+  return {
+    profile,
+    hasKnownDomain,
+    hasCcTld,
+    hasIntlPhone,
+    hasDomesticPhone,
+    matchedPhone,
+    hasPostalCode,
+    hasCity,
+    matchedCity,
+    hasStateOrProvince,
+    matchedState,
+    hasAddressKeyword,
+    hasOperationalPhrase,
+    matchedOperationalPhrase,
+    hasNativeScript,
+    hasCommercialKeyword,
+    matchedCommercialKeyword,
+    hasExplicitPhysicalAddress
+  };
+}
 function evaluateGeographicOrigin(inputs, targetCountryCode = "BD") {
-  const normTarget = (targetCountryCode || "BD").toUpperCase();
-  const evidence = [];
+  const rawTarget = targetCountryCode ? targetCountryCode.trim().toUpperCase() : "BD";
+  const normTarget = normalizeCountryCode(rawTarget) || rawTarget;
+  const targetProfile = getCountryProfile(normTarget);
+  if (!targetProfile) {
+    return {
+      classification: "LOCATION_UNKNOWN",
+      targetCountryCode: normTarget,
+      businessCountryCode: void 0,
+      confidence: "NONE",
+      evidence: [`Target country code "${targetCountryCode}" is unsupported or unrecognized.`],
+      reason: `Target country "${targetCountryCode}" lacks an active country classification profile.`,
+      reasonCode: "UNSUPPORTED_TARGET_COUNTRY",
+      isLocal: false,
+      isForeign: false,
+      isUnknown: true
+    };
+  }
   const textToScan = [
     inputs.pageName || "",
     inputs.pageUrl || "",
@@ -3296,199 +4694,165 @@ function evaluateGeographicOrigin(inputs, targetCountryCode = "BD") {
     inputs.bodyCopy || "",
     inputs.ctaText || ""
   ].join(" ").toLowerCase();
-  for (const fi of FOREIGN_INDICATORS) {
-    if (fi.countryCode === normTarget) continue;
-    if (inputs.destinationDomain) {
-      const dom = inputs.destinationDomain.toLowerCase();
-      if (fi.domains.some((d) => dom === d || dom.endsWith("." + d))) {
-        evidence.push(`Official website domain ${inputs.destinationDomain} belongs to known ${fi.countryName} commercial entity`);
-        return {
-          classification: "FOREIGN_VERIFIED",
-          targetCountryCode: normTarget,
-          businessCountryCode: fi.countryCode,
-          confidence: "HIGH",
-          evidence,
-          reason: `Verified foreign commercial entity operating from ${fi.countryName} (${fi.countryCode}).`,
-          isLocal: false,
-          isForeign: true,
-          isUnknown: false
-        };
-      }
-      if (fi.domainSuffixes.some((s) => dom.endsWith(s))) {
-        evidence.push(`Destination domain ${inputs.destinationDomain} has ${fi.countryName} country-code TLD (${fi.domainSuffixes.join(", ")})`);
-        return {
-          classification: "FOREIGN_VERIFIED",
-          targetCountryCode: normTarget,
-          businessCountryCode: fi.countryCode,
-          confidence: "HIGH",
-          evidence,
-          reason: `Verified foreign domain based in ${fi.countryName} (${fi.countryCode}).`,
-          isLocal: false,
-          isForeign: true,
-          isUnknown: false
-        };
-      }
-    }
-    const pageUrlLower = (inputs.pageUrl || "").toLowerCase();
-    for (const city of fi.cities) {
-      const cityRegex = new RegExp(`\\b${city}\\b`, "i");
-      if (cityRegex.test(inputs.bodyCopy || "") || pageUrlLower.includes(city) || (inputs.pageName || "").toLowerCase().includes(city)) {
-        evidence.push(`Explicit mention of ${fi.countryName} location/city: "${city}"`);
-        return {
-          classification: "FOREIGN_VERIFIED",
-          targetCountryCode: normTarget,
-          businessCountryCode: fi.countryCode,
-          confidence: "HIGH",
-          evidence,
-          reason: `Explicit commercial presence or address located in ${city}, ${fi.countryName}.`,
-          isLocal: false,
-          isForeign: true,
-          isUnknown: false
-        };
-      }
-    }
-    for (const kw of fi.keywords) {
-      if (textToScan.includes(kw)) {
-        evidence.push(`Explicit ${fi.countryName} commercial context: "${kw}"`);
-        return {
-          classification: "FOREIGN_VERIFIED",
-          targetCountryCode: normTarget,
-          businessCountryCode: fi.countryCode,
-          confidence: "HIGH",
-          evidence,
-          reason: `Entity copy and commercial signals explicitly refer to ${fi.countryName}.`,
-          isLocal: false,
-          isForeign: true,
-          isUnknown: false
-        };
-      }
+  const localSignals = detectSignalsForProfile(targetProfile, inputs, textToScan);
+  const foreignProfiles = getForeignIndicatorProfiles(normTarget);
+  const foreignObservations = [];
+  for (const fp of foreignProfiles) {
+    const fs = detectSignalsForProfile(fp, inputs, textToScan);
+    const isSharedPhoneOnly = fs.hasIntlPhone && !fs.hasKnownDomain && !fs.hasCcTld && !fs.hasExplicitPhysicalAddress && !fs.hasCity && !fs.hasStateOrProvince && !fs.hasPostalCode && Boolean(targetProfile.phone.sharedPrefixes && fp.phone.sharedPrefixes && targetProfile.phone.sharedPrefixes.some((p) => fp.phone.sharedPrefixes?.includes(p)));
+    if (!isSharedPhoneOnly && (fs.hasKnownDomain || fs.hasCcTld || fs.hasIntlPhone || fs.hasExplicitPhysicalAddress || fs.hasCommercialKeyword || fs.hasCity)) {
+      foreignObservations.push(fs);
     }
   }
-  if (inputs.bodyCopy) {
-    if (IN_PHONE_REGEX.test(inputs.bodyCopy) && inputs.bodyCopy.includes("+91")) {
-      evidence.push("Verified Indian telephone international dialing prefix +91");
+  const conflictingForeignAddress = foreignObservations.find((f) => f.hasExplicitPhysicalAddress);
+  if (localSignals.hasExplicitPhysicalAddress && conflictingForeignAddress) {
+    return {
+      classification: "LOCATION_UNKNOWN",
+      targetCountryCode: normTarget,
+      businessCountryCode: void 0,
+      confidence: "NONE",
+      evidence: [
+        `Local physical address detected in ${localSignals.matchedCity || targetProfile.countryName}`,
+        `Contradictory foreign physical address detected in ${conflictingForeignAddress.matchedCity || conflictingForeignAddress.profile.countryName}`
+      ],
+      reason: "Conflicting high-quality physical address evidence detected across multiple countries; origin unresolved.",
+      reasonCode: "CONFLICTING_LOCATION_EVIDENCE",
+      isLocal: false,
+      isForeign: false,
+      isUnknown: true
+    };
+  }
+  const strongForeign = foreignObservations.find(
+    (f) => f.hasKnownDomain || f.hasCcTld || f.hasIntlPhone || f.hasExplicitPhysicalAddress || f.hasCommercialKeyword || f.hasCity
+  );
+  if (strongForeign) {
+    const isForeignVerified = strongForeign.hasKnownDomain || strongForeign.hasCcTld || strongForeign.hasIntlPhone || strongForeign.hasExplicitPhysicalAddress || strongForeign.hasCommercialKeyword || strongForeign.hasCity;
+    if (isForeignVerified && !localSignals.hasExplicitPhysicalAddress) {
+      const foreignEvidence = [];
+      let reasonCode = "EXPLICIT_FOREIGN_ADDRESS";
+      let reason = `Verified foreign commercial entity operating from ${strongForeign.profile.countryName} (${strongForeign.profile.countryCode}).`;
+      if (strongForeign.hasKnownDomain) {
+        foreignEvidence.push(`Official website domain ${inputs.destinationDomain} belongs to known ${strongForeign.profile.countryName} commercial entity`);
+        reasonCode = "EXPLICIT_FOREIGN_DOMAIN";
+      } else if (strongForeign.hasCcTld) {
+        foreignEvidence.push(`Destination domain ${inputs.destinationDomain} has ${strongForeign.profile.countryName} country-code TLD (${strongForeign.profile.domainSuffixes.join(", ")})`);
+        reasonCode = "EXPLICIT_FOREIGN_DOMAIN";
+        reason = `Verified foreign domain based in ${strongForeign.profile.countryName} (${strongForeign.profile.countryCode}).`;
+      } else if (strongForeign.hasIntlPhone) {
+        foreignEvidence.push(`Verified telephone country code for ${strongForeign.profile.countryName} (${strongForeign.profile.phone.internationalPrefixes[0]})`);
+        reasonCode = "EXPLICIT_FOREIGN_PHONE";
+        reason = `Verified telephone country code for ${strongForeign.profile.countryName} (${strongForeign.profile.phone.internationalPrefixes[0]}).`;
+      } else if (strongForeign.hasCity) {
+        foreignEvidence.push(`Explicit mention of ${strongForeign.profile.countryName} location/city: "${strongForeign.matchedCity}"`);
+        reason = `Explicit commercial presence or address located in ${strongForeign.matchedCity}, ${strongForeign.profile.countryName}.`;
+      } else if (strongForeign.hasCommercialKeyword) {
+        foreignEvidence.push(`Explicit ${strongForeign.profile.countryName} commercial context: "${strongForeign.matchedCommercialKeyword}"`);
+        reasonCode = "EXPLICIT_FOREIGN_CONTEXT";
+        reason = `Entity copy and commercial signals explicitly refer to ${strongForeign.profile.countryName}.`;
+      }
       return {
         classification: "FOREIGN_VERIFIED",
         targetCountryCode: normTarget,
-        businessCountryCode: "IN",
+        businessCountryCode: strongForeign.profile.countryCode,
         confidence: "HIGH",
-        evidence,
-        reason: "Verified telephone country code for India (+91).",
-        isLocal: false,
-        isForeign: true,
-        isUnknown: false
-      };
-    }
-    if (UK_PHONE_REGEX.test(inputs.bodyCopy) && inputs.bodyCopy.includes("+44")) {
-      evidence.push("Verified UK telephone international dialing prefix +44");
-      return {
-        classification: "FOREIGN_VERIFIED",
-        targetCountryCode: normTarget,
-        businessCountryCode: "GB",
-        confidence: "HIGH",
-        evidence,
-        reason: "Verified telephone country code for United Kingdom (+44).",
-        isLocal: false,
-        isForeign: true,
-        isUnknown: false
-      };
-    }
-    if (AU_PHONE_REGEX.test(inputs.bodyCopy) && inputs.bodyCopy.includes("+61")) {
-      evidence.push("Verified Australian telephone international dialing prefix +61");
-      return {
-        classification: "FOREIGN_VERIFIED",
-        targetCountryCode: normTarget,
-        businessCountryCode: "AU",
-        confidence: "HIGH",
-        evidence,
-        reason: "Verified telephone country code for Australia (+61).",
+        evidence: foreignEvidence,
+        reason,
+        reasonCode,
         isLocal: false,
         isForeign: true,
         isUnknown: false
       };
     }
   }
-  if (normTarget === "BD") {
-    let hasLocalPhone = false;
-    let hasLocalAddressOrDelivery = false;
-    let hasLocalCity = false;
-    let hasBengaliScript = false;
-    let hasBdDomain = false;
-    if (inputs.bodyCopy && BD_PHONE_REGEX.test(inputs.bodyCopy)) {
-      const match = inputs.bodyCopy.match(BD_PHONE_REGEX);
-      if (match) {
-        hasLocalPhone = true;
-        evidence.push(`Verified Bangladesh domestic phone number format: "${match[0]}"`);
-      }
+  const isSharedNanp = (normTarget === "US" || normTarget === "CA") && localSignals.hasIntlPhone;
+  const nanpCorroborated = isSharedNanp && (localSignals.hasCity || localSignals.hasStateOrProvince || localSignals.hasPostalCode || localSignals.hasCcTld);
+  const hasStrongLocalPhone = localSignals.hasIntlPhone && (!isSharedNanp || nanpCorroborated) || localSignals.hasDomesticPhone && (localSignals.hasCity || localSignals.hasCcTld || localSignals.hasNativeScript || localSignals.hasOperationalPhrase);
+  if (localSignals.hasExplicitPhysicalAddress || hasStrongLocalPhone) {
+    const evidence = [];
+    if (localSignals.hasIntlPhone) {
+      evidence.push(`Verified ${targetProfile.countryName} telephone dialing prefix ${targetProfile.phone.internationalPrefixes[0]}`);
+    } else if (localSignals.hasDomesticPhone && localSignals.matchedPhone) {
+      evidence.push(`Verified ${targetProfile.countryName} domestic phone number format: "${localSignals.matchedPhone}"`);
     }
-    for (const phrase of BD_OPERATIONAL_PHRASES) {
-      if (textToScan.includes(phrase)) {
-        hasLocalAddressOrDelivery = true;
-        evidence.push(`Explicit local operational coverage phrase: "${phrase}"`);
-        break;
-      }
+    if (localSignals.hasPostalCode) {
+      evidence.push(`Verified domestic postal/ZIP code in ${targetProfile.countryName}`);
     }
-    for (const city of BD_CITIES_DIVISIONS) {
-      const cityRegex = new RegExp(`\\b${city}\\b`, "i");
-      if (cityRegex.test(inputs.bodyCopy || "") || (inputs.destinationUrl || "").toLowerCase().includes(city)) {
-        hasLocalCity = true;
-        evidence.push(`Mention of major Bangladesh metropolitan area: "${city}"`);
-        break;
-      }
+    if (localSignals.hasCity && localSignals.matchedCity) {
+      evidence.push(`Mention of major ${targetProfile.countryName} metropolitan area: "${localSignals.matchedCity}"`);
     }
-    if (/[\u0980-\u09FF]/.test(inputs.bodyCopy || "") || /[\u0980-\u09FF]/.test(inputs.pageName || "")) {
-      hasBengaliScript = true;
-      evidence.push("Ad creative contains native Bengali script text");
+    if (localSignals.hasStateOrProvince && localSignals.matchedState) {
+      evidence.push(`Mention of administrative region/state: "${localSignals.matchedState}"`);
     }
-    if (inputs.destinationDomain) {
-      const dom = inputs.destinationDomain.toLowerCase();
-      if (dom.endsWith(".bd") || dom.endsWith(".com.bd") || dom.includes("regalfurniturebd") || dom.includes("htbazarbd")) {
-        hasBdDomain = true;
-        evidence.push(`Official website domain contains Bangladesh identifier: "${inputs.destinationDomain}"`);
-      }
+    if (localSignals.hasOperationalPhrase && localSignals.matchedOperationalPhrase) {
+      evidence.push(`Explicit local operational coverage phrase: "${localSignals.matchedOperationalPhrase}"`);
     }
-    const hasAddressKeywords = /\b(?:house\s*#?|road\s*#?|sector\s*#?|block\s*#?|lane\s*#?|plot\s*#?|holding\s*#?|floor\s*#?|avenue\b|street\b)/i.test(inputs.bodyCopy || "");
-    const hasVerifiedPhysicalAddress = hasLocalCity && hasAddressKeywords;
-    const hasExplicitBdPrefix = inputs.bodyCopy && (inputs.bodyCopy.includes("+880") || inputs.bodyCopy.includes("8801"));
-    if (hasExplicitBdPrefix || hasLocalPhone && (hasLocalCity || hasBdDomain || hasBengaliScript || hasLocalAddressOrDelivery) || hasVerifiedPhysicalAddress) {
-      return {
-        classification: "LOCAL_VERIFIED",
-        targetCountryCode: normTarget,
-        businessCountryCode: "BD",
-        confidence: "HIGH",
-        evidence,
-        reason: "Verified local business with confirmed Bangladesh physical showroom, street address, or telephone contact.",
-        isLocal: true,
-        isForeign: false,
-        isUnknown: false
-      };
+    if (localSignals.hasNativeScript) {
+      evidence.push(`Ad creative contains native ${targetProfile.countryCode === "BD" ? "Bengali " : ""}script text`);
     }
-    if (hasLocalAddressOrDelivery || hasBengaliScript || hasLocalCity || hasLocalPhone) {
-      return {
-        classification: "LOCAL_PROBABLE",
-        targetCountryCode: normTarget,
-        businessCountryCode: "BD",
-        confidence: "MEDIUM",
-        evidence,
-        reason: "Probable local business with corroborating Bangladesh commercial signals (labeled for review).",
-        isLocal: true,
-        isForeign: false,
-        isUnknown: false
-      };
+    if (localSignals.hasCcTld && inputs.destinationDomain) {
+      evidence.push(`Official website domain contains ${targetProfile.countryName} identifier: "${inputs.destinationDomain}"`);
     }
-    if (hasBdDomain) {
-      return {
-        classification: "LOCAL_PROBABLE",
-        targetCountryCode: normTarget,
-        businessCountryCode: "BD",
-        confidence: "LOW",
-        evidence,
-        reason: "Country-code domain suffix indicates probable regional association, but lacks verified physical address/phone.",
-        isLocal: true,
-        isForeign: false,
-        isUnknown: false
-      };
+    return {
+      classification: "LOCAL_VERIFIED",
+      targetCountryCode: normTarget,
+      businessCountryCode: normTarget,
+      confidence: "HIGH",
+      evidence,
+      reason: `Verified local business with confirmed ${targetProfile.countryName} physical showroom, street address, or telephone contact.`,
+      reasonCode: localSignals.hasExplicitPhysicalAddress ? "EXPLICIT_LOCAL_ADDRESS" : "EXPLICIT_LOCAL_PHONE",
+      isLocal: true,
+      isForeign: false,
+      isUnknown: false
+    };
+  }
+  const hasProbableSignals = localSignals.hasOperationalPhrase || localSignals.hasNativeScript || localSignals.hasCity || localSignals.hasDomesticPhone || isSharedNanp && !nanpCorroborated;
+  if (hasProbableSignals) {
+    const evidence = [];
+    let reasonCode = "WEAK_LOCAL_SIGNALS_ONLY";
+    if (localSignals.hasOperationalPhrase && localSignals.matchedOperationalPhrase) {
+      evidence.push(`Explicit local operational coverage phrase: "${localSignals.matchedOperationalPhrase}"`);
+      reasonCode = "PROBABLE_LOCAL_DELIVERY";
     }
+    if (localSignals.hasCity && localSignals.matchedCity) {
+      evidence.push(`Mention of major ${targetProfile.countryName} metropolitan area: "${localSignals.matchedCity}"`);
+      if (reasonCode === "WEAK_LOCAL_SIGNALS_ONLY") reasonCode = "PROBABLE_LOCAL_CITY";
+    }
+    if (localSignals.hasNativeScript) {
+      evidence.push(`Ad creative contains native ${targetProfile.countryCode === "BD" ? "Bengali " : ""}script text`);
+      if (reasonCode === "WEAK_LOCAL_SIGNALS_ONLY") reasonCode = "PROBABLE_LOCAL_SCRIPT";
+    }
+    if (localSignals.hasDomesticPhone && localSignals.matchedPhone) {
+      evidence.push(`Observed unverified domestic telephone format: "${localSignals.matchedPhone}"`);
+    }
+    if (isSharedNanp && !nanpCorroborated) {
+      evidence.push("Observed NANP (+1) telephone prefix without state, province, or city corroboration");
+    }
+    return {
+      classification: "LOCAL_PROBABLE",
+      targetCountryCode: normTarget,
+      businessCountryCode: normTarget,
+      confidence: "MEDIUM",
+      evidence,
+      reason: `Probable local business with corroborating ${targetProfile.countryName} commercial signals (labeled for review).`,
+      reasonCode,
+      isLocal: true,
+      isForeign: false,
+      isUnknown: false
+    };
+  }
+  if (localSignals.hasCcTld && inputs.destinationDomain) {
+    return {
+      classification: "LOCAL_PROBABLE",
+      targetCountryCode: normTarget,
+      businessCountryCode: normTarget,
+      confidence: "LOW",
+      evidence: [`Official website domain contains ${targetProfile.countryName} identifier: "${inputs.destinationDomain}"`],
+      reason: "Country-code domain suffix indicates probable regional association, but lacks verified physical address/phone.",
+      reasonCode: "DOMAIN_SUFFIX_ONLY",
+      isLocal: true,
+      isForeign: false,
+      isUnknown: false
+    };
   }
   return {
     classification: "LOCATION_UNKNOWN",
@@ -3497,6 +4861,7 @@ function evaluateGeographicOrigin(inputs, targetCountryCode = "BD") {
     confidence: "NONE",
     evidence: ["No unambiguous geographic signals detected in extracted ad or page data."],
     reason: "Physical business location cannot be verified from available public signals.",
+    reasonCode: "COUNTRY_EVIDENCE_MISSING",
     isLocal: false,
     isForeign: false,
     isUnknown: true
@@ -3945,7 +5310,7 @@ function evaluateEntityMerge(cand, existingEntities, index) {
     relationshipType: "INDEPENDENT_BUSINESS"
   };
 }
-function mergeCandidateIntoEntity(target, cand, decision, sourceQuery) {
+function mergeCandidateIntoEntity(target, cand, decision, sourceQuery, targetCountryCode) {
   if (!target.activeAdLibraryIds) {
     if (typeof target.activeAdCount === "number" && target.activeAdCount > 0) {
       target.activeAdLibraryIds = (target.adLibraryIds || []).slice(0, target.activeAdCount);
@@ -3968,6 +5333,7 @@ function mergeCandidateIntoEntity(target, cand, decision, sourceQuery) {
   }
   target.activeAdLibraryIds = target.activeAdLibraryIds.filter((id) => target.adLibraryIds.includes(id));
   target.activeAdCount = target.activeAdLibraryIds.length;
+  if (!target.matchedKeywords) target.matchedKeywords = [];
   if (sourceQuery) {
     if (!target.matchedQueries) target.matchedQueries = [];
     if (!target.matchedQueries.includes(sourceQuery)) {
@@ -4020,6 +5386,41 @@ function mergeCandidateIntoEntity(target, cand, decision, sourceQuery) {
   if (!target.sampleCta && cand.ctaText) {
     target.sampleCta = cand.ctaText;
   }
+  if (!target.adEvidence) target.adEvidence = [];
+  const adCtaRes = cand.ctaType ? { ctaType: cand.ctaType, normalizedText: cand.ctaText || "", reasonCode: "CTA_TEXT_MATCH", reason: "" } : classifyCta(cand.ctaText);
+  const adDestRes = cand.destinationType ? { destinationType: cand.destinationType, confidence: cand.destinationConfidence || "HIGH", reasonCode: cand.destinationReasonCode || "VISIBLE_EXTERNAL_DESTINATION", reason: "" } : classifyDestination({
+    destinationUrl: cand.destinationUrl,
+    destinationDomain: cand.destinationDomain,
+    ctaText: cand.ctaText,
+    ctaType: adCtaRes.ctaType,
+    bodyCopy: cand.bodyCopy,
+    rawText: cand.rawText
+  });
+  const existingAdIdx = target.adEvidence.findIndex((e) => e.libraryId === cand.libraryId);
+  const adEvidenceItem = {
+    libraryId: cand.libraryId,
+    ctaText: cand.ctaText,
+    ctaType: adCtaRes.ctaType,
+    destinationType: adDestRes.destinationType,
+    destinationUrl: cand.destinationUrl,
+    destinationDomain: cand.destinationDomain,
+    reasonCode: adDestRes.reasonCode,
+    confidence: adDestRes.confidence,
+    observedAt: cand.startedRunning || (/* @__PURE__ */ new Date()).toISOString()
+  };
+  if (existingAdIdx >= 0) {
+    target.adEvidence[existingAdIdx] = adEvidenceItem;
+  } else {
+    target.adEvidence.push(adEvidenceItem);
+  }
+  const aggSummary = aggregateAdEvidence(target.adEvidence);
+  target.observedCtaTexts = aggSummary.observedCtaTexts;
+  target.observedCtaTypes = aggSummary.observedCtaTypes;
+  target.observedDestinationTypes = aggSummary.observedDestinationTypes;
+  target.primaryCtaType = aggSummary.primaryCtaType;
+  target.primaryDestinationType = aggSummary.primaryDestinationType;
+  target.destinationReasonCode = aggSummary.destinationReasonCode;
+  target.destinationConfidence = aggSummary.destinationConfidence;
   if (!target.mergeHistory) target.mergeHistory = [];
   target.mergeHistory.push({
     timestamp: (/* @__PURE__ */ new Date()).toISOString(),
@@ -4028,6 +5429,30 @@ function mergeCandidateIntoEntity(target, cand, decision, sourceQuery) {
     sourceQuery,
     confidence: decision.confidence
   });
+  const evalTargetCountry = targetCountryCode || target.targetCountryCode || target.locationCode;
+  if (evalTargetCountry) {
+    const updatedGeo = evaluateGeographicOrigin({
+      pageName: target.name,
+      pageUrl: target.facebookPageUrl,
+      destinationUrl: target.destinationUrl || cand.destinationUrl,
+      destinationDomain: target.destinationDomain || cand.destinationDomain,
+      bodyCopy: [target.sampleCopy, cand.bodyCopy].filter(Boolean).join(" "),
+      ctaText: [target.sampleCta, cand.ctaText].filter(Boolean).join(" ")
+    }, evalTargetCountry);
+    const shouldUpdateGeo = !target.geographicClassification || target.geographicClassification === "LOCATION_UNKNOWN" || updatedGeo.classification === "FOREIGN_VERIFIED" || target.geographicClassification === "LOCAL_PROBABLE" && updatedGeo.classification === "LOCAL_VERIFIED" || updatedGeo.reasonCode === "CONFLICTING_LOCATION_EVIDENCE";
+    if (shouldUpdateGeo) {
+      target.targetCountryCode = updatedGeo.targetCountryCode;
+      target.businessCountryCode = updatedGeo.businessCountryCode;
+      target.geographicClassification = updatedGeo.classification;
+      target.businessLocationConfidence = updatedGeo.confidence;
+      target.businessLocationEvidence = Array.from(/* @__PURE__ */ new Set([
+        ...target.businessLocationEvidence || [],
+        ...updatedGeo.evidence
+      ]));
+      target.businessLocationReason = updatedGeo.reason;
+      target.businessLocationReasonCode = updatedGeo.reasonCode;
+    }
+  }
 }
 
 // src/extension/creativeSignals.ts
@@ -4607,7 +6032,7 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
       if (existingEntity) {
         counters.duplicatesRemoved++;
         counters.entityMergesCount = (counters.entityMergesCount || 0) + 1;
-        mergeCandidateIntoEntity(existingEntity, cand, mergeDecision, currentKeyword);
+        mergeCandidateIntoEntity(existingEntity, cand, mergeDecision, currentKeyword, countryCode);
         const newSignals = extractCreativeSignalsFromCandidate(cand);
         existingEntity.creativeSignals = aggregateCreativeSignals([
           ...existingEntity.creativeSignals || [],
@@ -4621,14 +6046,33 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
           bodyCopy: [existingEntity.sampleCopy, cand.bodyCopy].filter(Boolean).join(" "),
           ctaText: [existingEntity.sampleCta, cand.ctaText].filter(Boolean).join(" ")
         }, countryCode);
-        if (!existingEntity.geographicClassification || existingEntity.geographicClassification === "LOCATION_UNKNOWN" || existingEntity.geographicClassification === "LOCAL_PROBABLE" && updatedGeo.classification === "LOCAL_VERIFIED") {
+        const shouldUpdateGeo = !existingEntity.geographicClassification || existingEntity.geographicClassification === "LOCATION_UNKNOWN" || updatedGeo.classification === "FOREIGN_VERIFIED" || existingEntity.geographicClassification === "LOCAL_PROBABLE" && updatedGeo.classification === "LOCAL_VERIFIED" || updatedGeo.reasonCode === "CONFLICTING_LOCATION_EVIDENCE";
+        if (shouldUpdateGeo) {
           existingEntity.targetCountryCode = updatedGeo.targetCountryCode;
           existingEntity.businessCountryCode = updatedGeo.businessCountryCode;
           existingEntity.geographicClassification = updatedGeo.classification;
           existingEntity.businessLocationConfidence = updatedGeo.confidence;
-          existingEntity.businessLocationEvidence = updatedGeo.evidence;
+          existingEntity.businessLocationEvidence = Array.from(/* @__PURE__ */ new Set([
+            ...existingEntity.businessLocationEvidence || [],
+            ...updatedGeo.evidence
+          ]));
           existingEntity.businessLocationReason = updatedGeo.reason;
+          existingEntity.businessLocationReasonCode = updatedGeo.reasonCode;
         }
+        if (intent) {
+          const candEval = LeadRelevanceEngine.evaluateCandidate(cand, intent);
+          if (candEval.decision === "NOT_RELEVANT" && candEval.conflicts.some((c) => c.type === "CONTRADICTION" && c.strength === "STRONG")) {
+            existingEntity.relevanceDecision = "NOT_RELEVANT";
+            existingEntity.evaluationStatus = "REJECTED";
+            existingEntity.relevanceReasons = [...existingEntity.relevanceReasons || [], ...candEval.reasons];
+          } else if (candEval.decision === "RELEVANT") {
+            existingEntity.relevanceScore = Math.max(existingEntity.relevanceScore || 0, candEval.score);
+          }
+        }
+        const qualGate2 = evaluateLeadQualificationGates(existingEntity, intent);
+        existingEntity.status = qualGate2.status;
+        existingEntity.qualificationFailedGates = qualGate2.failedGates;
+        existingEntity.qualificationReasons = qualGate2.reasons;
         entityIndex.indexEntity(mergeDecision.targetKey, existingEntity);
         if (!updatedEntities.some((e) => e.id === existingEntity.id)) {
           updatedEntities.push(existingEntity);
@@ -4729,14 +6173,58 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
         continue;
       }
     }
+    const candCtaRes = cand.ctaType ? { ctaType: cand.ctaType, normalizedText: cand.ctaText || "", reasonCode: "CTA_TEXT_MATCH", reason: "" } : classifyCta(cand.ctaText);
+    const candDestRes = cand.destinationType ? { destinationType: cand.destinationType, confidence: cand.destinationConfidence || "HIGH", reasonCode: cand.destinationReasonCode || "VISIBLE_EXTERNAL_DESTINATION", reason: "" } : classifyDestination({
+      destinationUrl: domainNorm.cleanUrl || cand.destinationUrl,
+      destinationDomain: domainNorm.canonicalDomain || cand.destinationDomain,
+      ctaText: cand.ctaText,
+      ctaType: candCtaRes.ctaType,
+      bodyCopy: cand.bodyCopy,
+      rawText: cand.rawText
+    });
+    cand.ctaType = candCtaRes.ctaType;
+    cand.destinationType = candDestRes.destinationType;
+    cand.destinationReasonCode = candDestRes.reasonCode;
+    cand.destinationConfidence = candDestRes.confidence;
+    if (intent?.requiredCtaTypes && intent.requiredCtaTypes.length > 0) {
+      if (!intent.requiredCtaTypes.includes(candCtaRes.ctaType)) {
+        counters.notRelevantCandidates++;
+        if (!existingEntitiesMap.has(entityKey)) {
+          seenRejectedEntityKeys.add(entityKey);
+          seenUncertainEntityKeys.delete(entityKey);
+        }
+        continue;
+      }
+    }
+    if (intent?.requiredDestinationTypes && intent.requiredDestinationTypes.length > 0) {
+      if (!intent.requiredDestinationTypes.includes(candDestRes.destinationType)) {
+        counters.notRelevantCandidates++;
+        if (!existingEntitiesMap.has(entityKey)) {
+          seenRejectedEntityKeys.add(entityKey);
+          seenUncertainEntityKeys.delete(entityKey);
+        }
+        continue;
+      }
+    }
     counters.relevantCandidates++;
     const currentLeadCount = counters.finalUniqueRelevantLeads || counters.finalUniqueLeads;
     if (currentLeadCount >= effectiveCeiling) {
       safetyLimitReached = true;
       break;
     }
-    const webState = domainNorm.cleanUrl || cand.destinationUrl ? "found" : "not_found";
+    const webState = domainNorm.cleanUrl || cand.destinationUrl ? "found" : candDestRes.destinationType === "NO_VISIBLE_DESTINATION" ? "not_found" : "unknown";
     const fbState = pageNorm.canonicalUrl || cand.facebookPageUrl ? "found" : "not_found";
+    const candAdEvidenceItem = {
+      libraryId: cand.libraryId,
+      ctaText: cand.ctaText,
+      ctaType: candCtaRes.ctaType,
+      destinationType: candDestRes.destinationType,
+      destinationUrl: domainNorm.cleanUrl || cand.destinationUrl,
+      destinationDomain: domainNorm.canonicalDomain || cand.destinationDomain,
+      reasonCode: candDestRes.reasonCode,
+      confidence: candDestRes.confidence,
+      observedAt: cand.startedRunning || (/* @__PURE__ */ new Date()).toISOString()
+    };
     const newLead = {
       id: `lead_${runId}_${entityKey}`,
       name: cleanName,
@@ -4760,13 +6248,23 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
       matchedQueries: currentKeyword ? [currentKeyword] : intent?.primaryKeywords?.slice(0, 1) || [],
       locationCode: countryCode,
       locationName,
+      // Ad-level CTA & Destination Intelligence (Phase 0.4)
+      adEvidence: [candAdEvidenceItem],
+      observedCtaTexts: cand.ctaText ? [cand.ctaText] : [],
+      observedCtaTypes: [candCtaRes.ctaType],
+      observedDestinationTypes: [candDestRes.destinationType],
+      primaryCtaType: candCtaRes.ctaType,
+      primaryDestinationType: candDestRes.destinationType,
+      destinationReasonCode: candDestRes.reasonCode,
+      destinationConfidence: candDestRes.confidence,
       targetCountryCode: geoEval.targetCountryCode,
       businessCountryCode: geoEval.businessCountryCode,
       geographicClassification: geoEval.classification,
       businessLocationConfidence: geoEval.confidence,
       businessLocationEvidence: geoEval.evidence,
       businessLocationReason: geoEval.reason,
-      status: webState === "found" ? "QUALIFIED" : "REVIEW_REQUIRED",
+      status: "REVIEW_REQUIRED",
+      // evaluated below via evaluateLeadQualificationGates
       discoveredAt: (/* @__PURE__ */ new Date()).toISOString(),
       sampleCopy: cand.bodyCopy,
       sampleCta: cand.ctaText,
@@ -4774,7 +6272,7 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
       relationshipType: mergeDecision.relationshipType,
       mergeHistory: [],
       relevanceScore: v3Result?.score ?? evalResult?.score,
-      relevanceDecision: v3Result?.decision ?? evalResult?.decision ?? "RELEVANT",
+      relevanceDecision: v3Result?.decision ?? evalResult?.decision ?? "UNASSESSED",
       relevanceConfidence: v3Result?.confidence ?? evalResult?.confidence,
       relevanceReasons: v3Result?.reasons ?? evalResult?.reasons,
       relevanceMatchedTerms: v3Result?.matchedTerms ?? evalResult?.matchedTerms,
@@ -4786,9 +6284,13 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
       evidenceExplanation: v3Result?.explanation,
       uniqueEvidenceSignals: v3Result?.uniqueEvidenceSignals,
       observedEvidenceOccurrences: v3Result?.observedEvidenceOccurrences,
-      evaluationStatus: "RELEVANT",
+      evaluationStatus: (v3Result?.decision ?? evalResult?.decision) === "RELEVANT" ? "RELEVANT" : "UNASSESSED",
       creativeSignals: extractCreativeSignalsFromCandidate(cand)
     };
+    const qualGate = evaluateLeadQualificationGates(newLead, intent);
+    newLead.status = qualGate.status;
+    newLead.qualificationFailedGates = qualGate.failedGates;
+    newLead.qualificationReasons = qualGate.reasons;
     const expEligibility = checkAdvertiserExpansionEligibility(
       newLead,
       options.alreadyExpandedEntityIds || /* @__PURE__ */ new Set(),
@@ -5330,997 +6832,9 @@ var QueryFrontier = class _QueryFrontier {
   }
 };
 
-// src/extension/websiteUrlNormalizer.ts
-var TRACKING_PARAM_PREFIXES = [
-  "utm_",
-  "_hs",
-  "mc_"
-];
-var TRACKING_PARAMS = /* @__PURE__ */ new Set([
-  "fbclid",
-  "gclid",
-  "msclkid",
-  "ref",
-  "ref_src",
-  "source",
-  "campaign",
-  "affiliate",
-  "tracking_id",
-  "trk"
-]);
-function normalizeWebsiteUrl(inputUrl) {
-  const original = (inputUrl || "").trim();
-  if (!original) {
-    return {
-      isValid: false,
-      originalUrl: original,
-      normalizedUrl: "",
-      finalUrl: "",
-      finalOrigin: "",
-      finalHostname: "",
-      isMetaRedirect: false,
-      error: "EMPTY_URL"
-    };
-  }
-  if (/^(javascript|data|blob|file|about|chrome|chrome-extension):/i.test(original)) {
-    return {
-      isValid: false,
-      originalUrl: original,
-      normalizedUrl: "",
-      finalUrl: "",
-      finalOrigin: "",
-      finalHostname: "",
-      isMetaRedirect: false,
-      error: "UNSUPPORTED_SCHEME"
-    };
-  }
-  let workingUrl = original;
-  let isMetaRedirect = false;
-  if (!/^https?:\/\//i.test(workingUrl)) {
-    workingUrl = "https://" + workingUrl;
-  }
-  try {
-    let parsed = new URL(workingUrl);
-    if (parsed.hostname.toLowerCase().includes("facebook.com") && (parsed.pathname.toLowerCase().endsWith("/l.php") || parsed.pathname.toLowerCase().endsWith("/l/"))) {
-      const destinationParam = parsed.searchParams.get("u");
-      if (destinationParam) {
-        try {
-          const decoded = decodeURIComponent(destinationParam);
-          if (/^https?:\/\//i.test(decoded)) {
-            workingUrl = decoded;
-            parsed = new URL(workingUrl);
-            isMetaRedirect = true;
-          }
-        } catch {
-        }
-      }
-    }
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      return {
-        isValid: false,
-        originalUrl: original,
-        normalizedUrl: "",
-        finalUrl: "",
-        finalOrigin: "",
-        finalHostname: "",
-        isMetaRedirect,
-        error: "INVALID_PROTOCOL"
-      };
-    }
-    let hostname = parsed.hostname.toLowerCase().trim();
-    if (hostname.endsWith(".")) {
-      hostname = hostname.slice(0, -1);
-    }
-    if (!hostname || !hostname.includes(".") || hostname.includes(" ")) {
-      return {
-        isValid: false,
-        originalUrl: original,
-        normalizedUrl: "",
-        finalUrl: "",
-        finalOrigin: "",
-        finalHostname: "",
-        isMetaRedirect,
-        error: "INVALID_HOSTNAME"
-      };
-    }
-    const cleanedSearchParams = new URLSearchParams();
-    for (const [key, value] of parsed.searchParams.entries()) {
-      const lowerKey = key.toLowerCase();
-      const isTracking = TRACKING_PARAMS.has(lowerKey) || TRACKING_PARAM_PREFIXES.some((prefix) => lowerKey.startsWith(prefix));
-      if (!isTracking) {
-        cleanedSearchParams.append(key, value);
-      }
-    }
-    let pathname = parsed.pathname;
-    if (pathname.length > 1 && pathname.endsWith("/")) {
-      pathname = pathname.slice(0, -1);
-    }
-    if (!pathname) {
-      pathname = "/";
-    }
-    const searchString = cleanedSearchParams.toString() ? `?${cleanedSearchParams.toString()}` : "";
-    const finalUrl = `${parsed.protocol}//${hostname}${pathname}${searchString}`;
-    const finalOrigin = `${parsed.protocol}//${hostname}`;
-    const baseHost = hostname.startsWith("www.") ? hostname.slice(4) : hostname;
-    const normalizedUrl = `https://${baseHost}${pathname === "/" ? "" : pathname}${searchString}`;
-    return {
-      isValid: true,
-      originalUrl: original,
-      normalizedUrl,
-      finalUrl,
-      finalOrigin,
-      finalHostname: hostname,
-      isMetaRedirect
-    };
-  } catch (err) {
-    return {
-      isValid: false,
-      originalUrl: original,
-      normalizedUrl: "",
-      finalUrl: "",
-      finalOrigin: "",
-      finalHostname: "",
-      isMetaRedirect: false,
-      error: err.message || "MALFORMED_URL"
-    };
-  }
-}
-function isSameOriginUrl(targetUrl, baseOrigin) {
-  try {
-    const targetParsed = new URL(targetUrl);
-    const baseParsed = new URL(baseOrigin);
-    const targetHost = targetParsed.hostname.toLowerCase().replace(/^www\./, "");
-    const baseHost = baseParsed.hostname.toLowerCase().replace(/^www\./, "");
-    return targetHost === baseHost;
-  } catch {
-    return false;
-  }
-}
-
-// src/extension/websiteCache.ts
-var CACHE_TTL_MS = 24 * 60 * 60 * 1e3;
-var memoryCache = /* @__PURE__ */ new Map();
-function getDomainCacheKey(originOrDomain) {
-  let cleaned = (originOrDomain || "").toLowerCase().trim();
-  cleaned = cleaned.replace(/^https?:\/\//, "").replace(/^www\./, "");
-  const slashIdx = cleaned.indexOf("/");
-  if (slashIdx !== -1) {
-    cleaned = cleaned.slice(0, slashIdx);
-  }
-  return cleaned;
-}
-async function getCachedWebsiteVerification(originOrDomain) {
-  const key = getDomainCacheKey(originOrDomain);
-  if (!key) return null;
-  const now = Date.now();
-  if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-    try {
-      const storageKey = `web_verify_cache_${key}`;
-      const res = await chrome.storage.local.get([storageKey]);
-      const entry = res[storageKey];
-      if (entry && entry.expiresAt > now && entry.record) {
-        return entry.record;
-      }
-    } catch {
-    }
-  }
-  const memEntry = memoryCache.get(key);
-  if (memEntry) {
-    if (memEntry.expiresAt > now) {
-      return memEntry.record;
-    } else {
-      memoryCache.delete(key);
-    }
-  }
-  return null;
-}
-async function setCachedWebsiteVerification(originOrDomain, record) {
-  const key = getDomainCacheKey(originOrDomain);
-  if (!key) return;
-  const now = Date.now();
-  const entry = {
-    key,
-    record,
-    cachedAt: now,
-    expiresAt: now + CACHE_TTL_MS
-  };
-  memoryCache.set(key, entry);
-  if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-    try {
-      const storageKey = `web_verify_cache_${key}`;
-      await chrome.storage.local.set({ [storageKey]: entry });
-    } catch {
-    }
-  }
-}
-
-// src/extension/websiteVerifier.ts
-init_relevanceEngine();
-var MAX_PAGES_PER_DOMAIN = 5;
-var MAX_PAGE_TIMEOUT_MS = 1e4;
-var MAX_DOMAIN_VERIFICATION_TIME_MS = 3e4;
-var BANNED_LINK_HOST_PATTERNS = [
-  "facebook.com",
-  "fb.com",
-  "instagram.com",
-  "twitter.com",
-  "x.com",
-  "linkedin.com",
-  "youtube.com",
-  "pinterest.com",
-  "tiktok.com",
-  "google.com",
-  "amazon.",
-  "ebay.",
-  "aliexpress.",
-  "daraz.",
-  "walmart.",
-  "etsy.",
-  "apple.com",
-  "play.google.com",
-  "schema.org"
-];
-var BANNED_LINK_PATH_PATTERNS = [
-  "/login",
-  "/signin",
-  "/sign-in",
-  "/register",
-  "/signup",
-  "/sign-up",
-  "/auth",
-  "/cart",
-  "/checkout",
-  "/my-account",
-  "/account",
-  "/wp-admin",
-  "/user",
-  "/password",
-  "/reset",
-  ".pdf",
-  ".jpg",
-  ".png",
-  ".zip"
-];
-function cleanText(text) {
-  return (text || "").normalize("NFC").replace(/\s+/g, " ").trim();
-}
-function extractPageSignalsFromHtml(html, pageUrl) {
-  const normHtml = html || "";
-  const result = {
-    url: pageUrl,
-    statusCode: 200,
-    title: "",
-    metaDescription: "",
-    h1: [],
-    h2: [],
-    visibleText: "",
-    logoAlt: [],
-    sameOriginLinks: [],
-    emails: [],
-    phones: [],
-    addressCandidates: [],
-    isBlocked: false
-  };
-  const lowerHtml = normHtml.toLowerCase();
-  const challengePatterns = [
-    "just a moment...",
-    "attention required! | cloudflare",
-    "cf-chl-bypass",
-    "verify you are human",
-    "security check to access",
-    "access denied",
-    "error 403 forbidden",
-    "datadome",
-    "incapsula",
-    "bot detection"
-  ];
-  for (const pat of challengePatterns) {
-    if (lowerHtml.includes(pat)) {
-      result.isBlocked = true;
-      result.blockedReason = `Security challenge / access barrier detected: "${pat}"`;
-      return result;
-    }
-  }
-  if (typeof DOMParser !== "undefined") {
-    try {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(normHtml, "text/html");
-      result.title = cleanText(doc.title || "");
-      const metaDesc = doc.querySelector('meta[name="description" i]') || doc.querySelector('meta[property="og:description" i]');
-      if (metaDesc) {
-        result.metaDescription = cleanText(metaDesc.getAttribute("content") || "");
-      }
-      const canonical = doc.querySelector('link[rel="canonical" i]');
-      if (canonical) {
-        result.canonicalUrl = canonical.getAttribute("href") || void 0;
-      }
-      doc.querySelectorAll("h1").forEach((el) => {
-        const t = cleanText(el.textContent || "");
-        if (t && t.length < 150) result.h1.push(t);
-      });
-      doc.querySelectorAll("h2").forEach((el) => {
-        const t = cleanText(el.textContent || "");
-        if (t && t.length < 150) result.h2.push(t);
-      });
-      doc.querySelectorAll("img[alt]").forEach((el) => {
-        const alt = cleanText(el.getAttribute("alt") || "");
-        const idOrClass = `${el.id} ${el.className}`.toLowerCase();
-        if (alt && (idOrClass.includes("logo") || alt.toLowerCase().includes("logo"))) {
-          result.logoAlt.push(alt);
-        }
-      });
-      doc.querySelectorAll('script[type="application/ld+json"]').forEach((el) => {
-        try {
-          const parsed = JSON.parse(el.textContent || "{}");
-          const org = Array.isArray(parsed) ? parsed.find((i) => i["@type"] === "Organization" || i["@type"] === "LocalBusiness") : parsed;
-          if (org && org.name && typeof org.name === "string") {
-            result.organizationName = cleanText(org.name);
-          }
-        } catch {
-        }
-      });
-      const currentOrigin = new URL(pageUrl).origin;
-      doc.querySelectorAll("a[href]").forEach((el) => {
-        const href = el.getAttribute("href");
-        if (!href || href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("tel:") || href.startsWith("javascript:")) {
-          return;
-        }
-        try {
-          const absUrl = new URL(href, pageUrl).toString();
-          const parsedAbs = new URL(absUrl);
-          const lowerPath = parsedAbs.pathname.toLowerCase();
-          if (BANNED_LINK_HOST_PATTERNS.some((p) => parsedAbs.hostname.toLowerCase().includes(p)) || BANNED_LINK_PATH_PATTERNS.some((p) => lowerPath.includes(p))) {
-            return;
-          }
-          if (isSameOriginUrl(absUrl, currentOrigin)) {
-            const cleanTarget = `${parsedAbs.protocol}//${parsedAbs.hostname}${parsedAbs.pathname}`.replace(/\/$/, "") || `${parsedAbs.protocol}//${parsedAbs.hostname}/`;
-            if (!result.sameOriginLinks.includes(cleanTarget)) {
-              result.sameOriginLinks.push(cleanTarget);
-            }
-          }
-        } catch {
-        }
-      });
-      const scripts = doc.querySelectorAll("script, style, noscript, svg");
-      scripts.forEach((s) => s.remove());
-      result.visibleText = cleanText(doc.body?.textContent || "");
-    } catch {
-    }
-  }
-  if (!result.title) {
-    const titleMatch = normHtml.match(/<title[^>]*>([^<]+)<\/title>/i);
-    if (titleMatch) result.title = cleanText(titleMatch[1]);
-  }
-  if (!result.metaDescription) {
-    const metaMatch = normHtml.match(/<meta[^>]+(?:name|property)=["'](?:description|og:description)["'][^>]+content=["']([^"']+)["']/i);
-    if (metaMatch) result.metaDescription = cleanText(metaMatch[1]);
-  }
-  if (result.h1.length === 0) {
-    const h1Matches = normHtml.matchAll(/<h1[^>]*>([\s\S]*?)<\/h1>/gi);
-    for (const m of h1Matches) {
-      const t = cleanText(m[1].replace(/<[^>]+>/g, ""));
-      if (t && t.length < 150) result.h1.push(t);
-    }
-  }
-  if (result.h2.length === 0) {
-    const h2Matches = normHtml.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/gi);
-    for (const m of h2Matches) {
-      const t = cleanText(m[1].replace(/<[^>]+>/g, ""));
-      if (t && t.length < 150) result.h2.push(t);
-    }
-  }
-  if (!result.visibleText) {
-    result.visibleText = cleanText(normHtml.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " "));
-  }
-  if (!result.organizationName) {
-    const jsonLdMatches = normHtml.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
-    for (const m of jsonLdMatches) {
-      try {
-        const parsed = JSON.parse(m[1].trim());
-        const org = Array.isArray(parsed) ? parsed.find((i) => i["@type"] === "Organization" || i["@type"] === "LocalBusiness") : parsed;
-        if (org && org.name && typeof org.name === "string") {
-          result.organizationName = cleanText(org.name);
-          break;
-        }
-      } catch {
-      }
-    }
-  }
-  if (result.logoAlt.length === 0) {
-    const imgMatches = normHtml.matchAll(/<img[^>]+alt=["']([^"']+)["'][^>]*>/gi);
-    for (const m of imgMatches) {
-      const alt = cleanText(m[1]);
-      if (alt && alt.toLowerCase().includes("logo")) {
-        result.logoAlt.push(alt);
-      }
-    }
-  }
-  if (result.sameOriginLinks.length === 0) {
-    try {
-      const currentOrigin = new URL(pageUrl).origin;
-      const aMatches = normHtml.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>/gi);
-      for (const m of aMatches) {
-        const href = m[1];
-        if (!href || href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("tel:") || href.startsWith("javascript:")) {
-          continue;
-        }
-        try {
-          const absUrl = new URL(href, pageUrl).toString();
-          const parsedAbs = new URL(absUrl);
-          const lowerPath = parsedAbs.pathname.toLowerCase();
-          if (BANNED_LINK_HOST_PATTERNS.some((p) => parsedAbs.hostname.toLowerCase().includes(p)) || BANNED_LINK_PATH_PATTERNS.some((p) => lowerPath.includes(p))) {
-            continue;
-          }
-          if (isSameOriginUrl(absUrl, currentOrigin)) {
-            const cleanTarget = `${parsedAbs.protocol}//${parsedAbs.hostname}${parsedAbs.pathname}`.replace(/\/$/, "") || `${parsedAbs.protocol}//${parsedAbs.hostname}/`;
-            if (!result.sameOriginLinks.includes(cleanTarget)) {
-              result.sameOriginLinks.push(cleanTarget);
-            }
-          }
-        } catch {
-        }
-      }
-    } catch {
-    }
-  }
-  const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
-  const rawEmails = (result.visibleText + " " + normHtml).match(emailRegex) || [];
-  const bannedEmailDomains = ["example.com", "domain.com", "email.com", "sentry.io", "wixpress.com"];
-  for (const e of rawEmails) {
-    const lower = e.toLowerCase().trim();
-    if (!lower.endsWith(".png") && !lower.endsWith(".jpg") && !bannedEmailDomains.some((b) => lower.includes(b)) && !result.emails.includes(lower)) {
-      result.emails.push(lower);
-    }
-  }
-  const phoneRegex = /(?:\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,5}\b/g;
-  const rawPhones = result.visibleText.match(phoneRegex) || [];
-  for (const p of rawPhones) {
-    const cleaned = p.trim();
-    const digitCount = (cleaned.match(/\d/g) || []).length;
-    if (digitCount >= 7 && digitCount <= 15 && !result.phones.includes(cleaned)) {
-      result.phones.push(cleaned);
-    }
-  }
-  return result;
-}
-function prioritizePagesToCrawl(rootUrl, candidateLinks) {
-  const queue = [];
-  const root = rootUrl;
-  queue.push(root);
-  const cleanRootKey = root.toLowerCase().replace(/\/$/, "");
-  const priorityKeywords = [
-    ["about", "story", "company", "who-we-are"],
-    ["contact", "reach-us", "location", "get-in-touch"],
-    ["product", "service", "shop", "collection", "catalog", "menu"],
-    ["category", "pricing", "showroom"]
-  ];
-  for (const group of priorityKeywords) {
-    for (const link of candidateLinks) {
-      if (queue.length >= MAX_PAGES_PER_DOMAIN) break;
-      const lower = link.toLowerCase();
-      const cleanLinkKey = lower.replace(/\/$/, "");
-      if (cleanLinkKey !== cleanRootKey && !queue.includes(link) && group.some((kw) => lower.includes(kw))) {
-        queue.push(link);
-      }
-    }
-  }
-  for (const link of candidateLinks) {
-    if (queue.length >= MAX_PAGES_PER_DOMAIN) break;
-    const cleanLinkKey = link.toLowerCase().replace(/\/$/, "");
-    if (cleanLinkKey !== cleanRootKey && !queue.includes(link)) {
-      queue.push(link);
-    }
-  }
-  return queue.slice(0, MAX_PAGES_PER_DOMAIN);
-}
-function evaluateBusinessIdentityMatch(lead, extractedIdentity) {
-  const canonicalName = (lead.canonicalName || lead.name || "").toLowerCase().trim();
-  const fbPageName = (lead.facebookPageName || "").toLowerCase().trim();
-  const targetDomain = (lead.destinationDomain || "").toLowerCase().trim();
-  const host = extractedIdentity.hostname.toLowerCase().replace(/^www\./, "");
-  const extractedTokens = /* @__PURE__ */ new Set();
-  const addTokens = (str) => {
-    if (!str) return;
-    for (const tok of tokenizeText(str)) {
-      extractedTokens.add(tok);
-    }
-  };
-  addTokens(extractedIdentity.title);
-  addTokens(extractedIdentity.organizationName);
-  extractedIdentity.logoAlt.forEach(addTokens);
-  extractedIdentity.headings.forEach(addTokens);
-  const cleanOrg = (extractedIdentity.organizationName || "").toLowerCase().trim();
-  const cleanTitle = extractedIdentity.title.toLowerCase().trim();
-  const isDirectDomainMatch = Boolean(targetDomain && (host === targetDomain || host.endsWith(`.${targetDomain}`)));
-  const leadNameTokens = tokenizeText(canonicalName).filter((t) => t.length > 2);
-  const matchedTokens = leadNameTokens.filter((t) => extractedTokens.has(t));
-  const tokenOverlapRatio = leadNameTokens.length > 0 ? matchedTokens.length / leadNameTokens.length : 0;
-  if (cleanOrg && (cleanOrg === canonicalName || cleanOrg.includes(canonicalName) || canonicalName.includes(cleanOrg)) || cleanTitle.includes(canonicalName) && isDirectDomainMatch || tokenOverlapRatio >= 0.8 && isDirectDomainMatch && leadNameTokens.length >= 2 || extractedIdentity.logoAlt.some((alt) => alt.toLowerCase().includes(canonicalName))) {
-    return {
-      level: "STRONG",
-      reason: `Website explicit business identity matches canonical entity "${lead.canonicalName}" with confirmed domain corroboration.`,
-      evidenceItems: [{
-        type: "WEBSITE_IDENTITY",
-        strength: "STRONG",
-        source: "website_verification",
-        reason: `Website branding matches entity name "${lead.canonicalName}" on domain ${host}`,
-        value: cleanOrg || cleanTitle
-      }]
-    };
-  }
-  if (tokenOverlapRatio >= 0.6 && leadNameTokens.length >= 2 || isDirectDomainMatch && tokenOverlapRatio >= 0.4 || fbPageName && cleanTitle.includes(fbPageName)) {
-    return {
-      level: "MODERATE",
-      reason: `Website displays substantial brand token overlap (${Math.round(tokenOverlapRatio * 100)}%) with entity "${lead.canonicalName}".`,
-      evidenceItems: [{
-        type: "WEBSITE_IDENTITY",
-        strength: "MODERATE",
-        source: "website_verification",
-        reason: `Substantial brand token overlap on domain ${host}`,
-        value: matchedTokens.join(" ")
-      }]
-    };
-  }
-  if (cleanOrg && leadNameTokens.length >= 2 && tokenOverlapRatio === 0 && (!isDirectDomainMatch || tokenizeText(cleanOrg).filter((t) => t.length > 2).length >= 2)) {
-    return {
-      level: "CONTRADICTORY",
-      reason: `Website explicitly identifies as distinct company "${cleanOrg}", contradicting lead "${lead.canonicalName}".`,
-      evidenceItems: [{
-        type: "WEBSITE_IDENTITY",
-        strength: "CONTRADICTORY",
-        source: "website_verification",
-        reason: `Distinct entity identity "${cleanOrg}" contradicts "${lead.canonicalName}"`,
-        value: cleanOrg
-      }]
-    };
-  }
-  if (tokenOverlapRatio > 0 && tokenOverlapRatio < 0.6) {
-    return {
-      level: "WEAK",
-      reason: `Weak token overlap only (${matchedTokens.join(", ")}). Insufficient for confirmed business identity.`,
-      evidenceItems: [{
-        type: "WEBSITE_IDENTITY",
-        strength: "WEAK",
-        source: "website_verification",
-        reason: `Weak name token overlap on domain ${host}`,
-        value: matchedTokens.join(" ")
-      }]
-    };
-  }
-  return {
-    level: "UNKNOWN",
-    reason: "Insufficient distinct business identity evidence found on public website pages.",
-    evidenceItems: []
-  };
-}
-function extractCommercialSignals(combinedText) {
-  const lower = combinedText.toLowerCase();
-  const signals = /* @__PURE__ */ new Set();
-  const evidenceItems = [];
-  const commercialMap = [
-    { code: "WEBSITE_PRODUCT_SIGNAL", pattern: /\b(products?|catalog|collection|models?|items?|specs?|specifications?)\b/i, label: "Product catalog signals" },
-    { code: "WEBSITE_SERVICE_SIGNAL", pattern: /\b(services?|solutions?|customization|consultation|repair|maintenance)\b/i, label: "Service offerings" },
-    { code: "WEBSITE_PRICE_SIGNAL", pattern: /(\$|€|£|bdt|taka|price|pricing|starts at|cost|affordable|special deal|flat \d+%)/i, label: "Explicit pricing" },
-    { code: "WEBSITE_ECOMMERCE_SIGNAL", pattern: /\b(add to cart|checkout|buy now|shop now|shopping cart|order online|buy online)\b/i, label: "E-commerce cart functionality" },
-    { code: "WEBSITE_BOOKING_SIGNAL", pattern: /\b(book(?:ing|\s+(?:an?\s+)?appointment)?|appointment|schedule|reserve|reservation)\b/i, label: "Appointment / booking system" },
-    { code: "WEBSITE_CONTACT_SIGNAL", pattern: /\b(contact(?:\s+(?:us|sales|support|team))?|get\s+(?:a\s+)?quote|request\s+(?:a\s+)?quote|inquire|inquiry|reach us)\b/i, label: "Sales inquiry / quote mechanism" },
-    { code: "WEBSITE_LOCATION_SIGNAL", pattern: /\b(our locations?|store locator|find a store|headquarters|office address)\b/i, label: "Physical store / office locations" },
-    { code: "WEBSITE_SHOWROOM_SIGNAL", pattern: /\b(showroom|experience center|visit our showroom|flagship store)\b/i, label: "Physical showroom" },
-    { code: "WEBSITE_DELIVERY_SIGNAL", pattern: /\b(delivery|shipping|nationwide shipping|home delivery|dispatch|freight)\b/i, label: "Delivery / shipping service" },
-    { code: "WEBSITE_WARRANTY_SIGNAL", pattern: /\b(warranty|guarantee|\d+\s*year warranty|money back)\b/i, label: "Product / service warranty" }
-  ];
-  for (const item of commercialMap) {
-    if (item.pattern.test(lower)) {
-      signals.add(item.code);
-      evidenceItems.push({
-        type: "WEBSITE_COMMERCIAL",
-        strength: "STRONG",
-        source: "website_verification",
-        reason: item.label,
-        matchedSignal: item.code,
-        value: item.code
-      });
-    }
-  }
-  return {
-    signals: Array.from(signals),
-    evidenceItems
-  };
-}
-function evaluateWebsiteCategoryMatch(lead, combinedText) {
-  const lower = combinedText.toLowerCase();
-  const matchedKeywords = (lead.matchedKeywords || []).map((k) => k.toLowerCase().trim()).filter(Boolean);
-  let activeTaxonomyTerms = [];
-  for (const [key, tax] of Object.entries(BOUNDED_TAXONOMY)) {
-    if (matchedKeywords.some((kw) => kw.includes(key) || tax.rootTerms.some((rt) => kw.includes(rt)))) {
-      activeTaxonomyTerms = activeTaxonomyTerms.concat(tax.rootTerms, tax.productServiceTerms);
-    }
-  }
-  if (activeTaxonomyTerms.length === 0) {
-    activeTaxonomyTerms = matchedKeywords;
-  }
-  const foundTerms = /* @__PURE__ */ new Set();
-  for (const term of activeTaxonomyTerms) {
-    if (lower.includes(term.toLowerCase())) {
-      foundTerms.add(term);
-    }
-  }
-  if (foundTerms.size >= 3) {
-    return {
-      level: "STRONG",
-      evidenceItems: [{
-        type: "WEBSITE_CATEGORY",
-        strength: "STRONG",
-        source: "website_verification",
-        reason: `Strong category corroboration on website: ${Array.from(foundTerms).slice(0, 5).join(", ")}`,
-        value: Array.from(foundTerms).join(", ")
-      }]
-    };
-  }
-  if (foundTerms.size >= 1) {
-    return {
-      level: "MODERATE",
-      evidenceItems: [{
-        type: "WEBSITE_CATEGORY",
-        strength: "MODERATE",
-        source: "website_verification",
-        reason: `Category terms observed on website: ${Array.from(foundTerms).join(", ")}`,
-        value: Array.from(foundTerms).join(", ")
-      }]
-    };
-  }
-  return {
-    level: "WEAK",
-    evidenceItems: [{
-      type: "WEBSITE_CATEGORY",
-      strength: "WEAK",
-      source: "website_verification",
-      reason: "No clear category terms observed on public website.",
-      value: "NO_CATEGORY_TERMS"
-    }]
-  };
-}
-function detectWebsiteNegativeSignals(combinedText, statusCode, pagesVisited) {
-  const lower = combinedText.toLowerCase();
-  const signals = /* @__PURE__ */ new Set();
-  const evidenceItems = [];
-  if (/(\bbuy this domain\b|\bdomain is for sale\b|\binquire about this domain\b|\bparked free\b|\bdomain parking\b|\bnamesilo\b|\bsedo\b|\bhugedomains\b|\bdan\.com\b)/i.test(lower)) {
-    signals.add("PARKED_DOMAIN");
-    signals.add("DOMAIN_FOR_SALE");
-    evidenceItems.push({
-      type: "WEBSITE_NEGATIVE",
-      strength: "CONTRADICTORY",
-      source: "website_verification",
-      reason: "Domain parking or domain-for-sale placeholder detected",
-      matchedSignal: "PARKED_DOMAIN"
-    });
-  }
-  if (pagesVisited <= 1 && (/(\bunder construction\b|\bcoming soon\b|\bwebsite coming soon\b|\bdefault web site page\b|\bindex of \/\b)/i.test(lower) || lower.length < 150)) {
-    signals.add("EMPTY_SITE");
-    evidenceItems.push({
-      type: "WEBSITE_NEGATIVE",
-      strength: "MODERATE",
-      source: "website_verification",
-      reason: "Empty or under-construction placeholder site detected",
-      matchedSignal: "EMPTY_SITE"
-    });
-  }
-  if (/(\bbusiness directory\b|\byellow pages\b|\blocal business listings\b|\bfind local businesses\b|\btop 10 businesses\b)/i.test(lower) && !/(\babout our company\b|\bour showroom\b|\bour factory\b)/i.test(lower)) {
-    signals.add("GENERIC_DIRECTORY");
-    evidenceItems.push({
-      type: "WEBSITE_NEGATIVE",
-      strength: "CONTRADICTORY",
-      source: "website_verification",
-      reason: "Generic directory or listing portal destination detected",
-      matchedSignal: "GENERIC_DIRECTORY"
-    });
-  }
-  if (/(\bjob vacancies\b|\bsearch jobs\b|\bpost a job\b|\bcareer portal\b|\bjob portal\b)/i.test(lower) && !/(\bproducts\b|\bservices\b|\bour shop\b)/i.test(lower)) {
-    signals.add("JOB_PORTAL");
-    evidenceItems.push({
-      type: "WEBSITE_NEGATIVE",
-      strength: "CONTRADICTORY",
-      source: "website_verification",
-      reason: "Job recruitment portal detected instead of direct commercial business",
-      matchedSignal: "JOB_PORTAL"
-    });
-  }
-  if (/(\bmy personal blog\b|\bpersonal diary\b|\blifestyle blog by\b|\bwritten by a blogger\b)/i.test(lower) && !/(\bshop\b|\bcart\b|\border\b|\bcompany\b|\bstore\b)/i.test(lower)) {
-    signals.add("PERSONAL_BLOG");
-    evidenceItems.push({
-      type: "WEBSITE_NEGATIVE",
-      strength: "CONTRADICTORY",
-      source: "website_verification",
-      reason: "Personal blog or lifestyle journal destination detected",
-      matchedSignal: "PERSONAL_BLOG"
-    });
-  }
-  if (/(\bbreaking news\b|\bdaily news\b|\bjournalism\b|\bop-ed\b|\bpress release\b|\bnews agency\b)/i.test(lower) && !/(\bour products\b|\bour shop\b|\badd to cart\b|\bpricing\b)/i.test(lower)) {
-    signals.add("NEWS_ONLY");
-    evidenceItems.push({
-      type: "WEBSITE_NEGATIVE",
-      strength: "CONTRADICTORY",
-      source: "website_verification",
-      reason: "News or media editorial publication detected instead of commercial business",
-      matchedSignal: "NEWS_ONLY"
-    });
-  }
-  if (/(\bgovernment portal\b|\bofficial government\b|\bmunicipal services\b|\bpublic voting\b|\bdepartment of public works\b|\bcity hall\b)/i.test(lower)) {
-    signals.add("GENERIC_DIRECTORY");
-    evidenceItems.push({
-      type: "WEBSITE_NEGATIVE",
-      strength: "CONTRADICTORY",
-      source: "website_verification",
-      reason: "Government or municipal administration portal detected instead of commercial business",
-      matchedSignal: "GENERIC_DIRECTORY"
-    });
-  }
-  if (statusCode >= 400) {
-    signals.add("BROKEN_SITE");
-    evidenceItems.push({
-      type: "WEBSITE_NEGATIVE",
-      strength: "CONTRADICTORY",
-      source: "website_verification",
-      reason: `HTTP error status ${statusCode} returned by destination`,
-      matchedSignal: "BROKEN_SITE"
-    });
-  }
-  return {
-    signals: Array.from(signals),
-    evidenceItems
-  };
-}
-function determineFinalWebsiteStatus(reachable, isBlocked, identityLevel, commercialCount, negativeSignals) {
-  if (isBlocked) {
-    return "BLOCKED";
-  }
-  if (!reachable) {
-    return "INVALID";
-  }
-  if (negativeSignals.includes("PARKED_DOMAIN") || negativeSignals.includes("DOMAIN_FOR_SALE") || negativeSignals.includes("GENERIC_DIRECTORY") || negativeSignals.includes("JOB_PORTAL") || negativeSignals.includes("PERSONAL_BLOG") || negativeSignals.includes("NEWS_ONLY")) {
-    return "NOT_A_BUSINESS_SITE";
-  }
-  if (identityLevel === "CONTRADICTORY") {
-    return "NOT_A_BUSINESS_SITE";
-  }
-  if (identityLevel === "STRONG" && commercialCount >= 1 || identityLevel === "MODERATE" && commercialCount >= 2) {
-    return "VERIFIED_BUSINESS_WEBSITE";
-  }
-  if (commercialCount >= 2 || identityLevel === "MODERATE" && commercialCount >= 1 || identityLevel === "WEAK" && commercialCount >= 1) {
-    return "LIKELY_BUSINESS_WEBSITE";
-  }
-  return "UNCERTAIN_WEBSITE";
-}
-async function verifyLeadWebsite(lead, customFetch) {
-  const startTime = Date.now();
-  const originalUrl = lead.destinationUrl || lead.observedUrls && lead.observedUrls[0] || "";
-  if (!originalUrl) {
-    return {
-      leadId: lead.id,
-      canonicalName: lead.canonicalName || lead.name,
-      originalUrl: "",
-      normalizedUrl: "",
-      finalUrl: "",
-      finalOrigin: "",
-      hostname: "",
-      status: "NO_WEBSITE",
-      identityMatch: "UNKNOWN",
-      categoryMatch: "UNKNOWN",
-      commercialSignals: [],
-      negativeSignals: [],
-      evidence: [],
-      pagesVisited: [],
-      contactSignals: [],
-      locationSignals: [],
-      verifiedAt: (/* @__PURE__ */ new Date()).toISOString(),
-      durationMs: Date.now() - startTime
-    };
-  }
-  const norm = normalizeWebsiteUrl(originalUrl);
-  if (!norm.isValid) {
-    return {
-      leadId: lead.id,
-      canonicalName: lead.canonicalName || lead.name,
-      originalUrl,
-      normalizedUrl: norm.normalizedUrl,
-      finalUrl: norm.finalUrl,
-      finalOrigin: norm.finalOrigin,
-      hostname: norm.finalHostname,
-      status: "INVALID",
-      identityMatch: "UNKNOWN",
-      categoryMatch: "UNKNOWN",
-      commercialSignals: [],
-      negativeSignals: ["BROKEN_SITE"],
-      evidence: [],
-      pagesVisited: [],
-      contactSignals: [],
-      locationSignals: [],
-      verifiedAt: (/* @__PURE__ */ new Date()).toISOString(),
-      durationMs: Date.now() - startTime,
-      errorCode: norm.error || "INVALID_URL"
-    };
-  }
-  const cached = await getCachedWebsiteVerification(norm.finalHostname);
-  if (cached) {
-    return {
-      ...cached,
-      leadId: lead.id,
-      canonicalName: lead.canonicalName || lead.name
-    };
-  }
-  const destinationEvidence = [];
-  if (lead.destinationDomain) {
-    const metaHost = lead.destinationDomain.toLowerCase().replace(/^www\./, "");
-    const siteHost = norm.finalHostname.toLowerCase().replace(/^www\./, "");
-    if (metaHost === siteHost || siteHost.endsWith(`.${metaHost}`)) {
-      destinationEvidence.push({
-        type: "WEBSITE_DESTINATION",
-        strength: "STRONG",
-        source: "website_verification",
-        reason: `Advertiser Meta destination matches verified site host: ${norm.finalHostname}`,
-        matchedSignal: "DESTINATION_MATCH_STRONG",
-        value: norm.finalHostname
-      });
-    } else {
-      destinationEvidence.push({
-        type: "WEBSITE_DESTINATION",
-        strength: "MODERATE",
-        source: "website_verification",
-        reason: `Destination domain divergence: Meta ad pointed to ${metaHost}, website is ${siteHost}`,
-        matchedSignal: "DESTINATION_DOMAIN_CONFLICT",
-        value: `${metaHost} != ${siteHost}`
-      });
-    }
-  }
-  const defaultFetch = async (url, timeoutMs) => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const resp = await fetch(url, {
-        method: "GET",
-        headers: { "Accept": "text/html,application/xhtml+xml" },
-        signal: controller.signal
-      });
-      clearTimeout(timeout);
-      const text = await resp.text();
-      return { status: resp.status, html: text };
-    } catch (err) {
-      clearTimeout(timeout);
-      throw err;
-    }
-  };
-  const fetcher = customFetch || defaultFetch;
-  const pagesVisited = [];
-  const allExtractedTexts = [];
-  const allContactSignals = [];
-  const allLocationSignals = /* @__PURE__ */ new Set();
-  let primaryTitle = "";
-  let primaryOrgName;
-  const primaryLogoAlts = [];
-  const primaryHeadings = [];
-  let isBlocked = false;
-  let blockedReason;
-  let crawlError;
-  let pagesToCrawl = [norm.finalUrl];
-  try {
-    while (pagesToCrawl.length > 0 && pagesVisited.length < MAX_PAGES_PER_DOMAIN) {
-      if (Date.now() - startTime >= MAX_DOMAIN_VERIFICATION_TIME_MS) {
-        break;
-      }
-      const currentUrl = pagesToCrawl.shift();
-      if (pagesVisited.includes(currentUrl)) continue;
-      pagesVisited.push(currentUrl);
-      let pageRes;
-      try {
-        pageRes = await fetcher(currentUrl, MAX_PAGE_TIMEOUT_MS);
-      } catch (err) {
-        if (pagesVisited.length === 1) {
-          crawlError = err.name === "AbortError" ? "TIMEOUT" : "NETWORK_ERROR";
-        }
-        continue;
-      }
-      if (pageRes.status === 403 || pageRes.status === 429) {
-        isBlocked = true;
-        blockedReason = `HTTP ${pageRes.status} access denied`;
-        break;
-      }
-      const extracted = extractPageSignalsFromHtml(pageRes.html, currentUrl);
-      if (extracted.isBlocked) {
-        isBlocked = true;
-        blockedReason = extracted.blockedReason;
-        break;
-      }
-      allExtractedTexts.push(`${extracted.title} ${extracted.metaDescription} ${extracted.visibleText}`);
-      if (pagesVisited.length === 1) {
-        primaryTitle = extracted.title;
-        primaryOrgName = extracted.organizationName;
-        primaryLogoAlts.push(...extracted.logoAlt);
-        primaryHeadings.push(...extracted.h1, ...extracted.h2);
-        const prioritized = prioritizePagesToCrawl(norm.finalUrl, extracted.sameOriginLinks);
-        for (const p of prioritized) {
-          const pKey = p.toLowerCase().replace(/\/$/, "");
-          const alreadyVisited = pagesVisited.some((v) => v.toLowerCase().replace(/\/$/, "") === pKey);
-          const alreadyQueued = pagesToCrawl.some((q) => q.toLowerCase().replace(/\/$/, "") === pKey);
-          if (!alreadyVisited && !alreadyQueued) {
-            pagesToCrawl.push(p);
-          }
-        }
-      }
-      for (const email of extracted.emails) {
-        if (!allContactSignals.some((c) => c.value === email)) {
-          allContactSignals.push({ type: "email", value: email });
-        }
-      }
-      for (const phone of extracted.phones) {
-        if (!allContactSignals.some((c) => c.value === phone)) {
-          allContactSignals.push({ type: "phone", value: phone });
-        }
-      }
-    }
-  } catch (err) {
-    crawlError = err.message || "PARSE_ERROR";
-  }
-  const combinedText = allExtractedTexts.join(" ");
-  const reachable = pagesVisited.length > 0 && !crawlError;
-  const identityMatch = evaluateBusinessIdentityMatch(lead, {
-    title: primaryTitle,
-    organizationName: primaryOrgName,
-    logoAlt: primaryLogoAlts,
-    headings: primaryHeadings,
-    hostname: norm.finalHostname
-  });
-  const commercial = extractCommercialSignals(combinedText);
-  const categoryMatch = evaluateWebsiteCategoryMatch(lead, combinedText);
-  const negative = detectWebsiteNegativeSignals(combinedText, reachable ? 200 : 500, pagesVisited.length);
-  const finalStatus = determineFinalWebsiteStatus(
-    reachable,
-    isBlocked,
-    identityMatch.level,
-    commercial.signals.length,
-    negative.signals
-  );
-  const structuredEvidence = [
-    ...destinationEvidence,
-    ...identityMatch.evidenceItems,
-    ...commercial.evidenceItems,
-    ...categoryMatch.evidenceItems,
-    ...negative.evidenceItems
-  ];
-  if (allContactSignals.length > 0) {
-    structuredEvidence.push({
-      type: "WEBSITE_CONTACT",
-      strength: "STRONG",
-      source: "website_verification",
-      reason: `Discovered ${allContactSignals.length} public contact channel(s) on website`,
-      value: allContactSignals.map((c) => `${c.type}:${c.value}`).slice(0, 3).join(", ")
-    });
-  }
-  const record = {
-    leadId: lead.id,
-    canonicalName: lead.canonicalName || lead.name,
-    originalUrl,
-    normalizedUrl: norm.normalizedUrl,
-    finalUrl: norm.finalUrl,
-    finalOrigin: norm.finalOrigin,
-    hostname: norm.finalHostname,
-    status: finalStatus,
-    identityMatch: identityMatch.level,
-    categoryMatch: categoryMatch.level,
-    commercialSignals: commercial.signals,
-    negativeSignals: negative.signals,
-    evidence: structuredEvidence,
-    pagesVisited,
-    contactSignals: allContactSignals,
-    locationSignals: Array.from(allLocationSignals),
-    verifiedAt: (/* @__PURE__ */ new Date()).toISOString(),
-    durationMs: Date.now() - startTime,
-    blockedReason,
-    errorCode: crawlError
-  };
-  if (finalStatus !== "INVALID" && finalStatus !== "BLOCKED") {
-    await setCachedWebsiteVerification(norm.finalHostname, record);
-  }
-  return record;
+// src/config/collectionGate.ts
+function isLiveCollectionPermitted() {
+  return false;
 }
 
 // src/extension/qualification/qualificationProfile.ts
@@ -10038,6 +10552,7 @@ console.log("[Meta Ad Library Scraper] Service Worker initializing...");
 var SCHEMA_VERSION = 1;
 var STALE_JOB_THRESHOLD_MS = 5 * 60 * 1e3;
 var cancelledRuns = /* @__PURE__ */ new Set();
+var pausedRuns = /* @__PURE__ */ new Set();
 async function saveActiveRun(run) {
   if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
     run.lastUpdatedAt = (/* @__PURE__ */ new Date()).toISOString();
@@ -10170,12 +10685,61 @@ var wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function executeResearchPipeline(payload, providedRunId, providedRun) {
   const runId = providedRunId || `run_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
   cancelledRuns.delete(runId);
+  pausedRuns.delete(runId);
   const keywords = payload.keywords.map((k) => k.trim()).filter(Boolean);
   const countryCode = payload.countryCode || "US";
   const requestedLimit = payload.maxFinalUniqueRelevantLeads ?? payload.maxResults;
   const isAutoDiscovery = payload.researchMode === "AUTO_DISCOVERY" && requestedLimit === void 0;
   const effectiveCeiling = isAutoDiscovery ? MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH : Math.min(Math.max(1, requestedLimit || MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH), MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH);
   const targetLeadCount = isAutoDiscovery ? void 0 : effectiveCeiling;
+  if (!isLiveCollectionPermitted()) {
+    const blockedRun = providedRun || {
+      runId,
+      researchName: payload.researchName || `${payload.mode === "PRESET" ? payload.presetName || "Preset" : keywords[0]} in ${payload.locationName}`,
+      mode: payload.mode,
+      presetId: payload.presetId,
+      presetName: payload.presetName,
+      keywords,
+      countryCode,
+      locationName: payload.locationName,
+      researchMode: isAutoDiscovery ? "AUTO_DISCOVERY" : void 0,
+      maxFinalUniqueRelevantLeads: isAutoDiscovery ? MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH : void 0,
+      maxResults: payload.maxResults ?? effectiveCeiling,
+      targetLeadCount,
+      status: "BLOCKED",
+      stopReason: "COLLECTION_NOT_AUTHORIZED",
+      leads: [],
+      rejectedLeadsCount: 0,
+      uncertainLeadsCount: 0,
+      relevanceStrategyVersion: RELEVANCE_STRATEGY_VERSION,
+      engineVersion: RELEVANCE_ENGINE_VERSION,
+      counters: {
+        rawAds: 0,
+        normalizedCandidates: 0,
+        relevantCandidates: 0,
+        uncertainCandidates: 0,
+        notRelevantCandidates: 0,
+        duplicatesRemoved: 0,
+        finalUniqueLeads: 0
+      },
+      logs: [
+        {
+          timestamp: (/* @__PURE__ */ new Date()).toLocaleTimeString(),
+          message: "Live automated collection from Meta Ad Library is disabled and unauthorized (Phase 0A gate: NO-GO).",
+          stage: "SAFETY_GATE"
+        }
+      ],
+      startedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      lastUpdatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      schemaVersion: SCHEMA_VERSION,
+      totalAdsInspected: 0
+    };
+    blockedRun.status = "BLOCKED";
+    blockedRun.stopReason = "COLLECTION_NOT_AUTHORIZED";
+    await saveActiveRun(blockedRun);
+    broadcastProgress(blockedRun, "BLOCKED", "Live automated collection is disabled and unauthorized.");
+    return blockedRun;
+  }
   const researchIntent = compileResearchIntent(
     payload.mode,
     keywords,
@@ -10226,7 +10790,7 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
   const seenRejectedEntityKeys = /* @__PURE__ */ new Set();
   const seenUncertainEntityKeys = /* @__PURE__ */ new Set();
   const existingEntitiesMap = /* @__PURE__ */ new Map();
-  const existingLeads = await getAllRelevantLeads(runId);
+  const existingLeads = await getAllStoredLeads(runId);
   for (const lead of existingLeads) {
     const canonicalKey = lead.canonicalName ? lead.canonicalName.toLowerCase() : lead.name.toLowerCase();
     existingEntitiesMap.set(canonicalKey, lead);
@@ -10257,7 +10821,7 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
   let encounteredExtractionError = false;
   try {
     for (let qi = startQi; qi < queriesToRun.length; qi++) {
-      if (cancelledRuns.has(runId)) break;
+      if (cancelledRuns.has(runId) || pausedRuns.has(runId)) break;
       const currentLeadCount = initialRun.counters?.finalUniqueRelevantLeads ?? initialRun.counters?.finalUniqueLeads ?? existingEntitiesMap.size;
       if (currentLeadCount >= effectiveCeiling) break;
       if (queryFrontier.getSaturationState().isSaturated) {
@@ -10622,6 +11186,20 @@ if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage)
           schemaVersion: SCHEMA_VERSION,
           totalAdsInspected: 0
         };
+        if (!isLiveCollectionPermitted()) {
+          initialRun.status = "BLOCKED";
+          initialRun.stopReason = "COLLECTION_NOT_AUTHORIZED";
+          initialRun.logs.push({
+            timestamp: (/* @__PURE__ */ new Date()).toLocaleTimeString(),
+            message: "Live automated collection from Meta Ad Library is disabled and unauthorized (Phase 0A gate: NO-GO).",
+            stage: "SAFETY_GATE"
+          });
+          saveActiveRun(initialRun).catch(() => {
+          });
+          broadcastProgress(initialRun, "BLOCKED", "Live automated collection is disabled and unauthorized.");
+          sendResponse({ success: false, runId, run: initialRun, error: "COLLECTION_NOT_AUTHORIZED: Live automated collection is disabled and unauthorized." });
+          return false;
+        }
         saveActiveRun(initialRun).catch(() => {
         });
         executeResearchPipeline(message.payload, runId, initialRun).catch((err) => {
@@ -10646,6 +11224,23 @@ if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage)
         }
       });
       sendResponse({ success: true, message: "Cancellation signal sent." });
+      return false;
+    }
+    if (message.type === "PAUSE_RESEARCH") {
+      const runId = message.payload?.runId;
+      if (runId) {
+        pausedRuns.add(runId);
+      }
+      chrome.storage.local.get(["activeResearchRun"], (data) => {
+        if (data && data.activeResearchRun) {
+          const run = data.activeResearchRun;
+          run.status = "PAUSED";
+          run.stopReason = "USER_PAUSED";
+          saveActiveRun(run).catch(() => {
+          });
+        }
+      });
+      sendResponse({ success: true, message: "Pause signal sent." });
       return false;
     }
     if (message.type === "GET_STATE") {
@@ -10680,64 +11275,18 @@ if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage)
       return true;
     }
     if (message.type === "RESUME_RESEARCH") {
-      const targetRunId = message.payload?.runId;
-      chrome.storage.local.get(["activeResearchRun"], async (data) => {
-        const activeRun = data.activeResearchRun;
-        if (!activeRun || targetRunId && activeRun.runId !== targetRunId) {
-          sendResponse({ success: false, error: "No matching research run available to resume." });
-          return;
-        }
-        activeRun.status = "STARTING";
-        await saveActiveRun(activeRun);
-        executeResearchPipeline(
-          {
-            mode: activeRun.mode,
-            presetId: activeRun.presetId,
-            presetName: activeRun.presetName,
-            keywords: activeRun.keywords,
-            countryCode: activeRun.countryCode,
-            locationName: activeRun.locationName,
-            researchName: activeRun.researchName,
-            researchMode: activeRun.researchMode,
-            maxResults: activeRun.maxResults
-          },
-          activeRun.runId,
-          activeRun
-        ).catch((err) => {
-          console.error("[service-worker] Resume execution error:", err);
-        });
-        sendResponse({ success: true, run: activeRun });
+      sendResponse({
+        success: false,
+        error: "COLLECTION_NOT_AUTHORIZED: Live automated collection is disabled and unauthorized."
       });
-      return true;
+      return false;
     }
     if (message.type === "VERIFY_WEBSITE") {
-      const { leadId } = message.payload || {};
-      chrome.storage.local.get(["activeResearchRun"], async (data) => {
-        const activeRun = data.activeResearchRun;
-        if (!activeRun) {
-          sendResponse({ success: false, error: "No active research run found" });
-          return;
-        }
-        const targetLead = activeRun.leads.find((l) => l.id === leadId);
-        if (!targetLead) {
-          sendResponse({ success: false, error: `Lead not found: ${leadId}` });
-          return;
-        }
-        try {
-          targetLead.websiteVerificationStatus = "VERIFYING";
-          await saveActiveRun(activeRun);
-          const record = await verifyLeadWebsite(targetLead);
-          targetLead.websiteVerificationStatus = record.status;
-          targetLead.websiteVerification = record;
-          await saveActiveRun(activeRun);
-          sendResponse({ success: true, record, lead: targetLead });
-        } catch (err) {
-          targetLead.websiteVerificationStatus = "INVALID";
-          await saveActiveRun(activeRun);
-          sendResponse({ success: false, error: err.message });
-        }
+      sendResponse({
+        success: false,
+        error: "CRAWLER_DISABLED_BY_POLICY: External website crawling is disabled by product policy."
       });
-      return true;
+      return false;
     }
     if (message.type === "EVALUATE_BUSINESS_QUALIFICATION") {
       try {

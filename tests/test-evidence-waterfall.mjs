@@ -33,7 +33,7 @@ import {
   calculateEvidenceCoverage,
   buildUncertainRecord
 } from '../src/extension/evidenceWaterfall.ts';
-import { compileResearchIntent } from '../src/extension/relevanceEngine.ts';
+import { compileResearchIntent, tokenizeText } from '../src/extension/relevanceEngine.ts';
 
 console.log('================================================================');
 console.log('MASTER PROMPT 4: EVIDENCE WATERFALL ADVERSARIAL TEST SUITE (20 SCENARIOS)');
@@ -235,6 +235,17 @@ const case16 = evaluateStrictRelevanceV3({
   matchedKeyword: 'ফার্নিচার'
 }, compileResearchIntent('CUSTOM', ['ফার্নিচার', 'Furniture'], undefined, 'BD'));
 check(16, 'Bengali script advertiser and copy accepted under Bengali intent', 'RELEVANT', case16.decision === 'RELEVANT');
+
+// Scenario 16 Regression Checks: Bengali Tokenization & Combining Mark Preservation
+const bnTokensKeyword = tokenizeText('ফার্নিচার');
+const bnTokensCopy = tokenizeText('সেরা ডাইনিং চেয়ার ও খাট কিনুন বিশেষ ছাড়ে। এখনই অর্ডার করুন।');
+const bnTokensMixed = tokenizeText('RFL ফার্নিচার');
+assert.ok(bnTokensKeyword.includes('ফার্নিচার'), 'Bengali root token "ফার্নিচার" must be preserved by tokenizer');
+assert.ok(bnTokensCopy.includes('চেয়ার') || bnTokensCopy.includes('চেয়ার'), 'Bengali vowel marks (kar) must not be stripped as punctuation');
+assert.ok(bnTokensCopy.includes('ডাইনিং') && bnTokensCopy.includes('খাট'), 'Bengali catalog tokens must be preserved in copy');
+assert.ok(bnTokensMixed.includes('rfl') && bnTokensMixed.includes('ফার্নিচার'), 'Mixed Latin/Bengali tokenization must preserve both scripts');
+assert.ok(case16.evidence.some(e => e.type === 'ENTITY_IDENTITY' && e.strength === 'STRONG'), 'Case 16 must detect strong entity identity');
+assert.ok(case16.evidence.some(e => e.type === 'PRODUCT_OR_SERVICE_SIGNAL' && e.strength === 'STRONG'), 'Case 16 must detect strong product catalog signal');
 
 // Scenario 17: Mixed-language evidence (English brand name + Bengali copy)
 const case17 = evaluateStrictRelevanceV3({

@@ -51,7 +51,8 @@ import {
   toResultDetailViewModel,
   toRunStatusViewModel,
   toExportPreviewViewModel,
-  isCanonicalLeadRecord
+  isCanonicalLeadRecord,
+  isExtensionLead
 } from './viewModelMappers.ts';
 import { exportLeadsToCsv } from '../metaAdapter.ts';
 import { ExtensionResearchRun, ExtensionLead, StartResearchPayload } from '../types.ts';
@@ -253,7 +254,7 @@ export const ExtensionApp: React.FC = () => {
   // Convert raw leads to ResultRowViewModel list
   const resultsVM: ResultRowViewModel[] = useMemo(() => {
     return rawLeads.map((item, idx) => {
-      if (isCanonicalLeadRecord(item)) {
+      if (isCanonicalLeadRecord(item) || isExtensionLead(item)) {
         return toResultRowViewModel(item);
       }
 
@@ -332,6 +333,9 @@ export const ExtensionApp: React.FC = () => {
     locationName?: string;
     maxCandidates: number;
     presetName?: string;
+    strictLocal?: boolean;
+    requiredCta?: string;
+    requiredDestination?: string;
   }) => {
     const planVM: PlanReviewViewModel = {
       sourceType: config.sourceType,
@@ -346,7 +350,7 @@ export const ExtensionApp: React.FC = () => {
         'RELEVANCE',
         'QUALIFICATION'
       ],
-      qualificationProfileName: 'Default Commercial Profile',
+      qualificationProfileName: 'Strict Qualification Gates (Phase 0.6)',
       maxCandidatesLimit: config.maxCandidates,
       timeoutSeconds: 30,
       checkpointEnabled: true,
@@ -354,7 +358,10 @@ export const ExtensionApp: React.FC = () => {
       canExecuteLive: true,
       keywords: config.keywords,
       countryCode: config.countryCode,
-      locationName: config.locationName
+      locationName: config.locationName,
+      strictLocal: config.strictLocal,
+      requiredCta: config.requiredCta,
+      requiredDestination: config.requiredDestination
     };
 
     setPendingPlan(planVM);
@@ -381,7 +388,10 @@ export const ExtensionApp: React.FC = () => {
       keywords: userKeywords,
       countryCode: userCountry,
       locationName: userLocation,
-      maxFinalUniqueRelevantLeads: pendingPlan.maxCandidatesLimit
+      maxFinalUniqueRelevantLeads: pendingPlan.maxCandidatesLimit,
+      strictLocalMode: pendingPlan.strictLocal !== false,
+      requiredCtaTypes: pendingPlan.requiredCta ? [pendingPlan.requiredCta] : undefined,
+      requiredDestinationTypes: pendingPlan.requiredDestination ? [pendingPlan.requiredDestination] : undefined
     };
 
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
@@ -417,7 +427,7 @@ export const ExtensionApp: React.FC = () => {
     ) || rawLeads[0];
 
     if (raw) {
-      if (isCanonicalLeadRecord(raw)) {
+      if (isCanonicalLeadRecord(raw) || isExtensionLead(raw)) {
         setInspectedLead(toResultDetailViewModel(raw));
         setIsDetailDrawerOpen(true);
         return;
@@ -543,7 +553,7 @@ export const ExtensionApp: React.FC = () => {
     );
   }, [rawLeads, historyRuns, activeRun]);
 
-  const handleConfirmExport = () => {
+  const handleConfirmExport = (qualifiedOnly: boolean = true) => {
     if (isExporting) return;
     setIsExporting(true);
 
@@ -558,7 +568,7 @@ export const ExtensionApp: React.FC = () => {
     });
 
     if (eligibleLeads.length > 0) {
-      const csv = exportLeadsToCsv(eligibleLeads as ExtensionLead[]);
+      const csv = exportLeadsToCsv(eligibleLeads as ExtensionLead[], { qualifiedOnly });
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');

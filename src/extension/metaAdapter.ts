@@ -11,11 +11,14 @@ import type {
   CardValidationOutcome,
   AdExtractionDiagnostics,
   ExtractionResultStatus,
-  AdExtractionResult
+  AdExtractionResult,
+  AdLevelEvidence
 } from './types.ts';
 import { LeadRelevanceEngine } from './relevanceEngine.ts';
 import type { ResearchIntent } from './relevanceEngine.ts';
 import { evaluateGeographicOrigin } from './geographicClassifier.ts';
+import { classifyCta, classifyDestination, aggregateAdEvidence } from './destinationClassifier.ts';
+import { evaluateLeadQualificationGates } from './qualificationGate.ts';
 
 /**
  * Checks whether a given URL is a Meta Ad Library search or listing page.
@@ -774,8 +777,8 @@ export function extractAdCardsFromDocument(doc: Document, observedKeyword?: stri
  */
 export function aggregateCandidatesToLeads(
   candidates: ScrapedAdCandidate[],
-  locationCode: string,
-  locationName: string,
+  locationCode: string | ResearchIntent = 'US',
+  locationName: string = 'United States',
   maxResults: number = MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH,
   existingLeads: ExtensionLead[] = [],
   intent?: ResearchIntent
@@ -796,6 +799,17 @@ export function aggregateCandidatesToLeads(
     reasonCodes: Record<string, number>;
   };
 } {
+  let effectiveLocationCode = 'US';
+  let effectiveLocationName = typeof locationName === 'string' ? locationName : 'United States';
+  let resolvedIntent = intent;
+
+  if (typeof locationCode === 'object' && locationCode !== null) {
+    resolvedIntent = locationCode as ResearchIntent;
+    effectiveLocationCode = resolvedIntent.locationCode || 'US';
+  } else if (typeof locationCode === 'string' && locationCode) {
+    effectiveLocationCode = locationCode;
+  }
+
   const effectiveCeiling = typeof maxResults === 'number' && maxResults > 0
     ? Math.min(maxResults, MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH)
     : MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH;
@@ -817,7 +831,7 @@ export function aggregateCandidatesToLeads(
   }
 
   const actualExistingLeads = Array.isArray(existingLeads) ? existingLeads : [];
-  const actualIntent = intent || (!Array.isArray(existingLeads) && typeof existingLeads === 'object' ? existingLeads as unknown as ResearchIntent : undefined);
+  const actualIntent = resolvedIntent || (!Array.isArray(existingLeads) && typeof existingLeads === 'object' ? existingLeads as unknown as ResearchIntent : undefined);
 
   const leadMap = new Map<string, ExtensionLead>();
 
@@ -865,7 +879,71 @@ export function aggregateCandidatesToLeads(
       destinationDomain: bestDestForGeo?.destinationDomain,
       bodyCopy: combinedBodyCopy,
       ctaText: combinedCta
-    }, locationCode);
+    }, effectiveLocationCode);
+
+    // 2.5. Classify CTA and Destination for each candidate and build ad-level evidence
+    const candsAdEvidence: AdLevelEvidence[] = cands.map(cand => {
+      const ctaRes = cand.ctaType
+        ? { ctaType: cand.ctaType, normalizedText: cand.ctaText || '', reasonCode: 'CTA_TEXT_MATCH', reason: '' }
+        : classifyCta(cand.ctaText);
+      const destRes = cand.destinationType
+        ? { destinationType: cand.destinationType, confidence: cand.destinationConfidence || 'HIGH', reasonCode: cand.destinationReasonCode || 'VISIBLE_EXTERNAL_DESTINATION', reason: '' }
+        : classifyDestination({
+            destinationUrl: cand.destinationUrl,
+            destinationDomain: cand.destinationDomain,
+            ctaText: cand.ctaText,
+            ctaType: ctaRes.ctaType,
+            bodyCopy: cand.bodyCopy,
+            rawText: cand.rawText
+          });
+
+      cand.ctaType = ctaRes.ctaType;
+      cand.destinationType = destRes.destinationType;
+      cand.destinationReasonCode = destRes.reasonCode;
+      cand.destinationConfidence = destRes.confidence;
+
+      return {
+        libraryId: cand.libraryId,
+        ctaText: cand.ctaText,
+        ctaType: ctaRes.ctaType,
+        destinationType: destRes.destinationType,
+        destinationUrl: cand.destinationUrl,
+        destinationDomain: cand.destinationDomain,
+        reasonCode: destRes.reasonCode,
+        confidence: destRes.confidence,
+        observedAt: cand.startedRunning || new Date().toISOString()
+      };
+    });
+
+    const seenCandidateLibIds = new Set<string>();
+    const uniqueCandsAdEvidence: AdLevelEvidence[] = [];
+    for (const item of candsAdEvidence) {
+      if (item.libraryId && seenCandidateLibIds.has(item.libraryId)) continue;
+      if (item.libraryId) seenCandidateLibIds.add(item.libraryId);
+      uniqueCandsAdEvidence.push(item);
+    }
+
+    const candSummary = aggregateAdEvidence(uniqueCandsAdEvidence);
+
+    // Filter by user-configured CTA type requirements (if specified)
+    if (actualIntent?.requiredCtaTypes && actualIntent.requiredCtaTypes.length > 0) {
+      const hasMatchingCta = candSummary.observedCtaTypes.some(t => actualIntent.requiredCtaTypes!.includes(t));
+      if (!hasMatchingCta) {
+        rejectedCount++;
+        reasonCodes['CTA_FILTER_MISMATCH'] = (reasonCodes['CTA_FILTER_MISMATCH'] || 0) + 1;
+        continue;
+      }
+    }
+
+    // Filter by user-configured Destination type requirements (if specified)
+    if (actualIntent?.requiredDestinationTypes && actualIntent.requiredDestinationTypes.length > 0) {
+      const hasMatchingDest = candSummary.observedDestinationTypes.some(t => actualIntent.requiredDestinationTypes!.includes(t));
+      if (!hasMatchingDest) {
+        rejectedCount++;
+        reasonCodes['DESTINATION_FILTER_MISMATCH'] = (reasonCodes['DESTINATION_FILTER_MISMATCH'] || 0) + 1;
+        continue;
+      }
+    }
 
     if (actualIntent?.strictLocalMode) {
       if (geoEval.classification === 'FOREIGN_VERIFIED') {
@@ -912,6 +990,25 @@ export function aggregateCandidatesToLeads(
           existing.sampleCta = cand.ctaText;
         }
       }
+
+      // Merge ad-level evidence
+      if (!existing.adEvidence) existing.adEvidence = [];
+      for (const item of candsAdEvidence) {
+        const idx = existing.adEvidence.findIndex(e => e.libraryId === item.libraryId);
+        if (idx >= 0) {
+          existing.adEvidence[idx] = item;
+        } else {
+          existing.adEvidence.push(item);
+        }
+      }
+      const existingSummary = aggregateAdEvidence(existing.adEvidence);
+      existing.observedCtaTexts = existingSummary.observedCtaTexts;
+      existing.observedCtaTypes = existingSummary.observedCtaTypes;
+      existing.observedDestinationTypes = existingSummary.observedDestinationTypes;
+      existing.primaryCtaType = existingSummary.primaryCtaType;
+      existing.primaryDestinationType = existingSummary.primaryDestinationType;
+      existing.destinationReasonCode = existingSummary.destinationReasonCode;
+      existing.destinationConfidence = existingSummary.destinationConfidence;
       existing.adLibraryIds = sanitizeAdLibraryIds(existing.adLibraryIds);
       existing.adCount = existing.adLibraryIds.length;
       if (!existing.activeAdLibraryIds) {
@@ -929,18 +1026,25 @@ export function aggregateCandidatesToLeads(
       existing.activeAdLibraryIds = existing.activeAdLibraryIds.filter(id => existing.adLibraryIds.includes(id));
       existing.activeAdCount = existing.activeAdLibraryIds.length;
 
-      // Update location intelligence if newly corroborated
-      if (
+      // Update location intelligence if newly corroborated or if higher-precedence foreign/conflict signals emerge
+      const shouldUpdateExistingGeo =
         !existing.geographicClassification ||
         existing.geographicClassification === 'LOCATION_UNKNOWN' ||
-        (existing.geographicClassification === 'LOCAL_PROBABLE' && geoEval.classification === 'LOCAL_VERIFIED')
-      ) {
+        geoEval.classification === 'FOREIGN_VERIFIED' ||
+        (existing.geographicClassification === 'LOCAL_PROBABLE' && geoEval.classification === 'LOCAL_VERIFIED') ||
+        geoEval.reasonCode === 'CONFLICTING_LOCATION_EVIDENCE';
+
+      if (shouldUpdateExistingGeo) {
         existing.targetCountryCode = geoEval.targetCountryCode;
         existing.businessCountryCode = geoEval.businessCountryCode;
         existing.geographicClassification = geoEval.classification;
         existing.businessLocationConfidence = geoEval.confidence;
-        existing.businessLocationEvidence = geoEval.evidence;
+        existing.businessLocationEvidence = Array.from(new Set([
+          ...(existing.businessLocationEvidence || []),
+          ...geoEval.evidence
+        ]));
         existing.businessLocationReason = geoEval.reason;
+        existing.businessLocationReasonCode = geoEval.reasonCode;
       }
 
       if (evalResult) {
@@ -954,6 +1058,11 @@ export function aggregateCandidatesToLeads(
         existing.engineVersion = evalResult.engineVersion;
         existing.presetVersion = evalResult.presetVersion;
       }
+
+      const qualGate = evaluateLeadQualificationGates(existing, actualIntent);
+      existing.status = qualGate.status;
+      existing.qualificationFailedGates = qualGate.failedGates;
+      existing.qualificationReasons = qualGate.reasons;
     } else {
       if (leadMap.size >= effectiveCeiling) {
         // System ceiling reached for unique relevant leads
@@ -977,7 +1086,7 @@ export function aggregateCandidatesToLeads(
       const matchedKws = Array.from(new Set(cands.map(c => c.observedKeyword).filter(Boolean) as string[]));
 
       const fbState = bestFbUrl ? 'found' : 'not_found';
-      const webState = bestDestUrl ? 'found' : 'not_found';
+      const webState = bestDestUrl ? 'found' : (candSummary.primaryDestinationType === 'NO_VISIBLE_DESTINATION' ? 'not_found' : 'unknown');
 
       const lead: ExtensionLead = {
         id: `lead_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`,
@@ -995,15 +1104,25 @@ export function aggregateCandidatesToLeads(
         activeAdLibraryIds: activeIds,
         adLibraryUrl: adIds[0] ? `https://www.facebook.com/ads/library/?id=${adIds[0]}` : undefined,
         matchedKeywords: matchedKws.length > 0 ? matchedKws : (actualIntent?.primaryKeywords?.slice(0, 1) || []),
-        locationCode,
-        locationName,
+        locationCode: effectiveLocationCode,
+        locationName: effectiveLocationName,
+        // Ad-level CTA & Destination Intelligence (Phase 0.4)
+        adEvidence: uniqueCandsAdEvidence,
+        observedCtaTexts: candSummary.observedCtaTexts,
+        observedCtaTypes: candSummary.observedCtaTypes,
+        observedDestinationTypes: candSummary.observedDestinationTypes,
+        primaryCtaType: candSummary.primaryCtaType,
+        primaryDestinationType: candSummary.primaryDestinationType,
+        destinationReasonCode: candSummary.destinationReasonCode,
+        destinationConfidence: candSummary.destinationConfidence,
         targetCountryCode: geoEval.targetCountryCode,
         businessCountryCode: geoEval.businessCountryCode,
         geographicClassification: geoEval.classification,
         businessLocationConfidence: geoEval.confidence,
         businessLocationEvidence: geoEval.evidence,
         businessLocationReason: geoEval.reason,
-        status: webState === 'found' ? 'QUALIFIED' : 'REVIEW_REQUIRED',
+        businessLocationReasonCode: geoEval.reasonCode,
+        status: 'REVIEW_REQUIRED', // evaluated below via evaluateLeadQualificationGates
         discoveredAt: new Date().toISOString(),
         sampleCopy: bestCopy,
         sampleCta: bestCta,
@@ -1017,6 +1136,11 @@ export function aggregateCandidatesToLeads(
         engineVersion: evalResult?.engineVersion,
         presetVersion: evalResult?.presetVersion
       };
+
+      const qualGate = evaluateLeadQualificationGates(lead, actualIntent);
+      lead.status = qualGate.status;
+      lead.qualificationFailedGates = qualGate.failedGates;
+      lead.qualificationReasons = qualGate.reasons;
 
       leadMap.set(key, lead);
     }
@@ -1068,11 +1192,32 @@ export function sanitizeCsvField(val: unknown): string {
 /**
  * Generates RFC-compliant and formula-safe CSV from leads
  */
-export function exportLeadsToCsv(leads: ExtensionLead[], run?: ExtensionResearchRun): string {
+export function exportLeadsToCsv(
+  leads: ExtensionLead[],
+  runOrOptions?: ExtensionResearchRun | { qualifiedOnly?: boolean },
+  options?: { qualifiedOnly?: boolean }
+): string {
+  let run: ExtensionResearchRun | undefined;
+  let opts: { qualifiedOnly?: boolean } | undefined = options;
+
+  if (runOrOptions && typeof runOrOptions === 'object' && 'qualifiedOnly' in runOrOptions) {
+    opts = runOrOptions as { qualifiedOnly?: boolean };
+  } else if (runOrOptions && typeof runOrOptions === 'object') {
+    run = runOrOptions as ExtensionResearchRun;
+  }
+
+  let exportLeads = leads;
+  if (opts?.qualifiedOnly) {
+    exportLeads = leads.filter(l => {
+      const gateCriteria = (run && 'researchIntent' in run && (run as any).researchIntent) ? (run as any).researchIntent : opts;
+      return evaluateLeadQualificationGates(l, gateCriteria).isQualified;
+    });
+  }
+
   let metaHeader = '';
   if (run) {
     const isAutoDiscovery = run.researchMode === 'AUTO_DISCOVERY' || run.targetLeadCount === undefined;
-    const finalCount = run.leads ? run.leads.length : leads.length;
+    const finalCount = run.leads ? run.leads.length : exportLeads.length;
     if (isAutoDiscovery) {
       metaHeader = `# Research Run: ${run.researchName} | Mode: Auto Discovery (${run.mode}) | Source: Meta Ad Library | Keywords: ${(run.keywords || []).join('; ')} | Location: ${run.locationName} | Final Relevant Leads: ${finalCount} | Status: ${run.status} | Stop Reason: ${run.stopReason || 'N/A'} | Engine Version: ${run.engineVersion || 'strict-v2'}\r\n`;
     } else {
@@ -1109,6 +1254,10 @@ export function exportLeadsToCsv(leads: ExtensionLead[], run?: ExtensionResearch
     'Discovered At',
     'Sample Copy',
     'Sample CTA',
+    'CTA Type',
+    'Destination Type',
+    'Destination Confidence',
+    'Destination Reason',
     'Website Verified URL',
     'Website Deep Verification Status',
     'Website Identity Match',
@@ -1118,7 +1267,7 @@ export function exportLeadsToCsv(leads: ExtensionLead[], run?: ExtensionResearch
     'Website Verified At'
   ];
 
-  const rows = leads.map(l => [
+  const rows = exportLeads.map(l => [
     sanitizeCsvField(l.name),
     sanitizeCsvField(l.facebookPageName),
     sanitizeCsvField(l.facebookPageUrl || ''),
@@ -1137,9 +1286,9 @@ export function exportLeadsToCsv(leads: ExtensionLead[], run?: ExtensionResearch
     sanitizeCsvField((l.businessLocationEvidence || []).join(' | ')),
     sanitizeCsvField((l.adLibraryIds || []).join('; ')),
     sanitizeCsvField(l.adLibraryUrl || ''),
-    sanitizeCsvField(l.relevanceDecision || 'RELEVANT'),
-    sanitizeCsvField(l.relevanceScore !== undefined ? `${(l.relevanceScore * 100).toFixed(0)}%` : '100%'),
-    sanitizeCsvField(l.relevanceConfidence || 'HIGH'),
+    sanitizeCsvField(l.relevanceDecision || 'UNASSESSED'),
+    sanitizeCsvField(l.relevanceScore !== undefined ? `${(l.relevanceScore * 100).toFixed(0)}%` : (l.relevanceDecision === 'RELEVANT' ? '100%' : 'N/A')),
+    sanitizeCsvField(l.relevanceConfidence || (l.relevanceDecision ? 'HIGH' : 'NONE')),
     sanitizeCsvField(l.relevanceMatchedTerms ? l.relevanceMatchedTerms.join('; ') : ''),
     sanitizeCsvField(l.relevanceReasons ? l.relevanceReasons.slice(0, 2).join(' | ') : ''),
     sanitizeCsvField(l.engineVersion || 'strict-v2'),
@@ -1147,6 +1296,10 @@ export function exportLeadsToCsv(leads: ExtensionLead[], run?: ExtensionResearch
     sanitizeCsvField(l.discoveredAt),
     sanitizeCsvField(l.sampleCopy || ''),
     sanitizeCsvField(l.sampleCta || ''),
+    sanitizeCsvField(l.primaryCtaType || 'UNKNOWN'),
+    sanitizeCsvField(l.primaryDestinationType || 'UNKNOWN'),
+    sanitizeCsvField(l.destinationConfidence || 'NONE'),
+    sanitizeCsvField(l.destinationReasonCode || 'DESTINATION_NOT_OBSERVED'),
     sanitizeCsvField(l.websiteVerification?.finalUrl || l.destinationUrl || ''),
     sanitizeCsvField(l.websiteVerificationStatus || (l.websiteVerification?.status) || (l.destinationUrl ? 'NOT_VERIFIED' : 'NO_WEBSITE')),
     sanitizeCsvField(l.websiteVerification?.identityMatch || 'UNKNOWN'),

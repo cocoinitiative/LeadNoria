@@ -139,6 +139,29 @@ export const PlanReviewModal: React.FC<PlanReviewModalProps> = ({
             <span className="font-semibold text-slate-200">{plan.qualificationProfileName}</span>
           </div>
 
+          {/* Qualification Rules */}
+          <div className="p-2.5 bg-slate-950/40 rounded border border-slate-800 flex flex-col gap-1 text-[11px]">
+            <span className="text-slate-400 font-semibold uppercase tracking-wider text-[10px]">Configured Qualification Rules:</span>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400">Strict-Local Verification:</span>
+              <span className={`font-medium ${plan.strictLocal !== false ? 'text-emerald-400' : 'text-amber-400'}`}>
+                {plan.strictLocal !== false ? 'Enabled (Foreign/Unknown fails)' : 'Disabled'}
+              </span>
+            </div>
+            {plan.requiredCta && (
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Required CTA:</span>
+                <span className="font-medium text-sky-400">{plan.requiredCta}</span>
+              </div>
+            )}
+            {plan.requiredDestination && (
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Required Destination:</span>
+                <span className="font-medium text-sky-400">{plan.requiredDestination}</span>
+              </div>
+            )}
+          </div>
+
           {/* Safety Warnings & Blocks */}
           {!plan.canExecuteLive && (
             <div 

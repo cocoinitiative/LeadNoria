@@ -27,6 +27,7 @@ import type {
 import { normalizeWebsiteUrl, isSameOriginUrl } from './websiteUrlNormalizer.ts';
 import { getCachedWebsiteVerification, setCachedWebsiteVerification } from './websiteCache.ts';
 import { BOUNDED_TAXONOMY, tokenizeText } from './relevanceEngine.ts';
+import { isExternalWebsiteCrawlingPermitted } from '../config/collectionGate.ts';
 
 export const MAX_PAGES_PER_DOMAIN = 5;
 export const MAX_PAGE_TIMEOUT_MS = 10000; // 10s
@@ -830,6 +831,31 @@ export async function verifyLeadWebsite(
   const startTime = Date.now();
   const originalUrl = lead.destinationUrl || (lead.observedUrls && lead.observedUrls[0]) || '';
 
+  // Fail-Closed Safety Gate (Phase 0.1): External website crawling is disabled by policy
+  if (!customFetch && !isExternalWebsiteCrawlingPermitted()) {
+    return {
+      leadId: lead.id,
+      canonicalName: lead.canonicalName || lead.name,
+      originalUrl,
+      normalizedUrl: '',
+      finalUrl: '',
+      finalOrigin: '',
+      hostname: '',
+      status: 'DISABLED',
+      identityMatch: 'UNKNOWN',
+      categoryMatch: 'UNKNOWN',
+      commercialSignals: [],
+      negativeSignals: [],
+      evidence: [],
+      pagesVisited: [],
+      contactSignals: [],
+      locationSignals: [],
+      verifiedAt: new Date().toISOString(),
+      durationMs: 0,
+      errorCode: 'CRAWLER_DISABLED_BY_POLICY'
+    };
+  }
+
   // 1. Check if website URL exists
   if (!originalUrl) {
     return {
@@ -916,23 +942,9 @@ export async function verifyLeadWebsite(
     }
   }
 
-  // 5. Fetch executor (native browser fetch with timeout or injected test fetch)
-  const defaultFetch = async (url: string, timeoutMs: number): Promise<{ status: number; html: string }> => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const resp = await fetch(url, {
-        method: 'GET',
-        headers: { 'Accept': 'text/html,application/xhtml+xml' },
-        signal: controller.signal
-      });
-      clearTimeout(timeout);
-      const text = await resp.text();
-      return { status: resp.status, html: text };
-    } catch (err) {
-      clearTimeout(timeout);
-      throw err;
-    }
+  // 5. Fetch executor (injected test fetch only; native browser fetch disabled by policy)
+  const defaultFetch = async (_url: string, _timeoutMs: number): Promise<{ status: number; html: string }> => {
+    throw new Error('CRAWLER_DISABLED_BY_POLICY: External website crawling is disabled by product policy.');
   };
 
   const fetcher = customFetch || defaultFetch;

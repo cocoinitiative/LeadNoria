@@ -18,11 +18,162 @@ import type {
   ExtensionResearchRun,
   ScrapedAdCandidate,
   UncertainEntityRecord,
-  AdvertiserExpansionProvenance
+  AdvertiserExpansionProvenance,
+  AdLevelEvidence,
+  GeographicClassification,
+  RelevanceDecision
 } from './types.ts';
+import { classifyCta, classifyDestination, aggregateAdEvidence } from './destinationClassifier.ts';
+import { evaluateLeadQualificationGates } from './qualificationGate.ts';
 
 const DB_NAME = 'leadnoria-research';
 const DB_VERSION = 2;
+
+/**
+ * Normalizes any stored or legacy lead record safely according to current schema invariants.
+ * Never promotes unevaluated relevance to RELEVANT.
+ * Never promotes unverified location to LOCAL_VERIFIED.
+ * Does not treat missing destination URL as proof of website absence.
+ */
+export function normalizeStoredLead(raw: any): ExtensionLead {
+  if (!raw || typeof raw !== 'object') {
+    throw new Error('INVALID_LEAD_RECORD: Cannot normalize non-object record');
+  }
+
+  const cleanName = (raw.name || raw.canonicalName || raw.facebookPageName || 'Unknown Advertiser').trim();
+  const canonicalName = (raw.canonicalName || cleanName).trim();
+
+  // 1. CTA & Destination Normalization
+  let adEvidence: AdLevelEvidence[] = Array.isArray(raw.adEvidence) ? [...raw.adEvidence] : [];
+
+  // Deduplicate adEvidence by libraryId
+  const seenLibIds = new Set<string>();
+  adEvidence = adEvidence.filter(e => {
+    if (!e || typeof e !== 'object' || !e.libraryId) return false;
+    if (seenLibIds.has(e.libraryId)) return false;
+    seenLibIds.add(e.libraryId);
+    return true;
+  });
+
+  // If adEvidence is missing but ad creative fields exist, rehydrate safely without fabricating certainty
+  if (adEvidence.length === 0 && (raw.sampleCta || raw.destinationUrl || (raw.adLibraryIds && raw.adLibraryIds.length > 0))) {
+    const rawCta = raw.sampleCta || raw.ctaText || '';
+    const ctaRes = classifyCta(rawCta);
+    const destRes = classifyDestination({
+      destinationUrl: raw.destinationUrl,
+      destinationDomain: raw.destinationDomain,
+      ctaText: rawCta,
+      ctaType: ctaRes.ctaType,
+      bodyCopy: raw.sampleCopy
+    });
+    const libId = (Array.isArray(raw.adLibraryIds) && raw.adLibraryIds[0]) ? raw.adLibraryIds[0] : `ad_legacy_${raw.id || 'unknown'}`;
+    adEvidence.push({
+      libraryId: libId,
+      ctaText: rawCta || undefined,
+      ctaType: raw.primaryCtaType || ctaRes.ctaType,
+      destinationType: raw.primaryDestinationType || destRes.destinationType,
+      destinationUrl: raw.destinationUrl,
+      destinationDomain: raw.destinationDomain,
+      reasonCode: raw.destinationReasonCode || destRes.reasonCode,
+      confidence: raw.destinationConfidence || destRes.confidence,
+      observedAt: raw.discoveredAt || new Date().toISOString()
+    });
+  }
+
+  const ctaSummary = aggregateAdEvidence(adEvidence);
+
+  // 2. Geographic Normalization (Never fabricate LOCAL_VERIFIED)
+  let geoClassification: GeographicClassification = raw.geographicClassification;
+  if (!geoClassification) {
+    if (raw.businessCountryCode && raw.targetCountryCode && raw.businessCountryCode === raw.targetCountryCode) {
+      geoClassification = 'LOCAL_PROBABLE'; // Do not promote unverified to LOCAL_VERIFIED without proof
+    } else if (raw.businessCountryCode && raw.targetCountryCode && raw.businessCountryCode !== raw.targetCountryCode) {
+      geoClassification = 'FOREIGN_VERIFIED';
+    } else {
+      geoClassification = 'LOCATION_UNKNOWN';
+    }
+  }
+
+  // 3. Relevance Decision Normalization (Never promote unevaluated to RELEVANT)
+  let relevanceDecision: RelevanceDecision = raw.relevanceDecision;
+  if (!relevanceDecision) {
+    relevanceDecision = 'UNASSESSED';
+  }
+
+  // 4. Website state normalization
+  let webState: 'found' | 'not_found' | 'unknown' = raw.websiteState;
+  if (!webState || (webState === 'not_found' && !raw.destinationUrl && ctaSummary.primaryDestinationType !== 'NO_VISIBLE_DESTINATION')) {
+    // Missing destination URL alone is not proof that website does not exist
+    webState = raw.destinationUrl ? 'found' : 'unknown';
+  }
+
+  const adIds = Array.isArray(raw.adLibraryIds) ? Array.from(new Set(raw.adLibraryIds.filter((id: any) => typeof id === 'string' && /^[0-9]{5,25}$/.test(id)))) : [];
+  const activeAdIds = Array.isArray(raw.activeAdLibraryIds) ? Array.from(new Set(raw.activeAdLibraryIds.filter((id: any) => adIds.includes(id)))) : [...adIds];
+
+  return {
+    ...raw,
+    name: cleanName,
+    canonicalName,
+    facebookPageName: raw.facebookPageName || cleanName,
+    facebookPageState: raw.facebookPageState || (raw.facebookPageUrl ? 'found' : 'unknown'),
+    destinationUrl: raw.destinationUrl,
+    destinationDomain: raw.destinationDomain,
+    websiteState: webState,
+    adCount: adIds.length || raw.adCount || 0,
+    activeAdCount: activeAdIds.length || raw.activeAdCount || 0,
+    adLibraryIds: adIds,
+    activeAdLibraryIds: activeAdIds,
+    adEvidence,
+    observedCtaTexts: ctaSummary.observedCtaTexts,
+    observedCtaTypes: ctaSummary.observedCtaTypes,
+    observedDestinationTypes: ctaSummary.observedDestinationTypes,
+    primaryCtaType: ctaSummary.primaryCtaType,
+    primaryDestinationType: ctaSummary.primaryDestinationType,
+    destinationReasonCode: ctaSummary.destinationReasonCode,
+    destinationConfidence: ctaSummary.destinationConfidence,
+    geographicClassification: geoClassification,
+    businessLocationConfidence: raw.businessLocationConfidence || 'NONE',
+    businessLocationEvidence: Array.isArray(raw.businessLocationEvidence) ? raw.businessLocationEvidence : [],
+    businessLocationReason: raw.businessLocationReason || 'Restored from persistent storage',
+    relevanceDecision,
+    relevanceConfidence: raw.relevanceConfidence || (relevanceDecision === 'RELEVANT' ? 'HIGH' : 'LOW'),
+    relevanceScore: raw.relevanceScore,
+    status: evaluateLeadQualificationGates({
+      name: cleanName,
+      adLibraryIds: adIds,
+      relevanceDecision,
+      geographicClassification: geoClassification,
+      primaryCtaType: ctaSummary.primaryCtaType,
+      observedCtaTypes: ctaSummary.observedCtaTypes,
+      primaryDestinationType: ctaSummary.primaryDestinationType,
+      observedDestinationTypes: ctaSummary.observedDestinationTypes,
+      websiteState: webState
+    }).status,
+    qualificationFailedGates: evaluateLeadQualificationGates({
+      name: cleanName,
+      adLibraryIds: adIds,
+      relevanceDecision,
+      geographicClassification: geoClassification,
+      primaryCtaType: ctaSummary.primaryCtaType,
+      observedCtaTypes: ctaSummary.observedCtaTypes,
+      primaryDestinationType: ctaSummary.primaryDestinationType,
+      observedDestinationTypes: ctaSummary.observedDestinationTypes,
+      websiteState: webState
+    }).failedGates,
+    qualificationReasons: evaluateLeadQualificationGates({
+      name: cleanName,
+      adLibraryIds: adIds,
+      relevanceDecision,
+      geographicClassification: geoClassification,
+      primaryCtaType: ctaSummary.primaryCtaType,
+      observedCtaTypes: ctaSummary.observedCtaTypes,
+      primaryDestinationType: ctaSummary.primaryDestinationType,
+      observedDestinationTypes: ctaSummary.observedDestinationTypes,
+      websiteState: webState
+    }).reasons,
+    schemaVersion: 2
+  };
+}
 
 export interface BulkBatchPayload {
   batchIndex: number;
@@ -123,9 +274,19 @@ class MemoryStoreFallback {
     const results: ExtensionLead[] = [];
     for (const [key, ent] of this.entities.entries()) {
       if (key.startsWith(`${runId}_`)) {
-        if ((!ent.relevanceDecision || ent.relevanceDecision === 'RELEVANT') && ent.evaluationStatus !== 'UNCERTAIN' && ent.evaluationStatus !== 'REJECTED') {
-          results.push(JSON.parse(JSON.stringify(ent)));
+        if (ent.relevanceDecision === 'RELEVANT' && ent.evaluationStatus !== 'UNCERTAIN' && ent.evaluationStatus !== 'REJECTED') {
+          results.push(normalizeStoredLead(ent));
         }
+      }
+    }
+    return results;
+  }
+
+  async getAllStoredLeads(runId: string): Promise<ExtensionLead[]> {
+    const results: ExtensionLead[] = [];
+    for (const [key, ent] of this.entities.entries()) {
+      if (key.startsWith(`${runId}_`)) {
+        results.push(normalizeStoredLead(ent));
       }
     }
     return results;
@@ -147,7 +308,7 @@ class MemoryStoreFallback {
 
   async getEntity(runId: string, canonicalKey: string): Promise<ExtensionLead | null> {
     const ent = this.entities.get(`${runId}_${canonicalKey.toLowerCase()}`);
-    return ent ? JSON.parse(JSON.stringify(ent)) : null;
+    return ent ? normalizeStoredLead(ent) : null;
   }
 
   async getSeenAdIds(runId: string): Promise<Set<string>> {
@@ -188,7 +349,7 @@ class MemoryStoreFallback {
     for (const [k, v] of this.entities.entries()) {
       if (k.startsWith(`${runId}_`)) {
         totalEntities++;
-        if (!v.relevanceDecision || v.relevanceDecision === 'RELEVANT') totalRelevant++;
+        if (v.relevanceDecision === 'RELEVANT' && v.evaluationStatus !== 'UNCERTAIN' && v.evaluationStatus !== 'REJECTED') totalRelevant++;
         bytes += JSON.stringify(v).length;
       }
     }
@@ -438,11 +599,13 @@ export async function getAllRelevantLeads(runId: string): Promise<ExtensionLead[
       request.onsuccess = () => {
         db.close();
         const records = (request.result || []) as Array<ExtensionLead & { relevanceDecision?: string; evaluationStatus?: string }>;
-        const relevant = records.filter(r =>
-          (!r.relevanceDecision || r.relevanceDecision === 'RELEVANT') &&
-          r.evaluationStatus !== 'UNCERTAIN' &&
-          r.evaluationStatus !== 'REJECTED'
-        );
+        const relevant = records
+          .filter(r =>
+            r.relevanceDecision === 'RELEVANT' &&
+            r.evaluationStatus !== 'UNCERTAIN' &&
+            r.evaluationStatus !== 'REJECTED'
+          )
+          .map(r => normalizeStoredLead(r));
         resolve(relevant);
       };
 
@@ -453,6 +616,39 @@ export async function getAllRelevantLeads(runId: string): Promise<ExtensionLead[
     });
   } catch {
     return memoryFallback.getAllRelevantLeads(runId);
+  }
+}
+
+/**
+ * Retrieves all stored leads for a research run regardless of qualification status
+ * Used for pipeline resumption and deduplication hydration
+ */
+export async function getAllStoredLeads(runId: string): Promise<ExtensionLead[]> {
+  if (!hasIndexedDB()) {
+    return memoryFallback.getAllStoredLeads(runId);
+  }
+
+  try {
+    const db = await openDB();
+    return await new Promise<ExtensionLead[]>((resolve, reject) => {
+      const tx = db.transaction('entities', 'readonly');
+      const store = tx.objectStore('entities');
+      const index = store.index('by_run');
+      const request = index.getAll(runId);
+
+      request.onsuccess = () => {
+        db.close();
+        const records = (request.result || []) as ExtensionLead[];
+        resolve(records.map(r => normalizeStoredLead(r)));
+      };
+
+      request.onerror = () => {
+        db.close();
+        reject(request.error);
+      };
+    });
+  } catch {
+    return memoryFallback.getAllStoredLeads(runId);
   }
 }
 
@@ -546,7 +742,7 @@ export async function getEntity(runId: string, canonicalKey: string): Promise<Ex
 
       request.onsuccess = () => {
         db.close();
-        resolve(request.result || null);
+        resolve(request.result ? normalizeStoredLead(request.result) : null);
       };
 
       request.onerror = () => {
@@ -688,8 +884,8 @@ export async function getStorageStats(runId: string): Promise<StorageStats> {
       tx.oncomplete = () => {
         db.close();
         const adsCount = reqAds.result || 0;
-        const ents = (reqEnts.result || []) as Array<ExtensionLead & { relevanceDecision?: string }>;
-        const relevantCount = ents.filter(e => !e.relevanceDecision || e.relevanceDecision === 'RELEVANT').length;
+        const ents = (reqEnts.result || []) as Array<ExtensionLead & { relevanceDecision?: string; evaluationStatus?: string }>;
+        const relevantCount = ents.filter(e => e.relevanceDecision === 'RELEVANT' && e.evaluationStatus !== 'UNCERTAIN' && e.evaluationStatus !== 'REJECTED').length;
         const cpsCount = reqCps.result || 0;
 
         // Approx size estimate: ~300 bytes per ad, ~500 bytes per entity
@@ -757,3 +953,48 @@ export async function clearRunData(runId: string): Promise<void> {
     return memoryFallback.clearRun(runId);
   }
 }
+
+export interface RecoveryDiagnostics {
+  runId: string;
+  hasCheckpoint: boolean;
+  checkpointBatchIndex?: number;
+  totalPersistedAds: number;
+  totalPersistedEntities: number;
+  totalRelevantLeads: number;
+  isConsistent: boolean;
+  discrepancies: string[];
+}
+
+/**
+ * Diagnostic reconciliation tool to audit interrupted research run state
+ */
+export async function recoverInterruptedRun(runId: string): Promise<RecoveryDiagnostics> {
+  const stats = await getStorageStats(runId);
+  const cp = await getLatestCheckpoint(runId);
+  const discrepancies: string[] = [];
+
+  if (!cp && (stats.totalAds > 0 || stats.totalEntities > 0)) {
+    discrepancies.push('Persisted records exist without valid checkpoint');
+  }
+
+  if (cp) {
+    if (stats.totalAds < cp.rawAdsCount) {
+      discrepancies.push(`Persisted ads (${stats.totalAds}) less than checkpoint recorded ads (${cp.rawAdsCount})`);
+    }
+    if (stats.totalEntities < cp.uniqueEntitiesCount) {
+      discrepancies.push(`Persisted entities (${stats.totalEntities}) less than checkpoint recorded entities (${cp.uniqueEntitiesCount})`);
+    }
+  }
+
+  return {
+    runId,
+    hasCheckpoint: !!cp,
+    checkpointBatchIndex: cp?.batchIndex,
+    totalPersistedAds: stats.totalAds,
+    totalPersistedEntities: stats.totalEntities,
+    totalRelevantLeads: stats.totalRelevantLeads,
+    isConsistent: discrepancies.length === 0,
+    discrepancies
+  };
+}
+

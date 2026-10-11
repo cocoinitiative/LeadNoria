@@ -556,7 +556,7 @@ console.log('\n--- SUITE 4: Entity-Level Aggregation & Quota Discipline ---');
 const mixedScrapedCandidates = [
   // 1. RFL Furniture (Ad 1: specific chair)
   {
-    libraryId: '1001',
+    libraryId: '100000000001001',
     pageName: 'RFL Furniture',
     facebookPageUrl: 'https://facebook.com/RFLfurniture',
     destinationUrl: 'https://othoba.com/rfl-classic-chair',
@@ -568,7 +568,7 @@ const mixedScrapedCandidates = [
   },
   // 2. RFL Furniture (Ad 2: generic brand campaign)
   {
-    libraryId: '1002',
+    libraryId: '100000000001002',
     pageName: 'RFL Furniture',
     facebookPageUrl: 'https://facebook.com/RFLfurniture',
     destinationUrl: 'https://othoba.com/rfl-offers',
@@ -580,7 +580,7 @@ const mixedScrapedCandidates = [
   },
   // 3. American Health Support (Irrelevant)
   {
-    libraryId: '2001',
+    libraryId: '100000000002001',
     pageName: 'American Health Support Community',
     facebookPageUrl: 'https://facebook.com/healthsupport',
     destinationUrl: 'https://healthsupport.org/story',
@@ -592,7 +592,7 @@ const mixedScrapedCandidates = [
   },
   // 4. Manchester United (Irrelevant)
   {
-    libraryId: '3001',
+    libraryId: '100000000003001',
     pageName: 'Manchester United',
     facebookPageUrl: 'https://facebook.com/manunited',
     destinationUrl: 'https://manutd.com',
@@ -604,7 +604,7 @@ const mixedScrapedCandidates = [
   },
   // 5. Otobi Office Furniture (Relevant)
   {
-    libraryId: '4001',
+    libraryId: '100000000004001',
     pageName: 'Otobi Office & Home Furnishings',
     facebookPageUrl: 'https://facebook.com/otobi',
     destinationUrl: 'https://otobi.com/desks',

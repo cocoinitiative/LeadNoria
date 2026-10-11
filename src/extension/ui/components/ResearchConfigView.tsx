@@ -29,6 +29,9 @@ interface ResearchConfigViewProps {
     locationName?: string;
     maxCandidates: number;
     presetName?: string;
+    strictLocal?: boolean;
+    requiredCta?: string;
+    requiredDestination?: string;
   }) => void;
   disabled?: boolean;
 }
@@ -44,6 +47,9 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
   const [customKeywords, setCustomKeywords] = useState<string>('Furniture, Home Decor');
   const [countryCode, setCountryCode] = useState<string>('BD');
   const [maxCandidates, setMaxCandidates] = useState<number>(200);
+  const [strictLocal, setStrictLocal] = useState<boolean>(true);
+  const [requiredCta, setRequiredCta] = useState<string>('ANY');
+  const [requiredDestination, setRequiredDestination] = useState<string>('ANY');
 
   const selectedPreset = RESEARCH_PRESETS.find(p => p.preset_id === presetId) || RESEARCH_PRESETS[0];
 
@@ -70,7 +76,10 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
       countryCode,
       locationName: selectedLoc?.displayName || countryCode,
       maxCandidates,
-      presetName
+      presetName,
+      strictLocal,
+      requiredCta: requiredCta !== 'ANY' ? requiredCta : undefined,
+      requiredDestination: requiredDestination !== 'ANY' ? requiredDestination : undefined
     });
   };
 
@@ -168,7 +177,68 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
         )}
       </div>
 
-      {/* 4. Research Scope Limit */}
+      {/* 4. Qualification Criteria & Filters */}
+      <div className="p-3 bg-slate-950/60 rounded-lg border border-slate-800 flex flex-col gap-2.5">
+        <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+          Qualification Rules
+        </span>
+        <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={strictLocal}
+            onChange={e => setStrictLocal(e.target.checked)}
+            disabled={disabled}
+            className="rounded border-slate-700 bg-slate-950 text-sky-500 focus:ring-0"
+          />
+          <span>
+            <strong className="text-slate-200">Strict-Local Verification</strong> (Foreign &amp; unknown locations fail gate)
+          </span>
+        </label>
+
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          <div>
+            <label htmlFor="required-cta-select" className="text-[10px] uppercase text-slate-400 block mb-0.5">
+              Required CTA
+            </label>
+            <select
+              id="required-cta-select"
+              value={requiredCta}
+              onChange={e => setRequiredCta(e.target.value)}
+              disabled={disabled}
+              className="w-full px-2 py-1 text-xs bg-slate-950 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-1 focus:ring-sky-400"
+            >
+              <option value="ANY">Any Observed CTA</option>
+              <option value="LEARN_MORE">Learn More</option>
+              <option value="SHOP_NOW">Shop Now</option>
+              <option value="SIGN_UP">Sign Up</option>
+              <option value="SEND_MESSAGE">Send Message</option>
+              <option value="WHATSAPP_MESSAGE">WhatsApp</option>
+              <option value="CALL_NOW">Call Now</option>
+            </select>
+          </div>
+          <div>
+            <label htmlFor="required-dest-select" className="text-[10px] uppercase text-slate-400 block mb-0.5">
+              Required Destination
+            </label>
+            <select
+              id="required-dest-select"
+              value={requiredDestination}
+              onChange={e => setRequiredDestination(e.target.value)}
+              disabled={disabled}
+              className="w-full px-2 py-1 text-xs bg-slate-950 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-1 focus:ring-sky-400"
+            >
+              <option value="ANY">Any Destination</option>
+              <option value="EXTERNAL_WEBSITE">External Website</option>
+              <option value="INSTANT_FORM">Meta Instant Form</option>
+              <option value="MESSAGING">Messaging</option>
+              <option value="CALL">Phone Call</option>
+              <option value="APP_STORE">App Store</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* 5. Research Scope Limit */}
       <div className="p-3 bg-slate-950/60 rounded-lg border border-slate-800 flex flex-col gap-2">
         <label htmlFor="max-candidates-input" className="text-xs font-semibold uppercase tracking-wider text-slate-400">
           Max Leads Target

@@ -18,9 +18,12 @@ import type {
   ScrapedAdCandidate,
   IdentityConfidence,
   EntityRelationshipType,
-  EntityMergeRecord
+  EntityMergeRecord,
+  AdLevelEvidence
 } from './types.ts';
 import { sanitizeAdLibraryIds } from './metaAdapter.ts';
+import { evaluateGeographicOrigin } from './geographicClassifier.ts';
+import { classifyCta, classifyDestination, aggregateAdEvidence } from './destinationClassifier.ts';
 
 // Generic shorteners, shared hosting, and multi-tenant marketplace platforms
 // Domains in this set MUST NEVER act as sole identity anchors for entity merging
@@ -545,7 +548,8 @@ export function mergeCandidateIntoEntity(
   target: ExtensionLead,
   cand: ScrapedAdCandidate,
   decision: EntityMergeDecision,
-  sourceQuery?: string
+  sourceQuery?: string,
+  targetCountryCode?: string
 ): void {
   // 0. Initialize activeAdLibraryIds from pre-existing target state before merging new candidate
   if (!target.activeAdLibraryIds) {
@@ -576,6 +580,7 @@ export function mergeCandidateIntoEntity(
   target.activeAdCount = target.activeAdLibraryIds.length;
 
   // 3. Preserve unique matched queries & keywords
+  if (!target.matchedKeywords) target.matchedKeywords = [];
   if (sourceQuery) {
     if (!target.matchedQueries) target.matchedQueries = [];
     if (!target.matchedQueries.includes(sourceQuery)) {
@@ -638,6 +643,51 @@ export function mergeCandidateIntoEntity(
     target.sampleCta = cand.ctaText;
   }
 
+  // 7.5. Preserve ad-level CTA and destination evidence (Phase 0.4)
+  if (!target.adEvidence) target.adEvidence = [];
+  const adCtaRes = cand.ctaType
+    ? { ctaType: cand.ctaType, normalizedText: cand.ctaText || '', reasonCode: 'CTA_TEXT_MATCH', reason: '' }
+    : classifyCta(cand.ctaText);
+  const adDestRes = cand.destinationType
+    ? { destinationType: cand.destinationType, confidence: cand.destinationConfidence || 'HIGH', reasonCode: cand.destinationReasonCode || 'VISIBLE_EXTERNAL_DESTINATION', reason: '' }
+    : classifyDestination({
+        destinationUrl: cand.destinationUrl,
+        destinationDomain: cand.destinationDomain,
+        ctaText: cand.ctaText,
+        ctaType: adCtaRes.ctaType,
+        bodyCopy: cand.bodyCopy,
+        rawText: cand.rawText
+      });
+
+  const existingAdIdx = target.adEvidence.findIndex(e => e.libraryId === cand.libraryId);
+  const adEvidenceItem: AdLevelEvidence = {
+    libraryId: cand.libraryId,
+    ctaText: cand.ctaText,
+    ctaType: adCtaRes.ctaType,
+    destinationType: adDestRes.destinationType,
+    destinationUrl: cand.destinationUrl,
+    destinationDomain: cand.destinationDomain,
+    reasonCode: adDestRes.reasonCode,
+    confidence: adDestRes.confidence,
+    observedAt: cand.startedRunning || new Date().toISOString()
+  };
+
+  if (existingAdIdx >= 0) {
+    target.adEvidence[existingAdIdx] = adEvidenceItem;
+  } else {
+    target.adEvidence.push(adEvidenceItem);
+  }
+
+  // Derive aggregated advertiser-level CTA & Destination intelligence
+  const aggSummary = aggregateAdEvidence(target.adEvidence);
+  target.observedCtaTexts = aggSummary.observedCtaTexts;
+  target.observedCtaTypes = aggSummary.observedCtaTypes;
+  target.observedDestinationTypes = aggSummary.observedDestinationTypes;
+  target.primaryCtaType = aggSummary.primaryCtaType;
+  target.primaryDestinationType = aggSummary.primaryDestinationType;
+  target.destinationReasonCode = aggSummary.destinationReasonCode;
+  target.destinationConfidence = aggSummary.destinationConfidence;
+
   // 8. Record structured merge audit entry
   if (!target.mergeHistory) target.mergeHistory = [];
   target.mergeHistory.push({
@@ -647,4 +697,37 @@ export function mergeCandidateIntoEntity(
     sourceQuery,
     confidence: decision.confidence
   });
+
+  // 9. Re-evaluate geographic physical location if relevant country code is available
+  const evalTargetCountry = targetCountryCode || target.targetCountryCode || target.locationCode;
+  if (evalTargetCountry) {
+    const updatedGeo = evaluateGeographicOrigin({
+      pageName: target.name,
+      pageUrl: target.facebookPageUrl,
+      destinationUrl: target.destinationUrl || cand.destinationUrl,
+      destinationDomain: target.destinationDomain || cand.destinationDomain,
+      bodyCopy: [target.sampleCopy, cand.bodyCopy].filter(Boolean).join(' '),
+      ctaText: [target.sampleCta, cand.ctaText].filter(Boolean).join(' ')
+    }, evalTargetCountry);
+
+    const shouldUpdateGeo =
+      !target.geographicClassification ||
+      target.geographicClassification === 'LOCATION_UNKNOWN' ||
+      updatedGeo.classification === 'FOREIGN_VERIFIED' ||
+      (target.geographicClassification === 'LOCAL_PROBABLE' && updatedGeo.classification === 'LOCAL_VERIFIED') ||
+      updatedGeo.reasonCode === 'CONFLICTING_LOCATION_EVIDENCE';
+
+    if (shouldUpdateGeo) {
+      target.targetCountryCode = updatedGeo.targetCountryCode;
+      target.businessCountryCode = updatedGeo.businessCountryCode;
+      target.geographicClassification = updatedGeo.classification;
+      target.businessLocationConfidence = updatedGeo.confidence;
+      target.businessLocationEvidence = Array.from(new Set([
+        ...(target.businessLocationEvidence || []),
+        ...updatedGeo.evidence
+      ]));
+      target.businessLocationReason = updatedGeo.reason;
+      target.businessLocationReasonCode = updatedGeo.reasonCode;
+    }
+  }
 }

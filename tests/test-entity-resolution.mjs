@@ -429,7 +429,7 @@ async function runEntityResolutionTests() {
     // Query 1: "Furniture" discovers RFL Furniture ad 1
     const res1 = await processBatch(
       [{
-        libraryId: 'ad_rfl_1',
+        libraryId: '900000000000001',
         pageName: 'RFL Furniture',
         facebookPageId: '555666777',
         facebookPageUrl: 'https://facebook.com/rflfurniturebd',
@@ -445,7 +445,7 @@ async function runEntityResolutionTests() {
     // Query 2: "Sofa" discovers RFL Furniture ad 2
     const res2 = await processBatch(
       [{
-        libraryId: 'ad_rfl_2',
+        libraryId: '900000000000002',
         pageName: 'RFL Furniture BD',
         facebookPageId: '555666777',
         facebookPageUrl: 'https://facebook.com/rflfurniturebd',
@@ -461,7 +461,7 @@ async function runEntityResolutionTests() {
     // Query 3: "Furniture Store" discovers RFL Furniture ad 3
     const res3 = await processBatch(
       [{
-        libraryId: 'ad_rfl_3',
+        libraryId: '900000000000003',
         pageName: 'RFL Furniture',
         facebookPageId: '555666777',
         facebookPageUrl: 'https://facebook.com/rflfurniturebd',
@@ -543,20 +543,20 @@ async function runEntityResolutionTests() {
       canonicalName: 'Restored Artisan Co',
       canonicalPageId: '777000111',
       facebookPageUrl: 'https://facebook.com/restoredartisan',
-      adLibraryIds: ['ad_res_1'],
+      adLibraryIds: ['900000000000011'],
       matchedKeywords: ['Artisan'],
       matchedQueries: ['Artisan'],
       adCount: 1,
       activeAdCount: 1
     };
     entitiesMap.set('fbid_777000111', restoredLead);
-    seenAdIds.add('ad_res_1');
+    seenAdIds.add('900000000000011');
     counters.finalUniqueLeads = 1;
 
     // Stream a new ad from same advertiser after resume
     await processBatch(
       [{
-        libraryId: 'ad_res_2',
+        libraryId: '900000000000012',
         pageName: 'Restored Artisan Co.',
         facebookPageId: '777000111',
         facebookPageUrl: 'https://facebook.com/restoredartisan'
@@ -574,7 +574,7 @@ async function runEntityResolutionTests() {
       'Entity restored in existingEntitiesMap with pageId 777000111',
       'MERGED into existing entity, finalUniqueLeads remains 1, adCount becomes 2',
       `finalUniqueLeads: ${counters.finalUniqueLeads}, adCount: ${restoredLead.adCount}`,
-      counters.finalUniqueLeads === 1 && restoredLead.adCount === 2 && restoredLead.adLibraryIds.includes('ad_res_2')
+      counters.finalUniqueLeads === 1 && restoredLead.adCount === 2 && restoredLead.adLibraryIds.includes('900000000000012')
     );
   }
 
@@ -834,7 +834,7 @@ async function runEntityResolutionTests() {
       destinationUrl: 'https://preservetest.com/page1',
       observedDomains: ['preservetest.com'],
       observedUrls: ['https://preservetest.com/page1'],
-      adLibraryIds: ['ad_pres_1'],
+      adLibraryIds: ['900000000000021'],
       matchedKeywords: ['Query1'],
       matchedQueries: ['Query1'],
       adCount: 1,
@@ -846,7 +846,7 @@ async function runEntityResolutionTests() {
     };
 
     const cand = {
-      libraryId: 'ad_pres_2',
+      libraryId: '900000000000022',
       pageName: 'Preserve Test Corp International',
       facebookPageId: '111222',
       destinationUrl: 'https://preservetest.com/page2?promo=spring',
@@ -869,11 +869,11 @@ async function runEntityResolutionTests() {
       'T',
       'Verify all evidence preserved after merge',
       'All Ad IDs, URLs, queries, and copies retained without destructive overwrite',
-      'adLibraryIds=[ad_pres_1, ad_pres_2], matchedQueries=[Query1, Query2], observedUrls has both URLs, adCount=2',
+      'adLibraryIds=[900000000000021, 900000000000022], matchedQueries=[Query1, Query2], observedUrls has both URLs, adCount=2',
       `adLibraryIds: ${entity.adLibraryIds.length}, matchedQueries: ${entity.matchedQueries.length}, observedUrls: ${entity.observedUrls.length}`,
       entity.adLibraryIds.length === 2 &&
-      entity.adLibraryIds.includes('ad_pres_1') &&
-      entity.adLibraryIds.includes('ad_pres_2') &&
+      entity.adLibraryIds.includes('900000000000021') &&
+      entity.adLibraryIds.includes('900000000000022') &&
       entity.matchedQueries.length === 2 &&
       entity.matchedQueries.includes('Query1') &&
       entity.matchedQueries.includes('Query2') &&

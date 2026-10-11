@@ -127,9 +127,6 @@ const manifest = {
     "https://www.facebook.com/ads/library/*",
     "https://web.facebook.com/ads/library/*"
   ],
-  optional_host_permissions: [
-    "https://*/*"
-  ],
   background: {
     service_worker: "service-worker.js",
     type: "module"

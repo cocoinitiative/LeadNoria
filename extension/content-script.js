@@ -1471,7 +1471,7 @@
   }
   function tokenizeText(text) {
     if (!text) return [];
-    return text.toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, " ").split(/[\s-]+/).map((w) => w.trim()).filter((w) => w.length >= 2 && !STOP_WORDS.has(w)).map(stemToken);
+    return text.normalize("NFC").toLowerCase().replace(/[^\p{L}\p{M}\p{N}\s-]/gu, " ").split(/[\s-]+/).map((w) => w.trim()).filter((w) => w.length >= 2 && !STOP_WORDS.has(w)).map(stemToken);
   }
   function extractUrlTokens(urlStr) {
     if (!urlStr) return [];
@@ -1503,15 +1503,35 @@
       normalizedDomain: rawDomain,
       normalizedUrlSlug: evidence.destinationUrl ? extractUrlTokens(evidence.destinationUrl).join(" ") : "",
       normalizedPageNameTokens: tokenizeText(rawPageName),
-      normalizedCta: rawCta.toLowerCase(),
-      advertiserText: rawAdvertiser.toLowerCase(),
-      adCopyText: rawAdCopy.toLowerCase()
+      normalizedCta: rawCta.normalize("NFC").toLowerCase(),
+      advertiserText: rawAdvertiser.normalize("NFC").toLowerCase(),
+      adCopyText: rawAdCopy.normalize("NFC").toLowerCase()
     };
   }
-  function compileResearchIntent(mode, keywords, presetId, locationCode = "US", options) {
-    const cleanKeywords = keywords.map((k) => k.trim()).filter(Boolean);
-    if (mode === "PRESET" && presetId) {
-      const preset = RESEARCH_PRESETS.find((p) => p.preset_id === presetId);
+  function compileResearchIntent(modeOrConfig, keywords = [], presetId, locationCode = "US", options) {
+    let mode = "CUSTOM";
+    let cleanKeywords = [];
+    let pId = presetId;
+    let loc = locationCode;
+    let opts = options;
+    if (typeof modeOrConfig === "object" && modeOrConfig !== null) {
+      mode = modeOrConfig.mode || "CUSTOM";
+      cleanKeywords = (modeOrConfig.keywords || modeOrConfig.targetNiches || []).map((k) => k.trim()).filter(Boolean);
+      pId = modeOrConfig.presetId;
+      loc = modeOrConfig.locationCode || modeOrConfig.targetCountryCode || "US";
+      opts = {
+        strictLocalMode: modeOrConfig.strictLocalMode,
+        allowProbableLocal: modeOrConfig.allowProbableLocal,
+        requiredCtaTypes: modeOrConfig.requiredCtaTypes,
+        requiredDestinationTypes: modeOrConfig.requiredDestinationTypes,
+        ...options
+      };
+    } else {
+      mode = modeOrConfig;
+      cleanKeywords = (keywords || []).map((k) => k.trim()).filter(Boolean);
+    }
+    if (mode === "PRESET" && pId) {
+      const preset = RESEARCH_PRESETS.find((p) => p.preset_id === pId);
       if (preset) {
         return {
           mode: "PRESET",
@@ -1524,9 +1544,11 @@
           primaryKeywords: preset.primary_keywords,
           secondaryKeywords: preset.secondary_keywords,
           exclusions: preset.optional_exclusions || [],
-          locationCode,
-          strictLocalMode: options?.strictLocalMode,
-          allowProbableLocal: options?.allowProbableLocal
+          locationCode: loc,
+          strictLocalMode: opts?.strictLocalMode,
+          allowProbableLocal: opts?.allowProbableLocal,
+          requiredCtaTypes: opts?.requiredCtaTypes,
+          requiredDestinationTypes: opts?.requiredDestinationTypes
         };
       }
     }
@@ -1536,9 +1558,11 @@
       primaryKeywords: cleanKeywords,
       secondaryKeywords: [],
       exclusions: [],
-      locationCode,
-      strictLocalMode: options?.strictLocalMode,
-      allowProbableLocal: options?.allowProbableLocal
+      locationCode: loc,
+      strictLocalMode: opts?.strictLocalMode,
+      allowProbableLocal: opts?.allowProbableLocal,
+      requiredCtaTypes: opts?.requiredCtaTypes,
+      requiredDestinationTypes: opts?.requiredDestinationTypes
     };
   }
   var RELEVANCE_STRATEGY_VERSION, RELEVANCE_ENGINE_VERSION, BOUNDED_TAXONOMY, NEGATIVE_CATEGORIES, ACCESSORY_ONLY_INDICATORS, STOP_WORDS, LeadRelevanceEngine;
@@ -1550,7 +1574,7 @@
       BOUNDED_TAXONOMY = {
         furniture: {
           category: "furniture",
-          rootTerms: ["furniture", "furnishing", "furnishings", "furnish"],
+          rootTerms: ["furniture", "furnishing", "furnishings", "furnish", "\u09AB\u09BE\u09B0\u09CD\u09A8\u09BF\u099A\u09BE\u09B0", "\u0986\u09B8\u09AC\u09BE\u09AC\u09AA\u09A4\u09CD\u09B0"],
           productServiceTerms: [
             "chair",
             "table",
@@ -1588,7 +1612,13 @@
             "sectional",
             "ergonomic chair",
             "standing desk",
-            "bedroom set"
+            "bedroom set",
+            "\u099A\u09C7\u09DF\u09BE\u09B0",
+            "\u09A1\u09BE\u0987\u09A8\u09BF\u0982",
+            "\u0996\u09BE\u099F",
+            "\u09B8\u09CB\u09AB\u09BE",
+            "\u099F\u09C7\u09AC\u09BF\u09B2",
+            "\u0986\u09B2\u09AE\u09BE\u09B0\u09BF"
           ],
           industryDescriptors: [
             "furniture store",
@@ -2806,6 +2836,765 @@
 
   // src/extension/metaAdapter.ts
   init_relevanceEngine();
+
+  // src/extension/countryProfiles/profiles/bd.ts
+  var BD_PROFILE = {
+    countryCode: "BD",
+    countryName: "Bangladesh",
+    aliases: ["BD", "BANGLADESH", "BENGAL"],
+    phone: {
+      internationalPrefixes: ["+880"],
+      phoneRegex: /(?:\+880[\s\-]*1[3-9][\s\-]?\d{2}[\s\-]?\d{6}|880[\s\-]*1[3-9][\s\-]?\d{2}[\s\-]?\d{6}|\+880\s*1[3-9]\d{8}|8801[3-9]\d{8})/,
+      domesticRegex: /(?:\b01[3-9][\s\-]?\d{2}[\s\-]?\d{6}\b|\b01[3-9]\d{8}\b)/
+    },
+    majorCities: [
+      "dhaka",
+      "chittagong",
+      "chattogram",
+      "sylhet",
+      "rajshahi",
+      "khulna",
+      "barishal",
+      "rangpur",
+      "mymensingh",
+      "gazipur",
+      "narayanganj",
+      "comilla",
+      "savar",
+      "uttara",
+      "banani",
+      "gulshan",
+      "dhanmondi",
+      "mirpur",
+      "motijheel",
+      "badda",
+      "mohammadpur",
+      "bashundhara",
+      "mohakhali",
+      "khilkhet",
+      "tejgaon"
+    ],
+    addressKeywords: [
+      "house",
+      "road",
+      "sector",
+      "block",
+      "lane",
+      "plot",
+      "holding",
+      "floor",
+      "avenue",
+      "street"
+    ],
+    operationalPhrases: [
+      "all over bangladesh",
+      "delivery all over bangladesh",
+      "inside dhaka",
+      "outside dhaka",
+      "free delivery in dhaka",
+      "free delivery inside dhaka",
+      "cash on delivery in bangladesh",
+      "home delivery inside dhaka",
+      "bangladesh delivery",
+      "deliver all over bangladesh",
+      "all over bd"
+    ],
+    domainSuffixes: [".bd", ".com.bd", ".org.bd", ".edu.bd", ".gov.bd"],
+    knownCommercialDomains: [
+      "regalfurniturebd.com",
+      "htbazarbd.com",
+      "daraz.com.bd",
+      "othoba.com",
+      "chaldal.com"
+    ],
+    nativeScriptRegex: /[\u0980-\u09FF]/,
+    keywords: ["bangladesh", "bdt", "taka", "cash on delivery"]
+  };
+
+  // src/extension/countryProfiles/profiles/us.ts
+  var US_PROFILE = {
+    countryCode: "US",
+    countryName: "United States",
+    aliases: ["US", "USA", "UNITED STATES", "UNITED STATES OF AMERICA", "AMERICA"],
+    phone: {
+      internationalPrefixes: ["+1"],
+      phoneRegex: /(?:\+1[\s\-]?[2-9]\d{2}[\s\-]?[2-9]\d{2}[\s\-]?\d{4})/,
+      domesticRegex: /\b[2-9]\d{2}[\s\-]?[2-9]\d{2}[\s\-]?\d{4}\b/,
+      sharedPrefixes: ["+1"],
+      tollFreeAreaCodes: ["800", "888", "877", "866", "855", "844", "833"]
+    },
+    regions: {
+      statesOrProvinces: [
+        "alabama",
+        "alaska",
+        "arizona",
+        "arkansas",
+        "california",
+        "colorado",
+        "connecticut",
+        "delaware",
+        "florida",
+        "georgia",
+        "hawaii",
+        "idaho",
+        "illinois",
+        "indiana",
+        "iowa",
+        "kansas",
+        "kentucky",
+        "louisiana",
+        "maine",
+        "maryland",
+        "massachusetts",
+        "michigan",
+        "minnesota",
+        "mississippi",
+        "missouri",
+        "montana",
+        "nebraska",
+        "nevada",
+        "new hampshire",
+        "new jersey",
+        "new mexico",
+        "new york",
+        "north carolina",
+        "north dakota",
+        "ohio",
+        "oklahoma",
+        "oregon",
+        "pennsylvania",
+        "rhode island",
+        "south carolina",
+        "south dakota",
+        "tennessee",
+        "texas",
+        "utah",
+        "vermont",
+        "virginia",
+        "washington",
+        "west virginia",
+        "wisconsin",
+        "wyoming"
+      ],
+      stateCodes: [
+        "AL",
+        "AK",
+        "AZ",
+        "AR",
+        "CA",
+        "CO",
+        "CT",
+        "DE",
+        "FL",
+        "GA",
+        "HI",
+        "ID",
+        "IL",
+        "IN",
+        "IA",
+        "KS",
+        "KY",
+        "LA",
+        "ME",
+        "MD",
+        "MA",
+        "MI",
+        "MN",
+        "MS",
+        "MO",
+        "MT",
+        "NE",
+        "NV",
+        "NH",
+        "NJ",
+        "NM",
+        "NY",
+        "NC",
+        "ND",
+        "OH",
+        "OK",
+        "OR",
+        "PA",
+        "RI",
+        "SC",
+        "SD",
+        "TN",
+        "TX",
+        "UT",
+        "VT",
+        "VA",
+        "WA",
+        "WV",
+        "WI",
+        "WY",
+        "DC"
+      ],
+      postalCodeRegex: /\b\d{5}(?:-\d{4})?\b/
+    },
+    majorCities: [
+      "new york",
+      "los angeles",
+      "chicago",
+      "houston",
+      "phoenix",
+      "philadelphia",
+      "san antonio",
+      "san diego",
+      "dallas",
+      "austin",
+      "san jose",
+      "fort worth",
+      "jacksonville",
+      "columbus",
+      "charlotte",
+      "indianapolis",
+      "san francisco",
+      "seattle",
+      "denver",
+      "washington",
+      "boston",
+      "utica",
+      "miami",
+      "atlanta"
+    ],
+    addressKeywords: [
+      "street",
+      "st.",
+      "st",
+      "avenue",
+      "ave.",
+      "ave",
+      "boulevard",
+      "blvd.",
+      "blvd",
+      "road",
+      "rd.",
+      "rd",
+      "suite",
+      "ste.",
+      "ste",
+      "drive",
+      "dr.",
+      "dr",
+      "court",
+      "ct.",
+      "ct",
+      "lane",
+      "ln.",
+      "ln",
+      "highway",
+      "hwy",
+      "parkway",
+      "pkwy"
+    ],
+    operationalPhrases: [
+      "free shipping in us",
+      "us nationwide delivery",
+      "ships within us",
+      "continental us",
+      "lower 48",
+      "made in usa",
+      "us shipping",
+      "nationwide delivery"
+    ],
+    domainSuffixes: [".us", ".gov", ".mil"],
+    knownCommercialDomains: [
+      "raymourflanigan.com",
+      "officedepot.com",
+      "tahans.com",
+      "ashleyfurniture.com",
+      "target.com",
+      "walmart.com",
+      "homedepot.com"
+    ],
+    keywords: ["labor day", "nationwide delivery", "special financing", "us shipping", "usd", "veterans day", "memorial day"]
+  };
+
+  // src/extension/countryProfiles/profiles/gb.ts
+  var GB_PROFILE = {
+    countryCode: "GB",
+    countryName: "United Kingdom",
+    aliases: [
+      "GB",
+      "UK",
+      "UNITED KINGDOM",
+      "GREAT BRITAIN",
+      "ENGLAND",
+      "SCOTLAND",
+      "WALES",
+      "NORTHERN IRELAND"
+    ],
+    phone: {
+      internationalPrefixes: ["+44"],
+      phoneRegex: /(?:\+44[\s\-]?[1-9](?:[\s\-]?\d){8,9})/,
+      domesticRegex: /\b0[12378](?:[\s\-]?\d){8,9}\b/
+    },
+    regions: {
+      statesOrProvinces: [
+        "england",
+        "scotland",
+        "wales",
+        "northern ireland",
+        "devon",
+        "north devon",
+        "cornwall",
+        "yorkshire",
+        "kent",
+        "essex",
+        "surrey",
+        "lancashire",
+        "hampshire",
+        "somerset"
+      ],
+      postalCodeRegex: /\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i
+    },
+    majorCities: [
+      "london",
+      "birmingham",
+      "manchester",
+      "leeds",
+      "glasgow",
+      "liverpool",
+      "newcastle",
+      "sheffield",
+      "bristol",
+      "edinburgh",
+      "belfast",
+      "cardiff",
+      "nottingham",
+      "southampton"
+    ],
+    addressKeywords: [
+      "high street",
+      "street",
+      "st",
+      "road",
+      "rd",
+      "lane",
+      "ln",
+      "avenue",
+      "ave",
+      "close",
+      "drive",
+      "way",
+      "walk",
+      "gardens",
+      "square",
+      "sq",
+      "unit",
+      "building",
+      "mews"
+    ],
+    operationalPhrases: [
+      "uk mainland delivery",
+      "free uk delivery",
+      "delivering across uk",
+      "nationwide uk delivery",
+      "uk delivery only",
+      "in-store & online"
+    ],
+    domainSuffixes: [".co.uk", ".uk", ".org.uk", ".gov.uk", ".ac.uk"],
+    knownCommercialDomains: [
+      "scs.co.uk",
+      "fairwayfurniture.co.uk",
+      "argos.co.uk",
+      "currys.co.uk",
+      "johnlewis.com",
+      "marksandspencer.com"
+    ],
+    keywords: [
+      "uk",
+      "gbp",
+      "interest free credit",
+      "registered in england",
+      "vat registered",
+      "hmrc",
+      "companies house"
+    ]
+  };
+
+  // src/extension/countryProfiles/profiles/ca.ts
+  var CA_PROFILE = {
+    countryCode: "CA",
+    countryName: "Canada",
+    aliases: ["CA", "CANADA", "CAN"],
+    phone: {
+      internationalPrefixes: ["+1"],
+      phoneRegex: /(?:\+1[\s\-]?[2-9]\d{2}[\s\-]?[2-9]\d{2}[\s\-]?\d{4})/,
+      domesticRegex: /\b[2-9]\d{2}[\s\-]?[2-9]\d{2}[\s\-]?\d{4}\b/,
+      sharedPrefixes: ["+1"],
+      tollFreeAreaCodes: ["800", "888", "877", "866", "855", "844", "833"]
+    },
+    regions: {
+      statesOrProvinces: [
+        "ontario",
+        "quebec",
+        "british columbia",
+        "alberta",
+        "manitoba",
+        "saskatchewan",
+        "nova scotia",
+        "new brunswick",
+        "newfoundland",
+        "prince edward island",
+        "northwest territories",
+        "yukon",
+        "nunavut"
+      ],
+      stateCodes: [
+        "ON",
+        "QC",
+        "BC",
+        "AB",
+        "MB",
+        "SK",
+        "NS",
+        "NB",
+        "NL",
+        "PE",
+        "NT",
+        "YT",
+        "NU"
+      ],
+      postalCodeRegex: /\b[A-CEGHJ-NPR-TVXY]\d[A-CEGHJ-NPR-TV-Z]\s*\d[A-CEGHJ-NPR-TV-Z]\d\b/i
+    },
+    majorCities: [
+      "toronto",
+      "montreal",
+      "vancouver",
+      "calgary",
+      "edmonton",
+      "ottawa",
+      "winnipeg",
+      "quebec city",
+      "hamilton",
+      "kitchener",
+      "halifax",
+      "victoria",
+      "mississauga",
+      "brampton",
+      "surrey",
+      "laval",
+      "markham"
+    ],
+    addressKeywords: [
+      "street",
+      "st",
+      "rue",
+      "avenue",
+      "ave",
+      "boulevard",
+      "blvd",
+      "road",
+      "rd",
+      "chemin",
+      "suite",
+      "ste",
+      "drive",
+      "dr",
+      "court",
+      "ct"
+    ],
+    operationalPhrases: [
+      "canada-wide delivery",
+      "free shipping across canada",
+      "shipping across canada",
+      "canadian owned",
+      "made in canada",
+      "coast to coast delivery"
+    ],
+    domainSuffixes: [".ca"],
+    knownCommercialDomains: [
+      "canadiantire.ca",
+      "thebay.com",
+      "bestbuy.ca",
+      "leons.ca",
+      "brick.com"
+    ],
+    keywords: ["cad", "gst/hst", "canadian", "canada wide", "cra registered"]
+  };
+
+  // src/extension/countryProfiles/profiles/au.ts
+  var AU_PROFILE = {
+    countryCode: "AU",
+    countryName: "Australia",
+    aliases: ["AU", "AUSTRALIA", "AUS", "OZ"],
+    phone: {
+      internationalPrefixes: ["+61"],
+      phoneRegex: /(?:\+61[\s\-]?[2-478](?:[\s\-]?\d){7,8})/,
+      domesticRegex: /\b0[2-478](?:[\s\-]?\d){7,8}\b/
+    },
+    regions: {
+      statesOrProvinces: [
+        "new south wales",
+        "victoria",
+        "queensland",
+        "western australia",
+        "south australia",
+        "tasmania",
+        "australian capital territory",
+        "northern territory"
+      ],
+      stateCodes: ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"],
+      postalCodeRegex: /\b(?:NSW|VIC|QLD|WA|SA|TAS|ACT|NT)\s*\d{4}\b/i
+    },
+    majorCities: [
+      "sydney",
+      "melbourne",
+      "brisbane",
+      "perth",
+      "adelaide",
+      "gold coast",
+      "canberra",
+      "newcastle",
+      "wollongong",
+      "hobart",
+      "geelong",
+      "darwin"
+    ],
+    addressKeywords: [
+      "street",
+      "st",
+      "road",
+      "rd",
+      "parade",
+      "pde",
+      "highway",
+      "hwy",
+      "avenue",
+      "ave",
+      "crescent",
+      "cres",
+      "court",
+      "ct",
+      "drive",
+      "dr",
+      "unit"
+    ],
+    operationalPhrases: [
+      "australia wide",
+      "australia-wide delivery",
+      "delivery across australia",
+      "aussie owned",
+      "australian made",
+      "free shipping australia wide"
+    ],
+    domainSuffixes: [".com.au", ".net.au", ".au", ".org.au", ".gov.au"],
+    knownCommercialDomains: [
+      "hospitalityfurniture.net.au",
+      "harveynorman.com.au",
+      "bunnings.com.au",
+      "thegoodguys.com.au",
+      "freedom.com.au"
+    ],
+    keywords: ["australia", "aud", "australia wide", "abn", "acn", "afterpay"]
+  };
+
+  // src/extension/countryProfiles/profiles/ie.ts
+  var IE_PROFILE = {
+    countryCode: "IE",
+    countryName: "Ireland",
+    aliases: ["IE", "IRELAND", "EIRE", "REPUBLIC OF IRELAND"],
+    phone: {
+      internationalPrefixes: ["+353"],
+      phoneRegex: /(?:\+353[\s\-]?[1-9](?:[\s\-]?\d){6,8})/,
+      domesticRegex: /\b0[1-9](?:[\s\-]?\d){6,8}\b/
+    },
+    regions: {
+      statesOrProvinces: [
+        "county dublin",
+        "county cork",
+        "county galway",
+        "county kildare",
+        "county meath",
+        "county limerick",
+        "county waterford",
+        "county louth",
+        "county wicklow",
+        "county kerry",
+        "county clare",
+        "county mayo",
+        "county donegal",
+        "county tipperary",
+        "co. dublin",
+        "co. cork",
+        "co. galway"
+      ],
+      // Eircode routing keys (e.g. D02, T12, H91) followed by alphanumeric identifier
+      postalCodeRegex: /\b[A-W]\d{2}\s*[0-9A-Z]{4}\b/i
+    },
+    majorCities: [
+      "dublin",
+      "cork",
+      "galway",
+      "limerick",
+      "waterford",
+      "drogheda",
+      "dundalk",
+      "swords",
+      "bray",
+      "navan",
+      "kilkenny"
+    ],
+    addressKeywords: [
+      "street",
+      "st",
+      "road",
+      "rd",
+      "avenue",
+      "ave",
+      "lane",
+      "ln",
+      "terrace",
+      "tce",
+      "quay",
+      "park",
+      "square",
+      "sq",
+      "unit",
+      "industrial estate"
+    ],
+    operationalPhrases: [
+      "nationwide delivery ireland",
+      "delivery across ireland",
+      "irish owned",
+      "all 32 counties",
+      "republic of ireland delivery",
+      "free delivery ireland",
+      "ireland delivery"
+    ],
+    domainSuffixes: [".ie"],
+    knownCommercialDomains: [
+      "harveynorman.ie",
+      "woodies.ie",
+      "did.ie",
+      "currys.ie",
+      "ezlivingfurniture.ie"
+    ],
+    keywords: ["ireland", "eur", "cro registered", "eircode", "an post"]
+  };
+
+  // src/extension/countryProfiles/profiles/in.ts
+  var IN_PROFILE = {
+    countryCode: "IN",
+    countryName: "India",
+    aliases: ["IN", "INDIA", "BHARAT"],
+    phone: {
+      internationalPrefixes: ["+91"],
+      phoneRegex: /(?:\+91[\s\-]?[6-9]\d{9})/,
+      domesticRegex: /\b[6-9]\d{9}\b/
+    },
+    majorCities: [
+      "jaipur",
+      "mumbai",
+      "delhi",
+      "bengaluru",
+      "bangalore",
+      "kolkata",
+      "chennai",
+      "hyderabad",
+      "pune",
+      "noida",
+      "gurgaon",
+      "ahmedabad",
+      "surat"
+    ],
+    addressKeywords: [
+      "road",
+      "rd",
+      "street",
+      "st",
+      "nagar",
+      "colony",
+      "marg",
+      "sector",
+      "phase",
+      "plot"
+    ],
+    operationalPhrases: [
+      "pan india",
+      "all over india",
+      "cash on delivery india",
+      "great indian festival"
+    ],
+    domainSuffixes: [".in", ".co.in", ".org.in", ".net.in"],
+    knownCommercialDomains: [
+      "amazon.in",
+      "interio.com",
+      "flipkart.com",
+      "myntra.com"
+    ],
+    keywords: ["india", "inr", "pan india", "great indian festival", "gstin"]
+  };
+
+  // src/extension/countryProfiles/profiles/cn.ts
+  var CN_PROFILE = {
+    countryCode: "CN",
+    countryName: "China",
+    aliases: ["CN", "CHINA", "PRC"],
+    phone: {
+      internationalPrefixes: ["+86", "86"],
+      phoneRegex: /(?:\+86[\s\-]?[1-9]\d{9,10})/
+    },
+    majorCities: [
+      "guangzhou",
+      "foshan",
+      "shenzhen",
+      "dongguan",
+      "yiwu",
+      "zhejiang",
+      "shanghai",
+      "beijing",
+      "ningbo",
+      "hangzhou"
+    ],
+    addressKeywords: ["district", "road", "industrial park", "building", "street"],
+    operationalPhrases: [
+      "factory direct",
+      "factory-direct",
+      "oem and odm",
+      "square meter factory",
+      "china export"
+    ],
+    domainSuffixes: [".cn", ".com.cn"],
+    knownCommercialDomains: [
+      "alibaba.com",
+      "made-in-china.com",
+      "aliexpress.com",
+      "1688.com"
+    ],
+    keywords: [
+      "oem and odm",
+      "factory-direct",
+      "oem configurations",
+      "square meter factory",
+      "china manufacturer"
+    ]
+  };
+
+  // src/extension/countryProfiles/registry.ts
+  var PROFILES = [
+    BD_PROFILE,
+    US_PROFILE,
+    GB_PROFILE,
+    CA_PROFILE,
+    AU_PROFILE,
+    IE_PROFILE,
+    IN_PROFILE,
+    CN_PROFILE
+  ];
+  var CODE_MAP = /* @__PURE__ */ new Map();
+  var ALIAS_MAP = /* @__PURE__ */ new Map();
+  for (const profile of PROFILES) {
+    const code = profile.countryCode.toUpperCase();
+    CODE_MAP.set(code, profile);
+    ALIAS_MAP.set(code, code);
+    for (const alias of profile.aliases) {
+      ALIAS_MAP.set(alias.toUpperCase(), code);
+    }
+  }
+
+  // src/extension/metaAdapter.ts
   function checkForBotChallenge(doc) {
     const hasAdCards = Array.from(doc.querySelectorAll("span, div")).some(
       (el) => {

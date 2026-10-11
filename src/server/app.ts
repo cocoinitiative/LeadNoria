@@ -1,6 +1,7 @@
 import express, { Request, Response, NextFunction } from "express";
 import { runBrowserWorker, cancelJob, checkBrowserAvailability } from "./browserWorker.ts";
 import { researchJobStore } from "./researchJobStore.ts";
+import { isLiveCollectionPermitted } from "../config/collectionGate.ts";
 
 export const app = express();
 
@@ -170,10 +171,19 @@ router.get("/research/jobs/:jobId/results", (req: Request, res: Response) => {
 // API: Execute research job (NDJSON stream / Serverless chunked response)
 router.post("/research", async (req: Request, res: Response) => {
   try {
+    const request = req.body || {};
+
+    // Fail-Closed Safety Gate (Phase 0.1): Live Meta scraping is unauthorized and disabled
+    if (request.validationMode !== 'CONTROLLED_FIXTURE' && !isLiveCollectionPermitted()) {
+      return res.status(403).json({
+        success: false,
+        error: 'COLLECTION_NOT_AUTHORIZED: Live automated collection from Meta Ad Library is disabled and unauthorized.',
+        code: 'COLLECTION_NOT_AUTHORIZED'
+      });
+    }
+
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Transfer-Encoding', 'chunked');
-    
-    const request = req.body;
     
     const emitEvent = (event: any) => {
       try {

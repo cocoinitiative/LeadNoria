@@ -364,6 +364,27 @@ export const ResultDetailDrawer: React.FC<ResultDetailDrawerProps> = ({
                   <strong className="text-slate-200">{[location.city, location.region, location.country].filter(Boolean).join(', ')}</strong>
                 </div>
               )}
+              {lead.geographicClassification && (
+                <div className="mt-1.5 p-2 bg-slate-900 rounded border border-slate-800 text-[11px] flex flex-col gap-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400 font-semibold text-[10px] uppercase">Geographic Classification:</span>
+                    <StatusBadge status={lead.geographicClassification} customLabel={toFriendlyStatus(lead.geographicClassification)} size="sm" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[10px] mt-0.5">
+                    <div>
+                      <span className="text-slate-500 block">Target Country:</span>
+                      <strong className="text-slate-200">{lead.targetCountryCode || 'Global / Unspecified'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block">Physical Business Country:</span>
+                      <strong className="text-slate-200">{lead.businessCountryCode || 'Unknown'}</strong>
+                    </div>
+                  </div>
+                  <p className="text-[9px] text-slate-500 mt-0.5">
+                    * Targeting intent, ad delivery, or currency is not treated as proof of physical business location.
+                  </p>
+                </div>
+              )}
               {location.coordinates && (
                 <div className="text-slate-500 font-mono text-[10px]">
                   Coordinates: {location.coordinates}
@@ -394,8 +415,25 @@ export const ResultDetailDrawer: React.FC<ResultDetailDrawerProps> = ({
                   )}
                 </div>
               ) : (
-                <span className="text-slate-500">Website data not available.</span>
+                <div className="p-1.5 bg-slate-900/60 rounded border border-slate-800 text-slate-400 text-[10px]">
+                  <span>No external destination observed in card. </span>
+                  <span className="text-slate-500 block mt-0.5">
+                    (Missing destination evidence does not prove that a business has no website).
+                  </span>
+                </div>
               )}
+
+              {/* Observed CTA & Destination Separation */}
+              <div className="grid grid-cols-2 gap-2 mt-0.5 p-1.5 bg-slate-900 rounded border border-slate-800 text-[10px]">
+                <div>
+                  <span className="text-slate-500 block">Observed CTA:</span>
+                  <strong className="text-slate-200">{lead.ctaType ? toFriendlyStatus(lead.ctaType) : 'None / Not observed'}</strong>
+                </div>
+                <div>
+                  <span className="text-slate-500 block">Observed Destination:</span>
+                  <strong className="text-slate-200">{lead.destinationType ? toFriendlyStatus(lead.destinationType) : 'Unknown'}</strong>
+                </div>
+              </div>
 
               {/* Technology & Capabilities */}
               <div className="flex flex-wrap gap-1.5 mt-0.5">
@@ -579,13 +617,42 @@ export const ResultDetailDrawer: React.FC<ResultDetailDrawerProps> = ({
               />
             </div>
 
-            <div className="text-[11px] text-slate-400">
-              Profile: <strong className="text-slate-200">{qualification.profileName}</strong>
+            <div className="text-[11px] text-slate-400 flex items-center justify-between">
+              <div>Profile: <strong className="text-slate-200">{qualification.profileName}</strong></div>
+              {lead.qualificationScore !== undefined && (
+                <div className="text-[10px] font-mono text-slate-300">
+                  Score: <strong className="text-sky-400">{lead.qualificationScoreText || `${(lead.qualificationScore * 100).toFixed(0)}%`}</strong>
+                  {lead.scoreConfidence && (
+                    <span className="text-slate-400 font-sans ml-1">({lead.scoreConfidence} conf)</span>
+                  )}
+                </div>
+              )}
             </div>
 
             <p className="text-[11px] text-slate-300 leading-relaxed bg-slate-900/60 p-2 rounded border border-slate-800">
               {qualification.explanation}
             </p>
+
+            <p className="text-[9px] text-slate-500 -mt-1">
+              * Lead score is a ranking metric and cannot override failed qualification gates.
+            </p>
+
+            {/* Failed Qualification Gates (Actionable Diagnostic Breakdown) */}
+            {lead.qualificationFailedGates && lead.qualificationFailedGates.length > 0 && (
+              <div className="p-2 bg-rose-950/40 border border-rose-500/40 rounded text-[11px] text-rose-200 flex flex-col gap-1">
+                <span className="text-[10px] font-semibold uppercase text-rose-300 flex items-center gap-1">
+                  <span>✕</span> Failed Qualification Gates ({lead.qualificationFailedGates.length}):
+                </span>
+                <ul className="list-disc list-inside space-y-0.5 text-[10px] text-rose-200">
+                  {lead.qualificationFailedGates.map((gate, gIdx) => (
+                    <li key={gIdx}>
+                      <strong>{toFriendlyStatus(gate)}</strong>
+                      <span className="font-mono text-[9px] text-rose-400 ml-1">[{gate}]</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {/* Why Reasons (Phase 23 Graph) */}
             {qualification.whyReasons && qualification.whyReasons.length > 0 && (
