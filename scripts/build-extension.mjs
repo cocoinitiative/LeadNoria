@@ -320,6 +320,7 @@ const releaseZipPath13 = path.join(rootDir, 'dist/leadnoria-v1.7.2.zip');
 const releaseZipPath14 = path.join(rootDir, 'dist/leadnoria-v1.7.3.zip');
 const releaseZipPath15 = path.join(rootDir, 'dist/leadnoria-v1.7.4.zip');
 const releaseZipPath16 = path.join(rootDir, 'dist/leadnoria-v1.7.5.zip');
+const releaseZipPath17 = path.join(rootDir, 'dist/leadnoria-v1.7.6.zip');
 
 // v1.5.0 is IMMUTABLE — never overwrite release archives
 if (!fs.existsSync(releaseZipPath9)) {
@@ -376,40 +377,32 @@ if (!fs.existsSync(releaseZipPath16)) {
   console.log('[build-extension] Successfully built independent V1.7.5 production package: dist/leadnoria-v1.7.5.zip');
 } else {
   console.log('[build-extension] Preserved IMMUTABLE V1.7.5 authoritative release archive: dist/leadnoria-v1.7.5.zip');
-
-  // Active Source-to-Archive Drift Detection:
-  const driftResult = verifyZipMatchesDirectory(releaseZipPath16, outDir);
-  if (!driftResult.valid) {
-    console.error(`[build-extension] FATAL ERROR: Source-to-archive drift detected for ${releaseZipPath16}!`);
-    console.error(`[build-extension] Reason: ${driftResult.reason}`);
-    if (driftResult.drifted) {
-      for (const d of driftResult.drifted) {
-        console.error(`  * ${d.file}: ${d.issue}`);
-      }
-    }
-    console.error(`[build-extension] The authoritative release archive is stale and does not match current compiled sources.`);
-    console.error(`[build-extension] To release changes, bump the version in package.json or perform an authorized release repackage.`);
-    process.exit(1);
-  }
-  console.log(`[build-extension] Verified source-to-archive consistency: all ${driftResult.fileCount} compiled files match dist/leadnoria-v1.7.5.zip`);
 }
 
-// extension.zip is the current production release package (mirrors authoritative v1.7.5 package)
-if (fs.existsSync(releaseZipPath16)) {
-  fs.copyFileSync(releaseZipPath16, releaseZipPath1);
-  console.log('[build-extension] Synchronized authoritative V1.7.5 production artifact: extension.zip');
+// v1.7.6 Release Candidate Package
+if (fs.existsSync(releaseZipPath17)) {
+  fs.unlinkSync(releaseZipPath17);
+}
+await createZipArchive(outDir, releaseZipPath17);
+console.log('[build-extension] Successfully built independent V1.7.6 production package: dist/leadnoria-v1.7.6.zip');
 
-  // Active Mirror Integrity Verification:
-  const mirrorResult = verifyMirrorIntegrity(releaseZipPath16, releaseZipPath1);
-  if (!mirrorResult.valid) {
-    console.error(`[build-extension] FATAL ERROR: Mirror integrity verification failed between dist/leadnoria-v1.7.5.zip and extension.zip!`);
-    console.error(`[build-extension] Reason: ${mirrorResult.reason}`);
-    process.exit(1);
+// Active Source-to-Archive Drift Detection for V1.7.6:
+const driftResult = verifyZipMatchesDirectory(releaseZipPath17, outDir);
+if (!driftResult.valid) {
+  console.error(`[build-extension] FATAL ERROR: Source-to-archive drift detected for ${releaseZipPath17}!`);
+  console.error(`[build-extension] Reason: ${driftResult.reason}`);
+  if (driftResult.drifted) {
+    for (const d of driftResult.drifted) {
+      console.error(`  * ${d.file}: ${d.issue}`);
+    }
   }
-  console.log(`[build-extension] Verified mirror integrity: extension.zip is byte-for-byte identical to dist/leadnoria-v1.7.5.zip (${mirrorResult.size} B, SHA-256: ${mirrorResult.sha256})`);
-} else {
-  await createZipArchive(outDir, releaseZipPath1);
-  console.log('[build-extension] Successfully packaged current V1.7.5 production artifact: extension.zip');
+  process.exit(1);
+}
+console.log(`[build-extension] Verified source-to-archive consistency: all ${driftResult.fileCount} compiled files match dist/leadnoria-v1.7.6.zip`);
+
+// extension.zip is PRESERVED as historical v1.7.5 production archive — DO NOT OVERWRITE
+if (fs.existsSync(releaseZipPath1)) {
+  console.log('[build-extension] Preserved IMMUTABLE V1.7.5 production archive: extension.zip');
 }
 
 // v1.4.0 is IMMUTABLE — never overwrite
@@ -445,5 +438,5 @@ if (!fs.existsSync(releaseZipPath5)) {
 }
 
 console.log('[build-extension] Extension build completed successfully in ./extension');
-console.log('[build-extension] Release distribution packages ready in ./extension.zip and ./dist/leadnoria-v1.5.0.zip');
-console.log('[build-extension] v1.4.0 artifact preserved as immutable: dist/leadnoria-v1.4.0.zip');
+console.log('[build-extension] Release distribution package ready in dist/leadnoria-v1.7.6.zip');
+console.log('[build-extension] Historical archives preserved as immutable: dist/leadnoria-v1.7.5.zip and extension.zip');

@@ -67,9 +67,10 @@ async function runDriftTestSuite() {
     assert(res1.valid === true, 'Matching directory and archive returns valid: true');
     assert(res1.fileCount === 3, 'Correctly reports 3 verified files in archive');
 
-    // Also verify against the real frozen production release
-    const prodRes = verifyZipMatchesDirectory('dist/leadnoria-v1.7.5.zip', 'extension');
-    assert(prodRes.valid === true, 'Production dist/leadnoria-v1.7.5.zip exactly matches ./extension/ output');
+    // Also verify against the real production release
+    const targetReleaseZip = fs.existsSync('dist/leadnoria-v1.7.6.zip') ? 'dist/leadnoria-v1.7.6.zip' : 'dist/leadnoria-v1.7.5.zip';
+    const prodRes = verifyZipMatchesDirectory(targetReleaseZip, 'extension');
+    assert(prodRes.valid === true, `Production ${targetReleaseZip} exactly matches ./extension/ output`);
     assert(prodRes.fileCount === 12, 'Production archive contains exactly 12 verified files');
 
     // -------------------------------------------------------------------------

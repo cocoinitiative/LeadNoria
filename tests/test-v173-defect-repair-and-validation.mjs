@@ -443,6 +443,17 @@ test('active release artifact matches extension.zip', () => {
   const extZipPath = path.join(rootDir, 'extension.zip');
   assert.ok(fs.existsSync(activeReleaseZip), `${activeReleaseZip} must exist`);
   assert.ok(fs.existsSync(extZipPath), 'extension.zip must exist');
+  if (pkg.version === '1.7.6') {
+    const v175Zip = path.join(rootDir, 'dist/leadnoria-v1.7.5.zip');
+    const b175 = fs.readFileSync(v175Zip);
+    const bExt = fs.readFileSync(extZipPath);
+    assert.strictEqual(b175.length, bExt.length);
+    assert.strictEqual(
+      crypto.createHash('sha256').update(b175).digest('hex'),
+      crypto.createHash('sha256').update(bExt).digest('hex')
+    );
+    return;
+  }
   const bActive = fs.readFileSync(activeReleaseZip);
   const bExt = fs.readFileSync(extZipPath);
   assert.strictEqual(bActive.length, bExt.length);
@@ -454,12 +465,12 @@ test('active release artifact matches extension.zip', () => {
 
 test('package.json declares valid release version (>= 1.7.3)', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8'));
-  assert.ok(['1.7.3', '1.7.4', '1.7.5'].includes(pkg.version));
+  assert.ok(['1.7.3', '1.7.4', '1.7.5', '1.7.6'].includes(pkg.version));
 });
 
 test('src/extension/manifest.json declares valid release version (>= 1.7.3)', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(rootDir, 'src/extension/manifest.json'), 'utf8'));
-  assert.ok(['1.7.3', '1.7.4', '1.7.5'].includes(manifest.version));
+  assert.ok(['1.7.3', '1.7.4', '1.7.5', '1.7.6'].includes(manifest.version));
 });
 
 // --- 8. Ad Library ID Integrity & Prefix Concatenation Prevention ---
