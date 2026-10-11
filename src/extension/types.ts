@@ -339,6 +339,13 @@ export interface ExtensionLead {
   discoveredAt: string;
   sampleCopy?: string;
   sampleCta?: string;
+  // Geographic Qualification (v1.7.5 Hardening)
+  targetCountryCode?: string;
+  businessCountryCode?: string;
+  geographicClassification?: GeographicClassification;
+  businessLocationConfidence?: LocationConfidence;
+  businessLocationEvidence?: string[];
+  businessLocationReason?: string;
   // Relevance evaluation fields
   relevanceScore?: number;
   relevanceDecision?: RelevanceDecision;
@@ -372,6 +379,26 @@ export interface ExtensionLead {
   // Prompt 6: Website Deep Verification
   websiteVerificationStatus?: WebsiteVerificationStatus;
   websiteVerification?: WebsiteVerificationRecord;
+}
+
+export type GeographicClassification =
+  | 'LOCAL_VERIFIED'
+  | 'LOCAL_PROBABLE'
+  | 'FOREIGN_VERIFIED'
+  | 'LOCATION_UNKNOWN';
+
+export type LocationConfidence = 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
+
+export interface GeographicEvaluation {
+  classification: GeographicClassification;
+  targetCountryCode: string;
+  businessCountryCode?: string;
+  confidence: LocationConfidence;
+  evidence: string[];
+  reason: string;
+  isLocal: boolean;
+  isForeign: boolean;
+  isUnknown: boolean;
 }
 
 export type IdentityConfidence = 'STRONG' | 'MODERATE' | 'WEAK' | 'UNRESOLVED' | 'AMBIGUOUS';
@@ -449,6 +476,9 @@ export interface StartResearchPayload {
   maxFinalUniqueRelevantLeads?: number;
   // Legacy backward-compatibility
   maxResults?: number;
+  // Geographic qualification mode
+  strictLocalMode?: boolean;
+  allowProbableLocal?: boolean;
 }
 
 export interface ExtensionMessage {

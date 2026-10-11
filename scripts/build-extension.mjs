@@ -300,6 +300,11 @@ function createZipArchive(sourceDir, zipPath) {
   });
 }
 
+if (process.argv.includes('--unpacked-only')) {
+  console.log('[build-extension] --unpacked-only: Successfully built unpacked extension in', outDir);
+  process.exit(0);
+}
+
 const releaseZipPath1 = path.join(rootDir, 'extension.zip');
 const releaseZipPath3 = path.join(rootDir, 'dist/leadnoria-v1.0.0.zip');
 const releaseZipPath4 = path.join(rootDir, 'dist/leadnoria-v1.1.0.zip');

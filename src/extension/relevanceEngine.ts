@@ -55,6 +55,8 @@ export interface ResearchIntent {
   secondaryKeywords?: string[];
   exclusions?: string[];
   locationCode?: string;
+  strictLocalMode?: boolean;
+  allowProbableLocal?: boolean;
 }
 
 export interface CandidateEvidence {
@@ -489,7 +491,8 @@ export function compileResearchIntent(
   mode: ResearchMode,
   keywords: string[],
   presetId?: string,
-  locationCode = 'US'
+  locationCode = 'US',
+  options?: { strictLocalMode?: boolean; allowProbableLocal?: boolean }
 ): ResearchIntent {
   const cleanKeywords = keywords.map(k => k.trim()).filter(Boolean);
 
@@ -507,7 +510,9 @@ export function compileResearchIntent(
         primaryKeywords: preset.primary_keywords,
         secondaryKeywords: preset.secondary_keywords,
         exclusions: preset.optional_exclusions || [],
-        locationCode
+        locationCode,
+        strictLocalMode: options?.strictLocalMode,
+        allowProbableLocal: options?.allowProbableLocal
       };
     }
   }
@@ -518,7 +523,9 @@ export function compileResearchIntent(
     primaryKeywords: cleanKeywords,
     secondaryKeywords: [],
     exclusions: [],
-    locationCode
+    locationCode,
+    strictLocalMode: options?.strictLocalMode,
+    allowProbableLocal: options?.allowProbableLocal
   };
 }
 

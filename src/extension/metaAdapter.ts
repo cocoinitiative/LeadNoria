@@ -15,6 +15,7 @@ import type {
 } from './types.ts';
 import { LeadRelevanceEngine } from './relevanceEngine.ts';
 import type { ResearchIntent } from './relevanceEngine.ts';
+import { evaluateGeographicOrigin } from './geographicClassifier.ts';
 
 /**
  * Checks whether a given URL is a Meta Ad Library search or listing page.
@@ -852,7 +853,39 @@ export function aggregateCandidatesToLeads(
       }
     }
 
-    // 2. Candidate is RELEVANT (or no intent was provided for raw aggregation)
+    // 2. Evaluate geographic physical origin
+    const combinedBodyCopy = cands.map(c => c.bodyCopy).filter(Boolean).join(' ');
+    const combinedCta = cands.map(c => c.ctaText).filter(Boolean).join(' ');
+    const bestFbForGeo = cands.find(c => Boolean(c.facebookPageUrl))?.facebookPageUrl;
+    const bestDestForGeo = cands.find(c => Boolean(c.destinationUrl));
+    const geoEval = evaluateGeographicOrigin({
+      pageName: cleanName,
+      pageUrl: bestFbForGeo,
+      destinationUrl: bestDestForGeo?.destinationUrl,
+      destinationDomain: bestDestForGeo?.destinationDomain,
+      bodyCopy: combinedBodyCopy,
+      ctaText: combinedCta
+    }, locationCode);
+
+    if (actualIntent?.strictLocalMode) {
+      if (geoEval.classification === 'FOREIGN_VERIFIED') {
+        rejectedCount++;
+        reasonCodes['FOREIGN_BUSINESS'] = (reasonCodes['FOREIGN_BUSINESS'] || 0) + 1;
+        continue;
+      }
+      if (geoEval.classification === 'LOCATION_UNKNOWN') {
+        uncertainCount++;
+        reasonCodes['LOCATION_UNKNOWN'] = (reasonCodes['LOCATION_UNKNOWN'] || 0) + 1;
+        continue;
+      }
+      if (geoEval.classification === 'LOCAL_PROBABLE' && actualIntent.allowProbableLocal === false) {
+        uncertainCount++;
+        reasonCodes['LOCAL_PROBABLE_DISALLOWED'] = (reasonCodes['LOCAL_PROBABLE_DISALLOWED'] || 0) + 1;
+        continue;
+      }
+    }
+
+    // 3. Candidate is RELEVANT (or no intent was provided for raw aggregation)
     const existing = leadMap.get(key);
 
     if (existing) {
@@ -895,6 +928,20 @@ export function aggregateCandidatesToLeads(
       }
       existing.activeAdLibraryIds = existing.activeAdLibraryIds.filter(id => existing.adLibraryIds.includes(id));
       existing.activeAdCount = existing.activeAdLibraryIds.length;
+
+      // Update location intelligence if newly corroborated
+      if (
+        !existing.geographicClassification ||
+        existing.geographicClassification === 'LOCATION_UNKNOWN' ||
+        (existing.geographicClassification === 'LOCAL_PROBABLE' && geoEval.classification === 'LOCAL_VERIFIED')
+      ) {
+        existing.targetCountryCode = geoEval.targetCountryCode;
+        existing.businessCountryCode = geoEval.businessCountryCode;
+        existing.geographicClassification = geoEval.classification;
+        existing.businessLocationConfidence = geoEval.confidence;
+        existing.businessLocationEvidence = geoEval.evidence;
+        existing.businessLocationReason = geoEval.reason;
+      }
 
       if (evalResult) {
         existing.relevanceScore = Math.max(existing.relevanceScore || 0, evalResult.score);
@@ -950,6 +997,12 @@ export function aggregateCandidatesToLeads(
         matchedKeywords: matchedKws.length > 0 ? matchedKws : (actualIntent?.primaryKeywords?.slice(0, 1) || []),
         locationCode,
         locationName,
+        targetCountryCode: geoEval.targetCountryCode,
+        businessCountryCode: geoEval.businessCountryCode,
+        geographicClassification: geoEval.classification,
+        businessLocationConfidence: geoEval.confidence,
+        businessLocationEvidence: geoEval.evidence,
+        businessLocationReason: geoEval.reason,
         status: webState === 'found' ? 'QUALIFIED' : 'REVIEW_REQUIRED',
         discoveredAt: new Date().toISOString(),
         sampleCopy: bestCopy,
@@ -1039,6 +1092,11 @@ export function exportLeadsToCsv(leads: ExtensionLead[], run?: ExtensionResearch
     'Matched Keywords',
     'Location Code',
     'Location Name',
+    'Target Country Code',
+    'Business Country Code',
+    'Geographic Classification',
+    'Location Confidence',
+    'Location Evidence',
     'Ad Library IDs',
     'Meta Ad Library URL',
     'Relevance Decision',
@@ -1072,6 +1130,11 @@ export function exportLeadsToCsv(leads: ExtensionLead[], run?: ExtensionResearch
     sanitizeCsvField((l.matchedKeywords || []).join('; ')),
     sanitizeCsvField(l.locationCode || ''),
     sanitizeCsvField(l.locationName || ''),
+    sanitizeCsvField(l.targetCountryCode || l.locationCode || ''),
+    sanitizeCsvField(l.businessCountryCode || ''),
+    sanitizeCsvField(l.geographicClassification || (l.businessCountryCode ? 'LOCAL_VERIFIED' : 'LOCATION_UNKNOWN')),
+    sanitizeCsvField(l.businessLocationConfidence || 'NONE'),
+    sanitizeCsvField((l.businessLocationEvidence || []).join(' | ')),
     sanitizeCsvField((l.adLibraryIds || []).join('; ')),
     sanitizeCsvField(l.adLibraryUrl || ''),
     sanitizeCsvField(l.relevanceDecision || 'RELEVANT'),

@@ -19,6 +19,7 @@ import type {
 } from './types.ts';
 import { LeadRelevanceEngine } from './relevanceEngine.ts';
 import type { ResearchIntent } from './relevanceEngine.ts';
+import { evaluateGeographicOrigin } from './geographicClassifier.ts';
 import {
   evaluateStrictRelevanceV3,
   recordCandidateEvidenceInProfile,
@@ -48,6 +49,8 @@ export interface BatchProcessOptions {
   entityIndex?: EntityResolutionIndex;
   existingUncertainMap?: Map<string, UncertainEntityRecord>;
   alreadyExpandedEntityIds?: Set<string>;
+  seenRejectedEntityKeys?: Set<string>;
+  seenUncertainEntityKeys?: Set<string>;
 }
 
 export interface BatchProcessResult {
@@ -104,6 +107,8 @@ export async function processBatch(
   const updatedEntities: ExtensionLead[] = [];
   const uncertainEntities: UncertainEntityRecord[] = [];
   const existingUncertainMap = options.existingUncertainMap || new Map<string, UncertainEntityRecord>();
+  const seenRejectedEntityKeys = options.seenRejectedEntityKeys || new Set<string>();
+  const seenUncertainEntityKeys = options.seenUncertainEntityKeys || new Set<string>();
   const newEvidence: Array<{ canonicalKey: string; evidence: any }> = [];
   const newAdIdsAdded: string[] = [];
   const newEntityKeysAdded: string[] = [];
@@ -118,10 +123,10 @@ export async function processBatch(
     duplicateAdRecordsRemoved: currentCounters.duplicateAdRecordsRemoved ?? 0,
     entityMergesCount: currentCounters.entityMergesCount ?? 0,
     finalUniqueLeads: currentCounters.finalUniqueLeads,
-    uniqueEntitiesObserved: currentCounters.uniqueEntitiesObserved ?? currentCounters.finalUniqueLeads,
-    relevantEntities: currentCounters.relevantEntities ?? currentCounters.finalUniqueLeads,
-    uncertainEntities: currentCounters.uncertainEntities ?? currentCounters.uncertainCandidates,
-    notRelevantEntities: currentCounters.notRelevantEntities ?? currentCounters.notRelevantCandidates,
+    uniqueEntitiesObserved: currentCounters.uniqueEntitiesObserved ?? (existingEntitiesMap.size + seenRejectedEntityKeys.size + seenUncertainEntityKeys.size),
+    relevantEntities: currentCounters.relevantEntities ?? existingEntitiesMap.size,
+    uncertainEntities: currentCounters.uncertainEntities ?? seenUncertainEntityKeys.size,
+    notRelevantEntities: currentCounters.notRelevantEntities ?? seenRejectedEntityKeys.size,
     keywordsCompleted: currentCounters.keywordsCompleted ?? 0,
     keywordsTotal: currentCounters.keywordsTotal ?? 1,
     finalUniqueRelevantLeads: currentCounters.finalUniqueRelevantLeads ?? currentCounters.finalUniqueLeads,
@@ -155,140 +160,225 @@ export async function processBatch(
     const mergeDecision = evaluateEntityMerge(cand, existingEntitiesMap, entityIndex);
 
     if (mergeDecision.shouldMerge) {
-      // Corroborated entity match! Merge into target entity
-      const existingEntity = existingEntitiesMap.get(mergeDecision.targetKey);
-      if (existingEntity) {
-        counters.duplicatesRemoved++;
-        counters.entityMergesCount = (counters.entityMergesCount || 0) + 1;
-        mergeCandidateIntoEntity(existingEntity, cand, mergeDecision, currentKeyword);
+        // Corroborated entity match! Merge into target entity
+        const existingEntity = existingEntitiesMap.get(mergeDecision.targetKey);
+        if (existingEntity) {
+          counters.duplicatesRemoved++;
+          counters.entityMergesCount = (counters.entityMergesCount || 0) + 1;
+          mergeCandidateIntoEntity(existingEntity, cand, mergeDecision, currentKeyword);
 
-        // Aggregate creative signals into existing entity with anti-inflation
-        const newSignals = extractCreativeSignalsFromCandidate(cand);
-        existingEntity.creativeSignals = aggregateCreativeSignals([
-          ...(existingEntity.creativeSignals || []),
-          ...newSignals
-        ]);
+          // Aggregate creative signals into existing entity with anti-inflation
+          const newSignals = extractCreativeSignalsFromCandidate(cand);
+          existingEntity.creativeSignals = aggregateCreativeSignals([
+            ...(existingEntity.creativeSignals || []),
+            ...newSignals
+          ]);
 
-        entityIndex.indexEntity(mergeDecision.targetKey, existingEntity);
+          // Re-evaluate geographic origin if new signals provide stronger corroboration
+          const updatedGeo = evaluateGeographicOrigin({
+            pageName: existingEntity.name,
+            pageUrl: existingEntity.facebookPageUrl,
+            destinationUrl: existingEntity.destinationUrl,
+            destinationDomain: existingEntity.destinationDomain,
+            bodyCopy: [existingEntity.sampleCopy, cand.bodyCopy].filter(Boolean).join(' '),
+            ctaText: [existingEntity.sampleCta, cand.ctaText].filter(Boolean).join(' ')
+          }, countryCode);
 
-        if (!updatedEntities.some(e => e.id === existingEntity.id)) {
-          updatedEntities.push(existingEntity);
+          if (
+            !existingEntity.geographicClassification ||
+            existingEntity.geographicClassification === 'LOCATION_UNKNOWN' ||
+            (existingEntity.geographicClassification === 'LOCAL_PROBABLE' && updatedGeo.classification === 'LOCAL_VERIFIED')
+          ) {
+            existingEntity.targetCountryCode = updatedGeo.targetCountryCode;
+            existingEntity.businessCountryCode = updatedGeo.businessCountryCode;
+            existingEntity.geographicClassification = updatedGeo.classification;
+            existingEntity.businessLocationConfidence = updatedGeo.confidence;
+            existingEntity.businessLocationEvidence = updatedGeo.evidence;
+            existingEntity.businessLocationReason = updatedGeo.reason;
+          }
+
+          entityIndex.indexEntity(mergeDecision.targetKey, existingEntity);
+
+          if (!updatedEntities.some(e => e.id === existingEntity.id)) {
+            updatedEntities.push(existingEntity);
+          }
+          continue;
         }
-        continue;
-      }
-    }
-
-    // 3. New candidate entity
-    const entityKey = mergeDecision.targetKey;
-    if (!seenEntityKeys.has(entityKey)) {
-      counters.uniqueEntitiesObserved = (counters.uniqueEntitiesObserved || 0) + 1;
-      seenEntityKeys.add(entityKey);
-      newEntityKeysAdded.push(entityKey);
-    }
-
-    // 4. Evidence Waterfall & Strict Relevance v3 Evaluation
-    let evalResult: any = null;
-    let v3Result: any = null;
-    if (intent) {
-      evalResult = LeadRelevanceEngine.evaluateCandidate(cand, intent);
-      v3Result = evaluateStrictRelevanceV3({
-        advertiserName: cand.pageName,
-        adText: cand.bodyCopy,
-        destinationUrl: cand.destinationUrl,
-        destinationDomain: cand.destinationDomain,
-        facebookPageUrl: cand.facebookPageUrl,
-        ctaText: cand.ctaText,
-        matchedKeyword: cand.observedKeyword || currentKeyword
-      }, intent);
-
-      if (v3Result.reasonCode) {
-        counters.reasonCodes![v3Result.reasonCode] = (counters.reasonCodes![v3Result.reasonCode] || 0) + 1;
       }
 
-      if (v3Result.decision === 'NOT_RELEVANT') {
-        counters.notRelevantCandidates++;
-        counters.notRelevantEntities = (counters.notRelevantEntities || 0) + 1;
-        // Non-relevant entity is recorded for audit/stats but not added to active leads
-        continue;
+      // 3. New candidate entity
+      const entityKey = mergeDecision.targetKey;
+      if (!seenEntityKeys.has(entityKey)) {
+        counters.uniqueEntitiesObserved = (counters.uniqueEntitiesObserved || 0) + 1;
+        seenEntityKeys.add(entityKey);
+        newEntityKeysAdded.push(entityKey);
       }
 
-      if (v3Result.decision === 'UNCERTAIN') {
-        counters.uncertainCandidates++;
-        counters.uncertainEntities = (counters.uncertainEntities || 0) + 1;
-        // Construct durable UncertainEntityRecord and store in internal queue
-        const existingUnc = existingUncertainMap.get(entityKey);
-        const uncRecord = classifyUncertainCandidate(cand, v3Result, intent, entityKey, existingUnc);
-        existingUncertainMap.set(entityKey, uncRecord);
-        uncertainEntities.push(uncRecord);
-        // Uncertain entity is excluded from qualified leads per Strict Relevance Gate v3
-        continue;
+      // 4. Evidence Waterfall & Strict Relevance v3 Evaluation
+      let evalResult: any = null;
+      let v3Result: any = null;
+      if (intent) {
+        evalResult = LeadRelevanceEngine.evaluateCandidate(cand, intent);
+        v3Result = evaluateStrictRelevanceV3({
+          advertiserName: cand.pageName,
+          adText: cand.bodyCopy,
+          destinationUrl: cand.destinationUrl,
+          destinationDomain: cand.destinationDomain,
+          facebookPageUrl: cand.facebookPageUrl,
+          ctaText: cand.ctaText,
+          matchedKeyword: cand.observedKeyword || currentKeyword
+        }, intent);
+
+        if (v3Result.reasonCode) {
+          counters.reasonCodes![v3Result.reasonCode] = (counters.reasonCodes![v3Result.reasonCode] || 0) + 1;
+        }
+
+        if (v3Result.decision === 'NOT_RELEVANT') {
+          counters.notRelevantCandidates++;
+          if (!existingEntitiesMap.has(entityKey)) {
+            seenRejectedEntityKeys.add(entityKey);
+            seenUncertainEntityKeys.delete(entityKey);
+          }
+          counters.notRelevantEntities = seenRejectedEntityKeys.size;
+          counters.uncertainEntities = seenUncertainEntityKeys.size;
+          counters.relevantEntities = existingEntitiesMap.size;
+          counters.uniqueEntitiesObserved = counters.relevantEntities + counters.notRelevantEntities + counters.uncertainEntities;
+          // Non-relevant entity is recorded for audit/stats but not added to active leads
+          continue;
+        }
+
+        if (v3Result.decision === 'UNCERTAIN') {
+          counters.uncertainCandidates++;
+          if (!existingEntitiesMap.has(entityKey) && !seenRejectedEntityKeys.has(entityKey)) {
+            seenUncertainEntityKeys.add(entityKey);
+          }
+          counters.notRelevantEntities = seenRejectedEntityKeys.size;
+          counters.uncertainEntities = seenUncertainEntityKeys.size;
+          counters.relevantEntities = existingEntitiesMap.size;
+          counters.uniqueEntitiesObserved = counters.relevantEntities + counters.notRelevantEntities + counters.uncertainEntities;
+          // Construct durable UncertainEntityRecord and store in internal queue
+          const existingUnc = existingUncertainMap.get(entityKey);
+          const uncRecord = classifyUncertainCandidate(cand, v3Result, intent, entityKey, existingUnc);
+          existingUncertainMap.set(entityKey, uncRecord);
+          uncertainEntities.push(uncRecord);
+          // Uncertain entity is excluded from qualified leads per Strict Relevance Gate v3
+          continue;
+        }
       }
-    }
 
-    // 5. Qualified relevant entity
-    counters.relevantCandidates++;
-    counters.relevantEntities = (counters.relevantEntities || 0) + 1;
+      // 5. Geographic physical location evaluation
+      const cleanName = normalizeAdvertiserName(cand.pageName);
+      const pageNorm = normalizeFacebookPage(cand.facebookPageUrl, cand.facebookPageId);
+      const domainNorm = normalizeDestinationDomain(cand.destinationUrl, cand.destinationDomain);
 
-    // 6. Global safety ceiling check (MAX 5,000)
-    const currentLeadCount = counters.finalUniqueRelevantLeads || counters.finalUniqueLeads;
-    if (currentLeadCount >= effectiveCeiling) {
-      safetyLimitReached = true;
-      break;
-    }
+      const geoEval = evaluateGeographicOrigin({
+        pageName: cleanName,
+        pageUrl: pageNorm.canonicalUrl || cand.facebookPageUrl,
+        destinationUrl: domainNorm.cleanUrl || cand.destinationUrl,
+        destinationDomain: domainNorm.canonicalDomain || cand.destinationDomain,
+        bodyCopy: cand.bodyCopy,
+        ctaText: cand.ctaText
+      }, countryCode);
 
-    // Construct unified ExtensionLead with identity metadata and evidence coverage
-    const cleanName = normalizeAdvertiserName(cand.pageName);
-    const pageNorm = normalizeFacebookPage(cand.facebookPageUrl, cand.facebookPageId);
-    const domainNorm = normalizeDestinationDomain(cand.destinationUrl, cand.destinationDomain);
-    const webState = (domainNorm.cleanUrl || cand.destinationUrl) ? 'found' : 'not_found';
-    const fbState = (pageNorm.canonicalUrl || cand.facebookPageUrl) ? 'found' : 'not_found';
+      if (intent?.strictLocalMode) {
+        if (geoEval.classification === 'FOREIGN_VERIFIED') {
+          counters.notRelevantCandidates++;
+          if (!existingEntitiesMap.has(entityKey)) {
+            seenRejectedEntityKeys.add(entityKey);
+            seenUncertainEntityKeys.delete(entityKey);
+          }
+          counters.notRelevantEntities = seenRejectedEntityKeys.size;
+          counters.uncertainEntities = seenUncertainEntityKeys.size;
+          counters.relevantEntities = existingEntitiesMap.size;
+          counters.uniqueEntitiesObserved = counters.relevantEntities + counters.notRelevantEntities + counters.uncertainEntities;
+          if (counters.reasonCodes) {
+            counters.reasonCodes['FOREIGN_BUSINESS'] = (counters.reasonCodes['FOREIGN_BUSINESS'] || 0) + 1;
+          }
+          continue;
+        }
+        if (geoEval.classification === 'LOCATION_UNKNOWN' || (geoEval.classification === 'LOCAL_PROBABLE' && intent.allowProbableLocal === false)) {
+          counters.uncertainCandidates++;
+          if (!existingEntitiesMap.has(entityKey) && !seenRejectedEntityKeys.has(entityKey)) {
+            seenUncertainEntityKeys.add(entityKey);
+          }
+          counters.notRelevantEntities = seenRejectedEntityKeys.size;
+          counters.uncertainEntities = seenUncertainEntityKeys.size;
+          counters.relevantEntities = existingEntitiesMap.size;
+          counters.uniqueEntitiesObserved = counters.relevantEntities + counters.notRelevantEntities + counters.uncertainEntities;
+          const code = geoEval.classification === 'LOCATION_UNKNOWN' ? 'LOCATION_UNKNOWN' : 'LOCAL_PROBABLE_DISALLOWED';
+          if (counters.reasonCodes) {
+            counters.reasonCodes[code] = (counters.reasonCodes[code] || 0) + 1;
+          }
+          continue;
+        }
+      }
 
-    const newLead: ExtensionLead = {
-      id: `lead_${runId}_${entityKey}`,
-      name: cleanName,
-      canonicalName: cleanName,
-      canonicalPageId: pageNorm.pageId,
-      canonicalPageSlug: pageNorm.pageSlug,
-      facebookPageName: cleanName,
-      facebookPageUrl: pageNorm.canonicalUrl || cand.facebookPageUrl,
-      facebookPageState: fbState,
-      destinationUrl: domainNorm.cleanUrl || cand.destinationUrl,
-      destinationDomain: domainNorm.canonicalDomain || cand.destinationDomain,
-      observedDomains: domainNorm.canonicalDomain ? [domainNorm.canonicalDomain] : [],
-      observedUrls: cand.destinationUrl ? [cand.destinationUrl] : [],
-      aliases: [],
-      websiteState: webState,
-      adCount: 1,
-      activeAdCount: 1,
-      adLibraryIds: [cand.libraryId],
-      adLibraryUrl: `https://www.facebook.com/ads/library/?id=${cand.libraryId}`,
-      matchedKeywords: currentKeyword ? [currentKeyword] : (intent?.primaryKeywords?.slice(0, 1) || []),
-      matchedQueries: currentKeyword ? [currentKeyword] : (intent?.primaryKeywords?.slice(0, 1) || []),
-      locationCode: countryCode,
-      locationName: locationName,
-      status: webState === 'found' ? 'QUALIFIED' : 'REVIEW_REQUIRED',
-      discoveredAt: new Date().toISOString(),
-      sampleCopy: cand.bodyCopy,
-      sampleCta: cand.ctaText,
-      identityConfidence: mergeDecision.confidence,
-      relationshipType: mergeDecision.relationshipType,
-      mergeHistory: [],
-      relevanceScore: v3Result?.score ?? evalResult?.score,
-      relevanceDecision: v3Result?.decision ?? evalResult?.decision ?? 'RELEVANT',
-      relevanceConfidence: v3Result?.confidence ?? evalResult?.confidence,
-      relevanceReasons: v3Result?.reasons ?? evalResult?.reasons,
-      relevanceMatchedTerms: v3Result?.matchedTerms ?? evalResult?.matchedTerms,
-      relevanceEvidence: v3Result?.evidence ?? evalResult?.evidence,
-      relevanceStrategyVersion: v3Result?.strategyVersion ?? evalResult?.strategyVersion,
-      engineVersion: v3Result?.engineVersion ?? evalResult?.engineVersion,
-      presetVersion: v3Result?.presetVersion ?? evalResult?.presetVersion,
-      evidenceCoverage: v3Result?.evidenceCoverage,
-      evidenceExplanation: v3Result?.explanation,
-      uniqueEvidenceSignals: v3Result?.uniqueEvidenceSignals,
-      observedEvidenceOccurrences: v3Result?.observedEvidenceOccurrences,
-      evaluationStatus: 'RELEVANT',
-      creativeSignals: extractCreativeSignalsFromCandidate(cand)
-    };
+      // 6. Qualified relevant entity
+      counters.relevantCandidates++;
+
+      // 7. Global safety ceiling check (MAX 5,000)
+      const currentLeadCount = counters.finalUniqueRelevantLeads || counters.finalUniqueLeads;
+      if (currentLeadCount >= effectiveCeiling) {
+        safetyLimitReached = true;
+        break;
+      }
+
+      // Construct unified ExtensionLead with identity metadata and evidence coverage
+      const webState = (domainNorm.cleanUrl || cand.destinationUrl) ? 'found' : 'not_found';
+      const fbState = (pageNorm.canonicalUrl || cand.facebookPageUrl) ? 'found' : 'not_found';
+
+      const newLead: ExtensionLead = {
+        id: `lead_${runId}_${entityKey}`,
+        name: cleanName,
+        canonicalName: cleanName,
+        canonicalPageId: pageNorm.pageId,
+        canonicalPageSlug: pageNorm.pageSlug,
+        facebookPageName: cleanName,
+        facebookPageUrl: pageNorm.canonicalUrl || cand.facebookPageUrl,
+        facebookPageState: fbState,
+        destinationUrl: domainNorm.cleanUrl || cand.destinationUrl,
+        destinationDomain: domainNorm.canonicalDomain || cand.destinationDomain,
+        observedDomains: domainNorm.canonicalDomain ? [domainNorm.canonicalDomain] : [],
+        observedUrls: cand.destinationUrl ? [cand.destinationUrl] : [],
+        aliases: [],
+        websiteState: webState,
+        adCount: 1,
+        activeAdCount: 1,
+        adLibraryIds: [cand.libraryId],
+        adLibraryUrl: `https://www.facebook.com/ads/library/?id=${cand.libraryId}`,
+        matchedKeywords: currentKeyword ? [currentKeyword] : (intent?.primaryKeywords?.slice(0, 1) || []),
+        matchedQueries: currentKeyword ? [currentKeyword] : (intent?.primaryKeywords?.slice(0, 1) || []),
+        locationCode: countryCode,
+        locationName: locationName,
+        targetCountryCode: geoEval.targetCountryCode,
+        businessCountryCode: geoEval.businessCountryCode,
+        geographicClassification: geoEval.classification,
+        businessLocationConfidence: geoEval.confidence,
+        businessLocationEvidence: geoEval.evidence,
+        businessLocationReason: geoEval.reason,
+        status: webState === 'found' ? 'QUALIFIED' : 'REVIEW_REQUIRED',
+        discoveredAt: new Date().toISOString(),
+        sampleCopy: cand.bodyCopy,
+        sampleCta: cand.ctaText,
+        identityConfidence: mergeDecision.confidence,
+        relationshipType: mergeDecision.relationshipType,
+        mergeHistory: [],
+        relevanceScore: v3Result?.score ?? evalResult?.score,
+        relevanceDecision: v3Result?.decision ?? evalResult?.decision ?? 'RELEVANT',
+        relevanceConfidence: v3Result?.confidence ?? evalResult?.confidence,
+        relevanceReasons: v3Result?.reasons ?? evalResult?.reasons,
+        relevanceMatchedTerms: v3Result?.matchedTerms ?? evalResult?.matchedTerms,
+        relevanceEvidence: v3Result?.evidence ?? evalResult?.evidence,
+        relevanceStrategyVersion: v3Result?.strategyVersion ?? evalResult?.strategyVersion,
+        engineVersion: v3Result?.engineVersion ?? evalResult?.engineVersion,
+        presetVersion: v3Result?.presetVersion ?? evalResult?.presetVersion,
+        evidenceCoverage: v3Result?.evidenceCoverage,
+        evidenceExplanation: v3Result?.explanation,
+        uniqueEvidenceSignals: v3Result?.uniqueEvidenceSignals,
+        observedEvidenceOccurrences: v3Result?.observedEvidenceOccurrences,
+        evaluationStatus: 'RELEVANT',
+        creativeSignals: extractCreativeSignalsFromCandidate(cand)
+      };
 
     // Check advertiser expansion eligibility
     const expEligibility = checkAdvertiserExpansionEligibility(
@@ -301,6 +391,8 @@ export async function processBatch(
     existingEntitiesMap.set(entityKey, newLead);
     entityIndex.indexEntity(entityKey, newLead);
     updatedEntities.push(newLead);
+    seenRejectedEntityKeys.delete(entityKey);
+    seenUncertainEntityKeys.delete(entityKey);
 
     if (evalResult?.evidence) {
       newEvidence.push({
@@ -311,6 +403,10 @@ export async function processBatch(
 
     counters.finalUniqueLeads++;
     counters.finalUniqueRelevantLeads = counters.finalUniqueLeads;
+    counters.relevantEntities = existingEntitiesMap.size;
+    counters.notRelevantEntities = seenRejectedEntityKeys.size;
+    counters.uncertainEntities = seenUncertainEntityKeys.size;
+    counters.uniqueEntitiesObserved = counters.relevantEntities + counters.notRelevantEntities + counters.uncertainEntities;
     newUniqueRelevantLeadsCount++;
 
     if (counters.finalUniqueLeads >= effectiveCeiling) {

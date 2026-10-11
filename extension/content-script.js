@@ -1508,7 +1508,7 @@
       adCopyText: rawAdCopy.toLowerCase()
     };
   }
-  function compileResearchIntent(mode, keywords, presetId, locationCode = "US") {
+  function compileResearchIntent(mode, keywords, presetId, locationCode = "US", options) {
     const cleanKeywords = keywords.map((k) => k.trim()).filter(Boolean);
     if (mode === "PRESET" && presetId) {
       const preset = RESEARCH_PRESETS.find((p) => p.preset_id === presetId);
@@ -1524,7 +1524,9 @@
           primaryKeywords: preset.primary_keywords,
           secondaryKeywords: preset.secondary_keywords,
           exclusions: preset.optional_exclusions || [],
-          locationCode
+          locationCode,
+          strictLocalMode: options?.strictLocalMode,
+          allowProbableLocal: options?.allowProbableLocal
         };
       }
     }
@@ -1534,7 +1536,9 @@
       primaryKeywords: cleanKeywords,
       secondaryKeywords: [],
       exclusions: [],
-      locationCode
+      locationCode,
+      strictLocalMode: options?.strictLocalMode,
+      allowProbableLocal: options?.allowProbableLocal
     };
   }
   var RELEVANCE_STRATEGY_VERSION, RELEVANCE_ENGINE_VERSION, BOUNDED_TAXONOMY, NEGATIVE_CATEGORIES, ACCESSORY_ONLY_INDICATORS, STOP_WORDS, LeadRelevanceEngine;

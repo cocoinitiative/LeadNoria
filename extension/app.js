@@ -16068,7 +16068,7 @@ function normalizeEvidence(evidence) {
     adCopyText: rawAdCopy.toLowerCase()
   };
 }
-function compileResearchIntent(mode, keywords, presetId, locationCode = "US") {
+function compileResearchIntent(mode, keywords, presetId, locationCode = "US", options) {
   const cleanKeywords = keywords.map((k) => k.trim()).filter(Boolean);
   if (mode === "PRESET" && presetId) {
     const preset = RESEARCH_PRESETS.find((p) => p.preset_id === presetId);
@@ -16084,7 +16084,9 @@ function compileResearchIntent(mode, keywords, presetId, locationCode = "US") {
         primaryKeywords: preset.primary_keywords,
         secondaryKeywords: preset.secondary_keywords,
         exclusions: preset.optional_exclusions || [],
-        locationCode
+        locationCode,
+        strictLocalMode: options?.strictLocalMode,
+        allowProbableLocal: options?.allowProbableLocal
       };
     }
   }
@@ -16094,7 +16096,9 @@ function compileResearchIntent(mode, keywords, presetId, locationCode = "US") {
     primaryKeywords: cleanKeywords,
     secondaryKeywords: [],
     exclusions: [],
-    locationCode
+    locationCode,
+    strictLocalMode: options?.strictLocalMode,
+    allowProbableLocal: options?.allowProbableLocal
   };
 }
 var RELEVANCE_STRATEGY_VERSION, RELEVANCE_ENGINE_VERSION, BOUNDED_TAXONOMY, NEGATIVE_CATEGORIES, ACCESSORY_ONLY_INDICATORS, STOP_WORDS, LeadRelevanceEngine;
@@ -24281,6 +24285,11 @@ function exportLeadsToCsv(leads, run) {
     "Matched Keywords",
     "Location Code",
     "Location Name",
+    "Target Country Code",
+    "Business Country Code",
+    "Geographic Classification",
+    "Location Confidence",
+    "Location Evidence",
     "Ad Library IDs",
     "Meta Ad Library URL",
     "Relevance Decision",
@@ -24313,6 +24322,11 @@ function exportLeadsToCsv(leads, run) {
     sanitizeCsvField((l.matchedKeywords || []).join("; ")),
     sanitizeCsvField(l.locationCode || ""),
     sanitizeCsvField(l.locationName || ""),
+    sanitizeCsvField(l.targetCountryCode || l.locationCode || ""),
+    sanitizeCsvField(l.businessCountryCode || ""),
+    sanitizeCsvField(l.geographicClassification || (l.businessCountryCode ? "LOCAL_VERIFIED" : "LOCATION_UNKNOWN")),
+    sanitizeCsvField(l.businessLocationConfidence || "NONE"),
+    sanitizeCsvField((l.businessLocationEvidence || []).join(" | ")),
     sanitizeCsvField((l.adLibraryIds || []).join("; ")),
     sanitizeCsvField(l.adLibraryUrl || ""),
     sanitizeCsvField(l.relevanceDecision || "RELEVANT"),

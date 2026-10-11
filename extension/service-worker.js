@@ -1507,7 +1507,7 @@ function normalizeEvidence(evidence) {
     adCopyText: rawAdCopy.toLowerCase()
   };
 }
-function compileResearchIntent(mode, keywords, presetId, locationCode = "US") {
+function compileResearchIntent(mode, keywords, presetId, locationCode = "US", options) {
   const cleanKeywords = keywords.map((k) => k.trim()).filter(Boolean);
   if (mode === "PRESET" && presetId) {
     const preset = RESEARCH_PRESETS.find((p) => p.preset_id === presetId);
@@ -1523,7 +1523,9 @@ function compileResearchIntent(mode, keywords, presetId, locationCode = "US") {
         primaryKeywords: preset.primary_keywords,
         secondaryKeywords: preset.secondary_keywords,
         exclusions: preset.optional_exclusions || [],
-        locationCode
+        locationCode,
+        strictLocalMode: options?.strictLocalMode,
+        allowProbableLocal: options?.allowProbableLocal
       };
     }
   }
@@ -1533,7 +1535,9 @@ function compileResearchIntent(mode, keywords, presetId, locationCode = "US") {
     primaryKeywords: cleanKeywords,
     secondaryKeywords: [],
     exclusions: [],
-    locationCode
+    locationCode,
+    strictLocalMode: options?.strictLocalMode,
+    allowProbableLocal: options?.allowProbableLocal
   };
 }
 var RELEVANCE_STRATEGY_VERSION, RELEVANCE_ENGINE_VERSION, BOUNDED_TAXONOMY, NEGATIVE_CATEGORIES, ACCESSORY_ONLY_INDICATORS, STOP_WORDS, LeadRelevanceEngine;
@@ -3193,6 +3197,313 @@ async function getSeenEntityKeys(runId) {
 
 // src/extension/bulkProcessor.ts
 init_relevanceEngine();
+
+// src/extension/geographicClassifier.ts
+var BD_PHONE_REGEX = /(?:\+880\s*1[3-9]\d{8}|8801[3-9]\d{8}|\b01[3-9]\d{8}\b)/;
+var IN_PHONE_REGEX = /(?:\+91[\s\-]?[6-9]\d{9}|\b[6-9]\d{9}\b)/;
+var UK_PHONE_REGEX = /(?:\+44[\s\-]?[1-9]\d{8,9}|\b0[12378]\d{8,9}\b)/;
+var AU_PHONE_REGEX = /(?:\+61[\s\-]?[2-478]\d{8}|\b0[2-478]\d{8}\b)/;
+var BD_CITIES_DIVISIONS = [
+  "dhaka",
+  "chittagong",
+  "chattogram",
+  "sylhet",
+  "rajshahi",
+  "khulna",
+  "barishal",
+  "rangpur",
+  "mymensingh",
+  "gazipur",
+  "narayanganj",
+  "comilla",
+  "savar",
+  "uttara",
+  "banani",
+  "gulshan",
+  "dhanmondi",
+  "mirpur",
+  "motijheel",
+  "badda",
+  "mohammadpur",
+  "bashundhara",
+  "mohakhali",
+  "khilkhet",
+  "tejgaon"
+];
+var BD_OPERATIONAL_PHRASES = [
+  "all over bangladesh",
+  "delivery all over bangladesh",
+  "inside dhaka",
+  "outside dhaka",
+  "free delivery in dhaka",
+  "free delivery inside dhaka",
+  "cash on delivery in bangladesh",
+  "home delivery inside dhaka",
+  "bangladesh delivery",
+  "deliver all over bangladesh",
+  "all over bd"
+];
+var FOREIGN_INDICATORS = [
+  {
+    countryCode: "IN",
+    countryName: "India",
+    domainSuffixes: [".in", ".co.in"],
+    domains: ["amazon.in", "interio.com", "flipkart.com"],
+    cities: ["jaipur", "mumbai", "delhi", "bengaluru", "bangalore", "kolkata", "chennai", "hyderabad", "pune", "noida", "gurgaon"],
+    keywords: ["india", "inr", "great indian festival", "pan india"]
+  },
+  {
+    countryCode: "GB",
+    countryName: "United Kingdom",
+    domainSuffixes: [".co.uk", ".uk", ".org.uk"],
+    domains: ["scs.co.uk", "fairwayfurniture.co.uk"],
+    cities: ["london", "north devon", "manchester", "birmingham", "leeds", "glasgow", "devon", "bristol"],
+    keywords: ["uk", "gbp", "in-store & online", "interest free credit", "registered in england"]
+  },
+  {
+    countryCode: "US",
+    countryName: "United States",
+    domainSuffixes: [".us", ".gov", ".mil"],
+    domains: ["raymourflanigan.com", "officedepot.com", "tahans.com", "ashleyfurniture.com"],
+    cities: ["new york", "california", "texas", "florida", "chicago", "los angeles", "utica"],
+    keywords: ["labor day", "nationwide delivery", "special financing", "us shipping"]
+  },
+  {
+    countryCode: "AU",
+    countryName: "Australia",
+    domainSuffixes: [".com.au", ".net.au", ".au"],
+    domains: ["hospitalityfurniture.net.au"],
+    cities: ["sydney", "melbourne", "brisbane", "perth", "adelaide"],
+    keywords: ["australia", "aud", "australia wide"]
+  },
+  {
+    countryCode: "CN",
+    countryName: "China",
+    domainSuffixes: [".cn", ".com.cn"],
+    domains: ["alibaba.com", "made-in-china.com"],
+    cities: ["guangzhou", "foshan", "shenzhen", "dongguan", "yiwu", "zhejiang"],
+    keywords: ["oem and odm", "factory-direct", "oem configurations", "square meter factory"]
+  }
+];
+function evaluateGeographicOrigin(inputs, targetCountryCode = "BD") {
+  const normTarget = (targetCountryCode || "BD").toUpperCase();
+  const evidence = [];
+  const textToScan = [
+    inputs.pageName || "",
+    inputs.pageUrl || "",
+    inputs.destinationDomain || "",
+    inputs.destinationUrl || "",
+    inputs.bodyCopy || "",
+    inputs.ctaText || ""
+  ].join(" ").toLowerCase();
+  for (const fi of FOREIGN_INDICATORS) {
+    if (fi.countryCode === normTarget) continue;
+    if (inputs.destinationDomain) {
+      const dom = inputs.destinationDomain.toLowerCase();
+      if (fi.domains.some((d) => dom === d || dom.endsWith("." + d))) {
+        evidence.push(`Official website domain ${inputs.destinationDomain} belongs to known ${fi.countryName} commercial entity`);
+        return {
+          classification: "FOREIGN_VERIFIED",
+          targetCountryCode: normTarget,
+          businessCountryCode: fi.countryCode,
+          confidence: "HIGH",
+          evidence,
+          reason: `Verified foreign commercial entity operating from ${fi.countryName} (${fi.countryCode}).`,
+          isLocal: false,
+          isForeign: true,
+          isUnknown: false
+        };
+      }
+      if (fi.domainSuffixes.some((s) => dom.endsWith(s))) {
+        evidence.push(`Destination domain ${inputs.destinationDomain} has ${fi.countryName} country-code TLD (${fi.domainSuffixes.join(", ")})`);
+        return {
+          classification: "FOREIGN_VERIFIED",
+          targetCountryCode: normTarget,
+          businessCountryCode: fi.countryCode,
+          confidence: "HIGH",
+          evidence,
+          reason: `Verified foreign domain based in ${fi.countryName} (${fi.countryCode}).`,
+          isLocal: false,
+          isForeign: true,
+          isUnknown: false
+        };
+      }
+    }
+    const pageUrlLower = (inputs.pageUrl || "").toLowerCase();
+    for (const city of fi.cities) {
+      const cityRegex = new RegExp(`\\b${city}\\b`, "i");
+      if (cityRegex.test(inputs.bodyCopy || "") || pageUrlLower.includes(city) || (inputs.pageName || "").toLowerCase().includes(city)) {
+        evidence.push(`Explicit mention of ${fi.countryName} location/city: "${city}"`);
+        return {
+          classification: "FOREIGN_VERIFIED",
+          targetCountryCode: normTarget,
+          businessCountryCode: fi.countryCode,
+          confidence: "HIGH",
+          evidence,
+          reason: `Explicit commercial presence or address located in ${city}, ${fi.countryName}.`,
+          isLocal: false,
+          isForeign: true,
+          isUnknown: false
+        };
+      }
+    }
+    for (const kw of fi.keywords) {
+      if (textToScan.includes(kw)) {
+        evidence.push(`Explicit ${fi.countryName} commercial context: "${kw}"`);
+        return {
+          classification: "FOREIGN_VERIFIED",
+          targetCountryCode: normTarget,
+          businessCountryCode: fi.countryCode,
+          confidence: "HIGH",
+          evidence,
+          reason: `Entity copy and commercial signals explicitly refer to ${fi.countryName}.`,
+          isLocal: false,
+          isForeign: true,
+          isUnknown: false
+        };
+      }
+    }
+  }
+  if (inputs.bodyCopy) {
+    if (IN_PHONE_REGEX.test(inputs.bodyCopy) && inputs.bodyCopy.includes("+91")) {
+      evidence.push("Verified Indian telephone international dialing prefix +91");
+      return {
+        classification: "FOREIGN_VERIFIED",
+        targetCountryCode: normTarget,
+        businessCountryCode: "IN",
+        confidence: "HIGH",
+        evidence,
+        reason: "Verified telephone country code for India (+91).",
+        isLocal: false,
+        isForeign: true,
+        isUnknown: false
+      };
+    }
+    if (UK_PHONE_REGEX.test(inputs.bodyCopy) && inputs.bodyCopy.includes("+44")) {
+      evidence.push("Verified UK telephone international dialing prefix +44");
+      return {
+        classification: "FOREIGN_VERIFIED",
+        targetCountryCode: normTarget,
+        businessCountryCode: "GB",
+        confidence: "HIGH",
+        evidence,
+        reason: "Verified telephone country code for United Kingdom (+44).",
+        isLocal: false,
+        isForeign: true,
+        isUnknown: false
+      };
+    }
+    if (AU_PHONE_REGEX.test(inputs.bodyCopy) && inputs.bodyCopy.includes("+61")) {
+      evidence.push("Verified Australian telephone international dialing prefix +61");
+      return {
+        classification: "FOREIGN_VERIFIED",
+        targetCountryCode: normTarget,
+        businessCountryCode: "AU",
+        confidence: "HIGH",
+        evidence,
+        reason: "Verified telephone country code for Australia (+61).",
+        isLocal: false,
+        isForeign: true,
+        isUnknown: false
+      };
+    }
+  }
+  if (normTarget === "BD") {
+    let hasLocalPhone = false;
+    let hasLocalAddressOrDelivery = false;
+    let hasLocalCity = false;
+    let hasBengaliScript = false;
+    let hasBdDomain = false;
+    if (inputs.bodyCopy && BD_PHONE_REGEX.test(inputs.bodyCopy)) {
+      const match = inputs.bodyCopy.match(BD_PHONE_REGEX);
+      if (match) {
+        hasLocalPhone = true;
+        evidence.push(`Verified Bangladesh domestic phone number format: "${match[0]}"`);
+      }
+    }
+    for (const phrase of BD_OPERATIONAL_PHRASES) {
+      if (textToScan.includes(phrase)) {
+        hasLocalAddressOrDelivery = true;
+        evidence.push(`Explicit local operational coverage phrase: "${phrase}"`);
+        break;
+      }
+    }
+    for (const city of BD_CITIES_DIVISIONS) {
+      const cityRegex = new RegExp(`\\b${city}\\b`, "i");
+      if (cityRegex.test(inputs.bodyCopy || "") || (inputs.destinationUrl || "").toLowerCase().includes(city)) {
+        hasLocalCity = true;
+        evidence.push(`Mention of major Bangladesh metropolitan area: "${city}"`);
+        break;
+      }
+    }
+    if (/[\u0980-\u09FF]/.test(inputs.bodyCopy || "") || /[\u0980-\u09FF]/.test(inputs.pageName || "")) {
+      hasBengaliScript = true;
+      evidence.push("Ad creative contains native Bengali script text");
+    }
+    if (inputs.destinationDomain) {
+      const dom = inputs.destinationDomain.toLowerCase();
+      if (dom.endsWith(".bd") || dom.endsWith(".com.bd") || dom.includes("regalfurniturebd") || dom.includes("htbazarbd")) {
+        hasBdDomain = true;
+        evidence.push(`Official website domain contains Bangladesh identifier: "${inputs.destinationDomain}"`);
+      }
+    }
+    const hasAddressKeywords = /\b(?:house\s*#?|road\s*#?|sector\s*#?|block\s*#?|lane\s*#?|plot\s*#?|holding\s*#?|floor\s*#?|avenue\b|street\b)/i.test(inputs.bodyCopy || "");
+    const hasVerifiedPhysicalAddress = hasLocalCity && hasAddressKeywords;
+    const hasExplicitBdPrefix = inputs.bodyCopy && (inputs.bodyCopy.includes("+880") || inputs.bodyCopy.includes("8801"));
+    if (hasExplicitBdPrefix || hasLocalPhone && (hasLocalCity || hasBdDomain || hasBengaliScript || hasLocalAddressOrDelivery) || hasVerifiedPhysicalAddress) {
+      return {
+        classification: "LOCAL_VERIFIED",
+        targetCountryCode: normTarget,
+        businessCountryCode: "BD",
+        confidence: "HIGH",
+        evidence,
+        reason: "Verified local business with confirmed Bangladesh physical showroom, street address, or telephone contact.",
+        isLocal: true,
+        isForeign: false,
+        isUnknown: false
+      };
+    }
+    if (hasLocalAddressOrDelivery || hasBengaliScript || hasLocalCity || hasLocalPhone) {
+      return {
+        classification: "LOCAL_PROBABLE",
+        targetCountryCode: normTarget,
+        businessCountryCode: "BD",
+        confidence: "MEDIUM",
+        evidence,
+        reason: "Probable local business with corroborating Bangladesh commercial signals (labeled for review).",
+        isLocal: true,
+        isForeign: false,
+        isUnknown: false
+      };
+    }
+    if (hasBdDomain) {
+      return {
+        classification: "LOCAL_PROBABLE",
+        targetCountryCode: normTarget,
+        businessCountryCode: "BD",
+        confidence: "LOW",
+        evidence,
+        reason: "Country-code domain suffix indicates probable regional association, but lacks verified physical address/phone.",
+        isLocal: true,
+        isForeign: false,
+        isUnknown: false
+      };
+    }
+  }
+  return {
+    classification: "LOCATION_UNKNOWN",
+    targetCountryCode: normTarget,
+    businessCountryCode: void 0,
+    confidence: "NONE",
+    evidence: ["No unambiguous geographic signals detected in extracted ad or page data."],
+    reason: "Physical business location cannot be verified from available public signals.",
+    isLocal: false,
+    isForeign: false,
+    isUnknown: true
+  };
+}
+
+// src/extension/bulkProcessor.ts
 init_evidenceWaterfall();
 
 // src/extension/metaAdapter.ts
@@ -4249,6 +4560,8 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
   const updatedEntities = [];
   const uncertainEntities = [];
   const existingUncertainMap = options.existingUncertainMap || /* @__PURE__ */ new Map();
+  const seenRejectedEntityKeys = options.seenRejectedEntityKeys || /* @__PURE__ */ new Set();
+  const seenUncertainEntityKeys = options.seenUncertainEntityKeys || /* @__PURE__ */ new Set();
   const newEvidence = [];
   const newAdIdsAdded = [];
   const newEntityKeysAdded = [];
@@ -4262,10 +4575,10 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
     duplicateAdRecordsRemoved: currentCounters.duplicateAdRecordsRemoved ?? 0,
     entityMergesCount: currentCounters.entityMergesCount ?? 0,
     finalUniqueLeads: currentCounters.finalUniqueLeads,
-    uniqueEntitiesObserved: currentCounters.uniqueEntitiesObserved ?? currentCounters.finalUniqueLeads,
-    relevantEntities: currentCounters.relevantEntities ?? currentCounters.finalUniqueLeads,
-    uncertainEntities: currentCounters.uncertainEntities ?? currentCounters.uncertainCandidates,
-    notRelevantEntities: currentCounters.notRelevantEntities ?? currentCounters.notRelevantCandidates,
+    uniqueEntitiesObserved: currentCounters.uniqueEntitiesObserved ?? existingEntitiesMap.size + seenRejectedEntityKeys.size + seenUncertainEntityKeys.size,
+    relevantEntities: currentCounters.relevantEntities ?? existingEntitiesMap.size,
+    uncertainEntities: currentCounters.uncertainEntities ?? seenUncertainEntityKeys.size,
+    notRelevantEntities: currentCounters.notRelevantEntities ?? seenRejectedEntityKeys.size,
     keywordsCompleted: currentCounters.keywordsCompleted ?? 0,
     keywordsTotal: currentCounters.keywordsTotal ?? 1,
     finalUniqueRelevantLeads: currentCounters.finalUniqueRelevantLeads ?? currentCounters.finalUniqueLeads,
@@ -4300,6 +4613,22 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
           ...existingEntity.creativeSignals || [],
           ...newSignals
         ]);
+        const updatedGeo = evaluateGeographicOrigin({
+          pageName: existingEntity.name,
+          pageUrl: existingEntity.facebookPageUrl,
+          destinationUrl: existingEntity.destinationUrl,
+          destinationDomain: existingEntity.destinationDomain,
+          bodyCopy: [existingEntity.sampleCopy, cand.bodyCopy].filter(Boolean).join(" "),
+          ctaText: [existingEntity.sampleCta, cand.ctaText].filter(Boolean).join(" ")
+        }, countryCode);
+        if (!existingEntity.geographicClassification || existingEntity.geographicClassification === "LOCATION_UNKNOWN" || existingEntity.geographicClassification === "LOCAL_PROBABLE" && updatedGeo.classification === "LOCAL_VERIFIED") {
+          existingEntity.targetCountryCode = updatedGeo.targetCountryCode;
+          existingEntity.businessCountryCode = updatedGeo.businessCountryCode;
+          existingEntity.geographicClassification = updatedGeo.classification;
+          existingEntity.businessLocationConfidence = updatedGeo.confidence;
+          existingEntity.businessLocationEvidence = updatedGeo.evidence;
+          existingEntity.businessLocationReason = updatedGeo.reason;
+        }
         entityIndex.indexEntity(mergeDecision.targetKey, existingEntity);
         if (!updatedEntities.some((e) => e.id === existingEntity.id)) {
           updatedEntities.push(existingEntity);
@@ -4331,12 +4660,25 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
       }
       if (v3Result.decision === "NOT_RELEVANT") {
         counters.notRelevantCandidates++;
-        counters.notRelevantEntities = (counters.notRelevantEntities || 0) + 1;
+        if (!existingEntitiesMap.has(entityKey)) {
+          seenRejectedEntityKeys.add(entityKey);
+          seenUncertainEntityKeys.delete(entityKey);
+        }
+        counters.notRelevantEntities = seenRejectedEntityKeys.size;
+        counters.uncertainEntities = seenUncertainEntityKeys.size;
+        counters.relevantEntities = existingEntitiesMap.size;
+        counters.uniqueEntitiesObserved = counters.relevantEntities + counters.notRelevantEntities + counters.uncertainEntities;
         continue;
       }
       if (v3Result.decision === "UNCERTAIN") {
         counters.uncertainCandidates++;
-        counters.uncertainEntities = (counters.uncertainEntities || 0) + 1;
+        if (!existingEntitiesMap.has(entityKey) && !seenRejectedEntityKeys.has(entityKey)) {
+          seenUncertainEntityKeys.add(entityKey);
+        }
+        counters.notRelevantEntities = seenRejectedEntityKeys.size;
+        counters.uncertainEntities = seenUncertainEntityKeys.size;
+        counters.relevantEntities = existingEntitiesMap.size;
+        counters.uniqueEntitiesObserved = counters.relevantEntities + counters.notRelevantEntities + counters.uncertainEntities;
         const existingUnc = existingUncertainMap.get(entityKey);
         const uncRecord = classifyUncertainCandidate(cand, v3Result, intent, entityKey, existingUnc);
         existingUncertainMap.set(entityKey, uncRecord);
@@ -4344,16 +4686,55 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
         continue;
       }
     }
+    const cleanName = normalizeAdvertiserName2(cand.pageName);
+    const pageNorm = normalizeFacebookPage(cand.facebookPageUrl, cand.facebookPageId);
+    const domainNorm = normalizeDestinationDomain(cand.destinationUrl, cand.destinationDomain);
+    const geoEval = evaluateGeographicOrigin({
+      pageName: cleanName,
+      pageUrl: pageNorm.canonicalUrl || cand.facebookPageUrl,
+      destinationUrl: domainNorm.cleanUrl || cand.destinationUrl,
+      destinationDomain: domainNorm.canonicalDomain || cand.destinationDomain,
+      bodyCopy: cand.bodyCopy,
+      ctaText: cand.ctaText
+    }, countryCode);
+    if (intent?.strictLocalMode) {
+      if (geoEval.classification === "FOREIGN_VERIFIED") {
+        counters.notRelevantCandidates++;
+        if (!existingEntitiesMap.has(entityKey)) {
+          seenRejectedEntityKeys.add(entityKey);
+          seenUncertainEntityKeys.delete(entityKey);
+        }
+        counters.notRelevantEntities = seenRejectedEntityKeys.size;
+        counters.uncertainEntities = seenUncertainEntityKeys.size;
+        counters.relevantEntities = existingEntitiesMap.size;
+        counters.uniqueEntitiesObserved = counters.relevantEntities + counters.notRelevantEntities + counters.uncertainEntities;
+        if (counters.reasonCodes) {
+          counters.reasonCodes["FOREIGN_BUSINESS"] = (counters.reasonCodes["FOREIGN_BUSINESS"] || 0) + 1;
+        }
+        continue;
+      }
+      if (geoEval.classification === "LOCATION_UNKNOWN" || geoEval.classification === "LOCAL_PROBABLE" && intent.allowProbableLocal === false) {
+        counters.uncertainCandidates++;
+        if (!existingEntitiesMap.has(entityKey) && !seenRejectedEntityKeys.has(entityKey)) {
+          seenUncertainEntityKeys.add(entityKey);
+        }
+        counters.notRelevantEntities = seenRejectedEntityKeys.size;
+        counters.uncertainEntities = seenUncertainEntityKeys.size;
+        counters.relevantEntities = existingEntitiesMap.size;
+        counters.uniqueEntitiesObserved = counters.relevantEntities + counters.notRelevantEntities + counters.uncertainEntities;
+        const code = geoEval.classification === "LOCATION_UNKNOWN" ? "LOCATION_UNKNOWN" : "LOCAL_PROBABLE_DISALLOWED";
+        if (counters.reasonCodes) {
+          counters.reasonCodes[code] = (counters.reasonCodes[code] || 0) + 1;
+        }
+        continue;
+      }
+    }
     counters.relevantCandidates++;
-    counters.relevantEntities = (counters.relevantEntities || 0) + 1;
     const currentLeadCount = counters.finalUniqueRelevantLeads || counters.finalUniqueLeads;
     if (currentLeadCount >= effectiveCeiling) {
       safetyLimitReached = true;
       break;
     }
-    const cleanName = normalizeAdvertiserName2(cand.pageName);
-    const pageNorm = normalizeFacebookPage(cand.facebookPageUrl, cand.facebookPageId);
-    const domainNorm = normalizeDestinationDomain(cand.destinationUrl, cand.destinationDomain);
     const webState = domainNorm.cleanUrl || cand.destinationUrl ? "found" : "not_found";
     const fbState = pageNorm.canonicalUrl || cand.facebookPageUrl ? "found" : "not_found";
     const newLead = {
@@ -4379,6 +4760,12 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
       matchedQueries: currentKeyword ? [currentKeyword] : intent?.primaryKeywords?.slice(0, 1) || [],
       locationCode: countryCode,
       locationName,
+      targetCountryCode: geoEval.targetCountryCode,
+      businessCountryCode: geoEval.businessCountryCode,
+      geographicClassification: geoEval.classification,
+      businessLocationConfidence: geoEval.confidence,
+      businessLocationEvidence: geoEval.evidence,
+      businessLocationReason: geoEval.reason,
       status: webState === "found" ? "QUALIFIED" : "REVIEW_REQUIRED",
       discoveredAt: (/* @__PURE__ */ new Date()).toISOString(),
       sampleCopy: cand.bodyCopy,
@@ -4411,6 +4798,8 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
     existingEntitiesMap.set(entityKey, newLead);
     entityIndex.indexEntity(entityKey, newLead);
     updatedEntities.push(newLead);
+    seenRejectedEntityKeys.delete(entityKey);
+    seenUncertainEntityKeys.delete(entityKey);
     if (evalResult?.evidence) {
       newEvidence.push({
         canonicalKey: entityKey,
@@ -4419,6 +4808,10 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
     }
     counters.finalUniqueLeads++;
     counters.finalUniqueRelevantLeads = counters.finalUniqueLeads;
+    counters.relevantEntities = existingEntitiesMap.size;
+    counters.notRelevantEntities = seenRejectedEntityKeys.size;
+    counters.uncertainEntities = seenUncertainEntityKeys.size;
+    counters.uniqueEntitiesObserved = counters.relevantEntities + counters.notRelevantEntities + counters.uncertainEntities;
     newUniqueRelevantLeadsCount++;
     if (counters.finalUniqueLeads >= effectiveCeiling) {
       safetyLimitReached = true;
@@ -9787,7 +10180,11 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
     payload.mode,
     keywords,
     payload.presetId,
-    countryCode
+    countryCode,
+    {
+      strictLocalMode: payload.strictLocalMode,
+      allowProbableLocal: payload.allowProbableLocal
+    }
   );
   const initialRun = providedRun || {
     runId,
@@ -9826,6 +10223,8 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
   await initBulkStore();
   const seenAdLibraryIds = await getSeenAdIds(runId);
   const seenEntityKeys = await getSeenEntityKeys(runId);
+  const seenRejectedEntityKeys = /* @__PURE__ */ new Set();
+  const seenUncertainEntityKeys = /* @__PURE__ */ new Set();
   const existingEntitiesMap = /* @__PURE__ */ new Map();
   const existingLeads = await getAllRelevantLeads(runId);
   for (const lead of existingLeads) {
@@ -9991,7 +10390,9 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
               locationName: payload.locationName,
               currentKeyword,
               intent: researchIntent,
-              effectiveCeiling
+              effectiveCeiling,
+              seenRejectedEntityKeys,
+              seenUncertainEntityKeys
             }
           );
           queryRawAds += candidates.length;

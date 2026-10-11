@@ -256,7 +256,11 @@ async function executeResearchPipeline(
     payload.mode,
     keywords,
     payload.presetId,
-    countryCode
+    countryCode,
+    {
+      strictLocalMode: payload.strictLocalMode,
+      allowProbableLocal: payload.allowProbableLocal
+    }
   );
 
   const initialRun: ExtensionResearchRun = providedRun || {
@@ -298,6 +302,8 @@ async function executeResearchPipeline(
   await initBulkStore();
   const seenAdLibraryIds = await getSeenAdIds(runId);
   const seenEntityKeys = await getSeenEntityKeys(runId);
+  const seenRejectedEntityKeys = new Set<string>();
+  const seenUncertainEntityKeys = new Set<string>();
   const existingEntitiesMap = new Map<string, ExtensionLead>();
 
   // If resuming, populate existing entities
@@ -502,7 +508,9 @@ async function executeResearchPipeline(
               locationName: payload.locationName,
               currentKeyword,
               intent: researchIntent,
-              effectiveCeiling
+              effectiveCeiling,
+              seenRejectedEntityKeys,
+              seenUncertainEntityKeys
             }
           );
 
