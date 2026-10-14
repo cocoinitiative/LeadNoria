@@ -32,6 +32,7 @@ interface ResearchConfigViewProps {
     strictLocal?: boolean;
     requiredCta?: string;
     requiredDestination?: string;
+    websiteRequirement?: string;
   }) => void;
   disabled?: boolean;
 }
@@ -50,6 +51,7 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
   const [strictLocal, setStrictLocal] = useState<boolean>(true);
   const [requiredCta, setRequiredCta] = useState<string>('ANY');
   const [requiredDestination, setRequiredDestination] = useState<string>('ANY');
+  const [websiteRequirement, setWebsiteRequirement] = useState<string>('ANY');
 
   const selectedPreset = RESEARCH_PRESETS.find(p => p.preset_id === presetId) || RESEARCH_PRESETS[0];
 
@@ -79,7 +81,10 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
       presetName,
       strictLocal,
       requiredCta: requiredCta !== 'ANY' ? requiredCta : undefined,
-      requiredDestination: requiredDestination !== 'ANY' ? requiredDestination : undefined
+      requiredDestination: (requiredDestination === 'APP_STORE' ? 'APP' : requiredDestination) !== 'ANY'
+        ? (requiredDestination === 'APP_STORE' ? 'APP' : requiredDestination)
+        : undefined,
+      websiteRequirement: websiteRequirement !== 'ANY' ? websiteRequirement : undefined
     });
   };
 
@@ -195,7 +200,7 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
           </span>
         </label>
 
-        <div className="grid grid-cols-2 gap-2 text-xs">
+        <div className="grid grid-cols-3 gap-2 text-xs">
           <div>
             <label htmlFor="required-cta-select" className="text-[10px] uppercase text-slate-400 block mb-0.5">
               Required CTA
@@ -211,9 +216,12 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
               <option value="LEARN_MORE">Learn More</option>
               <option value="SHOP_NOW">Shop Now</option>
               <option value="SIGN_UP">Sign Up</option>
+              <option value="CONTACT_US">Contact Us</option>
               <option value="SEND_MESSAGE">Send Message</option>
-              <option value="WHATSAPP_MESSAGE">WhatsApp</option>
               <option value="CALL_NOW">Call Now</option>
+              <option value="DOWNLOAD">Download</option>
+              <option value="GET_QUOTE">Get Quote</option>
+              <option value="OTHER">Other CTA</option>
             </select>
           </div>
           <div>
@@ -232,7 +240,24 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
               <option value="INSTANT_FORM">Meta Instant Form</option>
               <option value="MESSAGING">Messaging</option>
               <option value="CALL">Phone Call</option>
-              <option value="APP_STORE">App Store</option>
+              <option value="APP">Mobile App / App Store</option>
+              <option value="OTHER">Other Destination</option>
+            </select>
+          </div>
+          <div>
+            <label htmlFor="required-website-select" className="text-[10px] uppercase text-slate-400 block mb-0.5">
+              Website Requirement
+            </label>
+            <select
+              id="required-website-select"
+              value={websiteRequirement}
+              onChange={e => setWebsiteRequirement(e.target.value)}
+              disabled={disabled}
+              className="w-full px-2 py-1 text-xs bg-slate-950 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-1 focus:ring-sky-400"
+            >
+              <option value="ANY">Any Website Status</option>
+              <option value="WITH_WEBSITE">Must Have Website</option>
+              <option value="WITHOUT_WEBSITE">Without Website (Social Only)</option>
             </select>
           </div>
         </div>

@@ -100,13 +100,14 @@ export interface EntityEvidenceProfile {
  */
 export function createEntityEvidenceProfile(
   entityKey: string,
-  advertiserName: string,
+  advertiserName: string = '',
   canonicalName?: string
 ): EntityEvidenceProfile {
+  const safeName = advertiserName || '';
   return {
     entityKey,
-    advertiserName,
-    canonicalName: canonicalName || advertiserName,
+    advertiserName: safeName,
+    canonicalName: canonicalName || safeName,
     uniqueEvidenceMap: new Map(),
     observedEvidenceOccurrences: 0,
     distinctAdCopyHashes: new Set(),
@@ -697,7 +698,7 @@ export function evaluateStrictRelevanceV3(
   if ('uniqueEvidenceMap' in candidateOrProfile) {
     profile = candidateOrProfile;
   } else {
-    profile = createEntityEvidenceProfile('cand', candidateOrProfile.advertiserName);
+    profile = createEntityEvidenceProfile('cand', candidateOrProfile.advertiserName || '');
     recordCandidateEvidenceInProfile(profile, candidateOrProfile, intent);
   }
 
@@ -791,8 +792,8 @@ export function evaluateStrictRelevanceV3(
   // TIER 1.5: ACCESSORY-ONLY PROTECTION
   // =============================================================
   const isAccessoryOnly = ACCESSORY_ONLY_INDICATORS.some(ind =>
-    profile.advertiserName.toLowerCase().includes(ind) ||
-    Array.from(profile.distinctAdCopyHashes).some(copy => copy.toLowerCase().includes(ind))
+    (profile.advertiserName || '').toLowerCase().includes(ind) ||
+    Array.from(profile.distinctAdCopyHashes).some(copy => (copy || '').toLowerCase().includes(ind))
   ) && !hasRootVerticalEntity;
 
   if (isAccessoryOnly) {

@@ -25,9 +25,18 @@ import type {
 } from './types.ts';
 import type { ResearchIntent } from './relevanceEngine.ts';
 
+export type WebsiteRequirementMode =
+  | 'WITH_WEBSITE'
+  | 'WITHOUT_WEBSITE'
+  | 'BOTH'
+  | 'ANY'
+  | 'WITH'
+  | 'WITHOUT';
+
 export interface LeadQualificationGateResult {
   isQualified: boolean;
   status: 'QUALIFIED' | 'REVIEW_REQUIRED';
+  canonicalOutcome: 'QUALIFIED' | 'REJECTED' | 'REVIEW';
   failedGates: string[];
   passedGates: string[];
   reasons: string[];
@@ -39,11 +48,12 @@ export interface QualificationCriteriaInput {
   requiredCtaTypes?: CtaType[];
   requiredDestinationTypes?: DestinationType[];
   requireWebsiteFound?: boolean;
+  websiteRequirement?: WebsiteRequirementMode;
 }
 
 /**
  * Evaluates candidate data integrity, niche relevance, geographic origin,
- * call-to-action requirements, and destination requirements against configured criteria.
+ * call-to-action requirements, destination requirements, and website requirements against configured criteria.
  */
 export function evaluateLeadQualificationGates(
   lead: Partial<ExtensionLead>,
@@ -116,8 +126,9 @@ export function evaluateLeadQualificationGates(
 
   // Gate 5: Required Destination Types
   if (criteria?.requiredDestinationTypes && criteria.requiredDestinationTypes.length > 0) {
+    const effectiveReqDests = criteria.requiredDestinationTypes.map(d => (d === ('APP_STORE' as any) ? 'APP' : d));
     const observedDests = lead.observedDestinationTypes || (lead.primaryDestinationType ? [lead.primaryDestinationType] : []);
-    const matchesDest = observedDests.some(d => criteria.requiredDestinationTypes!.includes(d));
+    const matchesDest = observedDests.some(d => effectiveReqDests.includes(d));
     if (matchesDest) {
       passedGates.push('GATE_DESTINATION');
     } else {
@@ -126,20 +137,57 @@ export function evaluateLeadQualificationGates(
     }
   }
 
-  // Gate 6: Website Requirement (if website is expected or required)
+  // Gate 6: Website Requirement Gate
+  const reqWebMode = criteria?.websiteRequirement;
   const isWebsiteDestination = lead.primaryDestinationType === 'EXTERNAL_WEBSITE' ||
     (lead.observedDestinationTypes && lead.observedDestinationTypes.includes('EXTERNAL_WEBSITE'));
-  const requireWeb = criteria?.requireWebsiteFound ?? isWebsiteDestination;
 
-  if (requireWeb && lead.websiteState !== 'found') {
-    failedGates.push('GATE_WEBSITE');
-    reasons.push('External website was required or classified as primary destination, but valid destination URL is missing.');
+  if (reqWebMode === 'WITH_WEBSITE' || reqWebMode === 'WITH') {
+    if (lead.websiteState !== 'found' || (!lead.destinationUrl && !lead.destinationDomain)) {
+      failedGates.push('GATE_WEBSITE');
+      reasons.push('Configured website requirement (WITH_WEBSITE) failed: external website destination is unobserved, missing, or unverified.');
+    } else {
+      passedGates.push('GATE_WEBSITE');
+    }
+  } else if (reqWebMode === 'WITHOUT_WEBSITE' || reqWebMode === 'WITHOUT') {
+    if (lead.websiteState === 'found' || Boolean(lead.destinationUrl || lead.destinationDomain)) {
+      failedGates.push('GATE_WEBSITE');
+      reasons.push('Configured website requirement (WITHOUT_WEBSITE) failed: business has an observed website destination.');
+    } else if (lead.websiteState === 'not_found' && lead.primaryDestinationType === 'NO_VISIBLE_DESTINATION') {
+      passedGates.push('GATE_WEBSITE');
+    } else {
+      failedGates.push('GATE_WEBSITE');
+      reasons.push('Configured website requirement (WITHOUT_WEBSITE) requires explicit evidence of absence; missing ad destination URL alone does not prove no website.');
+    }
+  } else {
+    // Default / BOTH / ANY mode:
+    const requireWeb = criteria?.requireWebsiteFound ?? isWebsiteDestination;
+    if (requireWeb && lead.websiteState !== 'found') {
+      failedGates.push('GATE_WEBSITE');
+      reasons.push('External website was required or classified as primary destination, but valid destination URL is missing.');
+    } else {
+      passedGates.push('GATE_WEBSITE');
+    }
   }
 
   const isQualified = failedGates.length === 0;
+
+  // Determine canonical outcome: QUALIFIED, REJECTED, or REVIEW
+  let canonicalOutcome: 'QUALIFIED' | 'REJECTED' | 'REVIEW';
+  if (isQualified) {
+    canonicalOutcome = 'QUALIFIED';
+  } else {
+    const isHardRejection =
+      lead.relevanceDecision === 'NOT_RELEVANT' ||
+      geo === 'FOREIGN_VERIFIED' ||
+      ((reqWebMode === 'WITHOUT_WEBSITE' || reqWebMode === 'WITHOUT') && (lead.websiteState === 'found' || Boolean(lead.destinationUrl || lead.destinationDomain)));
+    canonicalOutcome = isHardRejection ? 'REJECTED' : 'REVIEW';
+  }
+
   return {
     isQualified,
     status: isQualified ? 'QUALIFIED' : 'REVIEW_REQUIRED',
+    canonicalOutcome,
     failedGates,
     passedGates,
     reasons

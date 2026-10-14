@@ -160,6 +160,12 @@ export const PlanReviewModal: React.FC<PlanReviewModalProps> = ({
                 <span className="font-medium text-sky-400">{plan.requiredDestination}</span>
               </div>
             )}
+            {plan.websiteRequirement && (
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Website Requirement:</span>
+                <span className="font-medium text-sky-400">{plan.websiteRequirement}</span>
+              </div>
+            )}
           </div>
 
           {/* Safety Warnings & Blocks */}

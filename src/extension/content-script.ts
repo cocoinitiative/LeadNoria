@@ -141,7 +141,15 @@ export function waitForDynamicAdCards(
         }
       }
 
-      // 3. Set up MutationObserver if supported
+      // 3. Initial scan: if results are ALREADY present in the DOM, allow quiet period for rendering to settle
+      const initialScan = extractAdCardsWithDiagnostics(doc, keyword, { seenLibraryIds });
+      if (initialScan.candidates.length > 0) {
+        quietTimer = setTimeout(() => {
+          finish('RESULTS_FOUND');
+        }, quietPeriodMs);
+      }
+
+      // 4. Set up MutationObserver if supported
       const MutationObserverClass = (win as any).MutationObserver || (typeof MutationObserver !== 'undefined' ? MutationObserver : null);
       const targetNode = doc.body || doc.documentElement;
 
@@ -200,12 +208,6 @@ export function waitForDynamicAdCards(
           // Fallback gracefully if observation fails on target
         }
       }
-
-      // 4. Initial quiet timer (allows initial network settle window if scrolling was requested)
-      const initialQuietDelay = scroll ? Math.max(quietPeriodMs, 1000) : quietPeriodMs;
-      quietTimer = setTimeout(() => {
-        finish();
-      }, initialQuietDelay);
 
       // 5. Hard maximum wait deadline safety net
       maxWaitTimer = setTimeout(() => {

@@ -336,6 +336,7 @@ export const ExtensionApp: React.FC = () => {
     strictLocal?: boolean;
     requiredCta?: string;
     requiredDestination?: string;
+    websiteRequirement?: string;
   }) => {
     const planVM: PlanReviewViewModel = {
       sourceType: config.sourceType,
@@ -361,7 +362,8 @@ export const ExtensionApp: React.FC = () => {
       locationName: config.locationName,
       strictLocal: config.strictLocal,
       requiredCta: config.requiredCta,
-      requiredDestination: config.requiredDestination
+      requiredDestination: config.requiredDestination,
+      websiteRequirement: config.websiteRequirement
     };
 
     setPendingPlan(planVM);
@@ -391,7 +393,8 @@ export const ExtensionApp: React.FC = () => {
       maxFinalUniqueRelevantLeads: pendingPlan.maxCandidatesLimit,
       strictLocalMode: pendingPlan.strictLocal !== false,
       requiredCtaTypes: pendingPlan.requiredCta ? [pendingPlan.requiredCta] : undefined,
-      requiredDestinationTypes: pendingPlan.requiredDestination ? [pendingPlan.requiredDestination] : undefined
+      requiredDestinationTypes: pendingPlan.requiredDestination ? [pendingPlan.requiredDestination] : undefined,
+      websiteRequirement: (pendingPlan.websiteRequirement as any) || undefined
     };
 
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
@@ -748,7 +751,7 @@ export const ExtensionApp: React.FC = () => {
                 setIsDiagnosticsOpen(true);
               }}
               onClearLocalHistory={handleClearHistory}
-              version="1.7.0"
+              version={typeof chrome !== 'undefined' && chrome.runtime?.getManifest ? chrome.runtime.getManifest().version : '1.7.7'}
               reliabilityMetrics={reliabilityMetrics}
               guardrailAlerts={guardrailAlerts}
               issues={aggregatedIssues}

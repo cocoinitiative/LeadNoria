@@ -725,11 +725,12 @@
     const normVal = (value || "").toLowerCase().trim().replace(/\s+/g, " ");
     return `${type}::${source}::${strength}::${normVal}`;
   }
-  function createEntityEvidenceProfile(entityKey, advertiserName, canonicalName) {
+  function createEntityEvidenceProfile(entityKey, advertiserName = "", canonicalName) {
+    const safeName = advertiserName || "";
     return {
       entityKey,
-      advertiserName,
-      canonicalName: canonicalName || advertiserName,
+      advertiserName: safeName,
+      canonicalName: canonicalName || safeName,
       uniqueEvidenceMap: /* @__PURE__ */ new Map(),
       observedEvidenceOccurrences: 0,
       distinctAdCopyHashes: /* @__PURE__ */ new Set(),
@@ -1194,7 +1195,7 @@
     if ("uniqueEvidenceMap" in candidateOrProfile) {
       profile = candidateOrProfile;
     } else {
-      profile = createEntityEvidenceProfile("cand", candidateOrProfile.advertiserName);
+      profile = createEntityEvidenceProfile("cand", candidateOrProfile.advertiserName || "");
       recordCandidateEvidenceInProfile(profile, candidateOrProfile, intent);
     }
     const candEvidence = {
@@ -1271,7 +1272,7 @@
       (e) => e.type === "ENTITY_IDENTITY" && (e.reasonCode === "SIGNAL_ENTITY_NAME_EXACT" || e.reasonCode === "SIGNAL_ENTITY_NAME_CORE")
     );
     const isAccessoryOnly = ACCESSORY_ONLY_INDICATORS.some(
-      (ind) => profile.advertiserName.toLowerCase().includes(ind) || Array.from(profile.distinctAdCopyHashes).some((copy) => copy.toLowerCase().includes(ind))
+      (ind) => (profile.advertiserName || "").toLowerCase().includes(ind) || Array.from(profile.distinctAdCopyHashes).some((copy) => (copy || "").toLowerCase().includes(ind))
     ) && !hasRootVerticalEntity;
     if (isAccessoryOnly) {
       decision = "UNCERTAIN";
@@ -1528,6 +1529,7 @@
         requiredCtaTypes: modeOrConfig.requiredCtaTypes,
         requiredDestinationTypes: modeOrConfig.requiredDestinationTypes,
         requireWebsiteFound: modeOrConfig.requireWebsiteFound,
+        websiteRequirement: modeOrConfig.websiteRequirement,
         ...options
       };
     }
@@ -1550,7 +1552,8 @@
           allowProbableLocal: opts?.allowProbableLocal,
           requiredCtaTypes: opts?.requiredCtaTypes,
           requiredDestinationTypes: opts?.requiredDestinationTypes,
-          requireWebsiteFound: opts?.requireWebsiteFound
+          requireWebsiteFound: opts?.requireWebsiteFound,
+          websiteRequirement: opts?.websiteRequirement
         };
       }
     }
@@ -1565,7 +1568,8 @@
       allowProbableLocal: opts?.allowProbableLocal,
       requiredCtaTypes: opts?.requiredCtaTypes,
       requiredDestinationTypes: opts?.requiredDestinationTypes,
-      requireWebsiteFound: opts?.requireWebsiteFound
+      requireWebsiteFound: opts?.requireWebsiteFound,
+      websiteRequirement: opts?.websiteRequirement
     };
   }
   var RELEVANCE_STRATEGY_VERSION, RELEVANCE_ENGINE_VERSION, BOUNDED_TAXONOMY, NEGATIVE_CATEGORIES, ACCESSORY_ONLY_INDICATORS, STOP_WORDS, LeadRelevanceEngine;
@@ -3608,11 +3612,11 @@
     if (hasAdCards) {
       return { isBlocked: false };
     }
-    const text = doc.body ? doc.body.innerText : "";
-    if (text.includes("Security Check") || text.includes("Enter the characters you see below")) {
+    const text = doc.body ? doc.body.innerText || doc.body.textContent || "" : "";
+    if (/(?:Security\s+Check|Enter\s+the\s+characters|verify\s+you\s+are\s+human|checkpoint|captcha)/i.test(text)) {
       return { isBlocked: true, reason: "Meta Security Check / CAPTCHA challenge presented.", code: "CHALLENGED" };
     }
-    if (text.includes("You\u2019re Temporarily Blocked") || text.includes("You are temporarily blocked") || text.includes("Rate limit exceeded") || text.includes("Too Many Requests")) {
+    if (/(?:You(?:’|'|\s+are)\s+temporarily\s+blocked|Rate\s+limit\s+exceeded|Too\s+Many\s+Requests|Please\s+slow\s+down)/i.test(text)) {
       return { isBlocked: true, reason: "Meta access temporarily rate-limited.", code: "RATE_LIMITED" };
     }
     if (text.includes("Log In to Facebook") && doc.querySelectorAll('input[type="password"]').length > 0) {
@@ -3686,7 +3690,7 @@
   }
   function normalizeAdLibraryText(text) {
     if (!text) return "";
-    return text.replace(/[\u00A0\u200B\u202F\uFEFF]/g, " ").replace(/\s+/g, " ").trim();
+    return text.replace(/[\uFF1A\uFE55\u05C3\u2236]/g, ":").replace(/[\u00A0\u1680\u2000-\u200D\u2028\u2029\u202F\u205F\u2060\u3000\uFEFF]/g, " ").replace(/\s+/g, " ").trim();
   }
   function extractAdIdentifier(text, context) {
     if (!text) return null;
@@ -3703,7 +3707,13 @@
       // Italian
       { regex: /(?:ID\s+della\s+libreria|ID\s+libreria)\s*:\s*([0-9]{5,25})/i, label: "ID della libreria" },
       // Portuguese
-      { regex: /(?:ID\s+da\s+biblioteca)\s*:\s*([0-9]{5,25})/i, label: "ID da biblioteca" }
+      { regex: /(?:ID\s+da\s+biblioteca)\s*:\s*([0-9]{5,25})/i, label: "ID da biblioteca" },
+      // Dutch
+      { regex: /(?:Bibliotheek-?ID|ID\s+van\s+de\s+bibliotheek)\s*:\s*([0-9]{5,25})/i, label: "Bibliotheek-ID" },
+      // Polish
+      { regex: /(?:Identyfikator\s+(?:w\s+)?Bibliotece|ID\s+biblioteki)\s*:\s*([0-9]{5,25})/i, label: "Identyfikator w Bibliotece" },
+      // Nordic (Danish, Swedish, Norwegian)
+      { regex: /(?:Biblioteks-?ID)\s*:\s*([0-9]{5,25})/i, label: "Biblioteks-ID" }
     ];
     const multiLocaleMonthRegex = /^\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Ene|Abr|Ago|Dic|Janv|F[eé]vr|Mars|Avr|Mai|Juin|Juil|Ao[uû]t|Sept|M[aä]r|Okt|Dez|Fev|Set|Out|Gen|Mag|Giu|Lug|Ott)\b/i;
     for (const { regex, label } of explicitPatterns) {
@@ -3994,7 +4004,7 @@
         const urlMatch = href.match(/[?&]id=([0-9]{5,25})/i);
         if (urlMatch && urlMatch[1]) {
           const id = urlMatch[1];
-          if (!idCandidates.some((c) => c.idInfo.id === id)) {
+          if (!idCandidates.some((c) => c.idEl === link)) {
             idCandidates.push({
               idEl: link,
               idInfo: { id, rawLabel: "Ad Detail Link ID", confidence: "HIGH" }
@@ -4007,12 +4017,12 @@
         const htmlEl = el;
         const text = htmlEl.textContent;
         if (!text || text.length > 250) continue;
-        if (!/(?:ID|Identifiant|Bibliothek)/i.test(text)) continue;
+        if (!/(?:ID|Identifiant|Bibliothek|Identyfikator|Biblioteka|Libreria)/i.test(text)) continue;
         const hasMatchingChild = (node) => {
           if (!node.children || node.children.length === 0) return false;
           for (const child of Array.from(node.children)) {
             const childText = child.textContent || "";
-            if (/(?:ID|Identifiant|Bibliothek)/i.test(childText) && extractAdIdentifier(childText, { surroundingText: child.parentElement?.textContent || "" }) !== null) {
+            if (/(?:ID|Identifiant|Bibliothek|Identyfikator|Biblioteka|Libreria)/i.test(childText) && extractAdIdentifier(childText, { surroundingText: child.parentElement?.textContent || "" }) !== null) {
               return true;
             }
             if (hasMatchingChild(child)) return true;
@@ -4023,8 +4033,50 @@
         const parentText = htmlEl.parentElement ? htmlEl.parentElement.textContent || "" : "";
         const idInfo = extractAdIdentifier(text, { surroundingText: parentText });
         if (idInfo) {
-          if (!idCandidates.some((c) => c.idInfo.id === idInfo.id)) {
+          const isRedundantInternal = idCandidates.some((c) => {
+            if (c.idEl === htmlEl) return true;
+            if (c.idInfo.id === idInfo.id) {
+              return Boolean(c.idEl.contains?.(htmlEl) || htmlEl.contains?.(c.idEl));
+            }
+            return false;
+          });
+          if (!isRedundantInternal) {
             idCandidates.push({ idEl: htmlEl, idInfo });
+          }
+        } else {
+          const malformedMatch = text.match(/(?:Library\s+ID|Ad\s+Library\s+ID|Identifiant\s+de\s+la\s+biblioth[eè]que|Bibliotheks-?ID|ID\s+della\s+libreria|ID\s+da\s+biblioteca|ID\s+de\s+la\s+biblioteca|Bibliotheek-?ID|Identyfikator\s+(?:w\s+)?Bibliotece)\s*:\s*(\S*)/i);
+          if (malformedMatch) {
+            const extractedVal = malformedMatch[1]?.trim() || "";
+            idCandidates.push({
+              idEl: htmlEl,
+              idInfo: {
+                id: extractedVal,
+                rawLabel: malformedMatch[0],
+                confidence: "LOW",
+                isAmbiguous: true,
+                ambiguityReason: `Malformed or missing identifier digits: "${extractedVal}"`
+              }
+            });
+          }
+        }
+      }
+      const structuralCards = Array.from(doc.querySelectorAll('article, [role="article"], div[class*="ad-card"], div[class*="result-card"]'));
+      for (const cardEl of structuralCards) {
+        const htmlCard = cardEl;
+        const alreadyHasCandidate = idCandidates.some((c) => htmlCard.contains?.(c.idEl) || htmlCard === c.idEl);
+        if (!alreadyHasCandidate) {
+          const hasAdSignal = /(?:Sponsored|Publicidad|Sponsoris|Gesponsert|Started\s+running)/i.test(htmlCard.textContent || "");
+          if (hasAdSignal) {
+            idCandidates.push({
+              idEl: htmlCard,
+              idInfo: {
+                id: "",
+                rawLabel: "Unidentified Card Container",
+                confidence: "LOW",
+                isAmbiguous: true,
+                ambiguityReason: "Ad card container has no identifiable Library ID"
+              }
+            });
           }
         }
       }
@@ -4033,11 +4085,11 @@
       for (const { idEl, idInfo } of idCandidates) {
         cardsExamined++;
         const { id: libraryId } = idInfo;
-        if (idInfo.isAmbiguous) {
+        if (!libraryId || idInfo.isAmbiguous) {
           cardsRejectedMissingId++;
           diagnosticDetails.push({
-            libraryId,
-            outcome: "AMBIGUOUS_CANDIDATE",
+            libraryId: libraryId || "UNKNOWN",
+            outcome: !libraryId ? "MISSING_IDENTIFIER" : "AMBIGUOUS_CANDIDATE",
             reason: idInfo.ambiguityReason || "Ambiguous identifier boundary without corroborating source"
           });
           continue;
@@ -4066,13 +4118,27 @@
           continue;
         }
         seenCardRoots.add(containerResult.cardRoot);
-        const candidate = extractFieldsFromCard(containerResult.cardRoot, libraryId, observedKeyword);
-        candidates.push(candidate);
-        seenLibraryIds.add(candidate.libraryId);
-        diagnosticDetails.push({ libraryId: candidate.libraryId, outcome: "VALID_CANDIDATE" });
+        try {
+          const candidate = extractFieldsFromCard(containerResult.cardRoot, libraryId, observedKeyword);
+          candidates.push(candidate);
+          seenLibraryIds.add(candidate.libraryId);
+          diagnosticDetails.push({ libraryId: candidate.libraryId, outcome: "VALID_CANDIDATE" });
+        } catch (cardErr) {
+          cardsRejectedMissingId++;
+          diagnosticDetails.push({
+            libraryId,
+            outcome: "PARSING_FAILED",
+            reason: cardErr?.message || "Field extraction failed"
+          });
+        }
       }
       const duration = Date.now() - startTime;
-      const status = candidates.length > 0 ? "RESULTS_FOUND" : "NO_NEW_RESULTS_OBSERVED";
+      let status = "NO_NEW_RESULTS_OBSERVED";
+      if (candidates.length > 0) {
+        status = "RESULTS_FOUND";
+      } else if (cardsRejectedMissingId > 0 && duplicateCardsIgnored === 0) {
+        status = "EXTRACTION_ERROR";
+      }
       return {
         candidates,
         diagnostics: {
@@ -4090,19 +4156,22 @@
       };
     } catch (err) {
       return {
-        candidates: [],
+        candidates,
         diagnostics: {
           cardsExamined,
           identifierCandidatesFound,
-          validCardsAccepted: 0,
+          validCardsAccepted: candidates.length,
           cardsRejectedMissingId,
           duplicateCardsIgnored,
           extractionDurationMs: Date.now() - startTime,
           scrollIteration: options?.scrollIteration,
           relevantMutationsObserved: options?.relevantMutationsObserved,
-          details: [{ outcome: "INVALID_CONTAINER", reason: err?.message || "Extraction exception" }]
+          details: [
+            ...diagnosticDetails,
+            { outcome: "INVALID_CONTAINER", reason: err?.message || "Extraction exception" }
+          ]
         },
-        status: "EXTRACTION_ERROR"
+        status: candidates.length > 0 ? "RESULTS_FOUND" : "EXTRACTION_ERROR"
       };
     }
   }
@@ -4200,6 +4269,12 @@
             scrolled = false;
           }
         }
+        const initialScan = extractAdCardsWithDiagnostics(doc, keyword, { seenLibraryIds });
+        if (initialScan.candidates.length > 0) {
+          quietTimer = setTimeout(() => {
+            finish("RESULTS_FOUND");
+          }, quietPeriodMs);
+        }
         const MutationObserverClass = win.MutationObserver || (typeof MutationObserver !== "undefined" ? MutationObserver : null);
         const targetNode = doc.body || doc.documentElement;
         if (MutationObserverClass && targetNode) {
@@ -4247,10 +4322,6 @@
           } catch {
           }
         }
-        const initialQuietDelay = scroll ? Math.max(quietPeriodMs, 1e3) : quietPeriodMs;
-        quietTimer = setTimeout(() => {
-          finish();
-        }, initialQuietDelay);
         maxWaitTimer = setTimeout(() => {
           finish();
         }, maxWaitMs);

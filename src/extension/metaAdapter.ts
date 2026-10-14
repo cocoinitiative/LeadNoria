@@ -19,6 +19,16 @@ import type { ResearchIntent } from './relevanceEngine.ts';
 import { evaluateGeographicOrigin } from './geographicClassifier.ts';
 import { classifyCta, classifyDestination, aggregateAdEvidence } from './destinationClassifier.ts';
 import { evaluateLeadQualificationGates } from './qualificationGate.ts';
+import {
+  EntityResolutionIndex,
+  evaluateEntityMerge,
+  normalizeAdvertiserName,
+  normalizeFacebookPage,
+  normalizeDestinationDomain,
+  getComparisonNameKey,
+  isShortGenericName,
+  GENERIC_SHARED_DOMAINS
+} from './entityResolver.ts';
 
 /**
  * Checks whether a given URL is a Meta Ad Library search or listing page.
@@ -49,13 +59,13 @@ export function checkForBotChallenge(doc: Document): { isBlocked: boolean; reaso
     return { isBlocked: false };
   }
 
-  const text = doc.body ? doc.body.innerText : '';
+  const text = doc.body ? (doc.body.innerText || doc.body.textContent || '') : '';
 
-  if (text.includes('Security Check') || text.includes('Enter the characters you see below')) {
+  if (/(?:Security\s+Check|Enter\s+the\s+characters|verify\s+you\s+are\s+human|checkpoint|captcha)/i.test(text)) {
     return { isBlocked: true, reason: 'Meta Security Check / CAPTCHA challenge presented.', code: 'CHALLENGED' };
   }
 
-  if (text.includes('You’re Temporarily Blocked') || text.includes('You are temporarily blocked') || text.includes('Rate limit exceeded') || text.includes('Too Many Requests')) {
+  if (/(?:You(?:’|'|\s+are)\s+temporarily\s+blocked|Rate\s+limit\s+exceeded|Too\s+Many\s+Requests|Please\s+slow\s+down)/i.test(text)) {
     return { isBlocked: true, reason: 'Meta access temporarily rate-limited.', code: 'RATE_LIMITED' };
   }
 
@@ -169,7 +179,8 @@ export function extractFacebookPageInfo(href: string, linkText?: string): { page
 export function normalizeAdLibraryText(text: string): string {
   if (!text) return '';
   return text
-    .replace(/[\u00A0\u200B\u202F\uFEFF]/g, ' ')
+    .replace(/[\uFF1A\uFE55\u05C3\u2236]/g, ':')
+    .replace(/[\u00A0\u1680\u2000-\u200D\u2028\u2029\u202F\u205F\u2060\u3000\uFEFF]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -249,7 +260,13 @@ export function extractAdIdentifier(
     // Italian
     { regex: /(?:ID\s+della\s+libreria|ID\s+libreria)\s*:\s*([0-9]{5,25})/i, label: 'ID della libreria' },
     // Portuguese
-    { regex: /(?:ID\s+da\s+biblioteca)\s*:\s*([0-9]{5,25})/i, label: 'ID da biblioteca' }
+    { regex: /(?:ID\s+da\s+biblioteca)\s*:\s*([0-9]{5,25})/i, label: 'ID da biblioteca' },
+    // Dutch
+    { regex: /(?:Bibliotheek-?ID|ID\s+van\s+de\s+bibliotheek)\s*:\s*([0-9]{5,25})/i, label: 'Bibliotheek-ID' },
+    // Polish
+    { regex: /(?:Identyfikator\s+(?:w\s+)?Bibliotece|ID\s+biblioteki)\s*:\s*([0-9]{5,25})/i, label: 'Identyfikator w Bibliotece' },
+    // Nordic (Danish, Swedish, Norwegian)
+    { regex: /(?:Biblioteks-?ID)\s*:\s*([0-9]{5,25})/i, label: 'Biblioteks-ID' }
   ];
 
   // Comprehensive multi-locale month boundary regex across English, Spanish, French, German, Italian, and Portuguese
@@ -624,7 +641,7 @@ export function extractAdCardsWithDiagnostics(
       const urlMatch = href.match(/[?&]id=([0-9]{5,25})/i);
       if (urlMatch && urlMatch[1]) {
         const id = urlMatch[1];
-        if (!idCandidates.some(c => c.idInfo.id === id)) {
+        if (!idCandidates.some(c => c.idEl === link)) {
           idCandidates.push({
             idEl: link as HTMLElement,
             idInfo: { id, rawLabel: 'Ad Detail Link ID', confidence: 'HIGH' }
@@ -639,7 +656,7 @@ export function extractAdCardsWithDiagnostics(
       const htmlEl = el as HTMLElement;
       const text = htmlEl.textContent;
       if (!text || text.length > 250) continue;
-      if (!/(?:ID|Identifiant|Bibliothek)/i.test(text)) continue;
+      if (!/(?:ID|Identifiant|Bibliothek|Identyfikator|Biblioteka|Libreria)/i.test(text)) continue;
 
       // CRITICAL: Strictly isolate innermost leaf elements.
       // If ANY descendant element also contains the identifier, the child is the specific
@@ -649,7 +666,7 @@ export function extractAdCardsWithDiagnostics(
         if (!node.children || node.children.length === 0) return false;
         for (const child of Array.from(node.children)) {
           const childText = child.textContent || '';
-          if (/(?:ID|Identifiant|Bibliothek)/i.test(childText) &&
+          if (/(?:ID|Identifiant|Bibliothek|Identyfikator|Biblioteka|Libreria)/i.test(childText) &&
               extractAdIdentifier(childText, { surroundingText: child.parentElement?.textContent || '' }) !== null) {
             return true;
           }
@@ -662,8 +679,53 @@ export function extractAdCardsWithDiagnostics(
       const parentText = htmlEl.parentElement ? (htmlEl.parentElement.textContent || '') : '';
       const idInfo = extractAdIdentifier(text, { surroundingText: parentText });
       if (idInfo) {
-        if (!idCandidates.some(c => c.idInfo.id === idInfo.id)) {
+        const isRedundantInternal = idCandidates.some(c => {
+          if (c.idEl === htmlEl) return true;
+          if (c.idInfo.id === idInfo.id) {
+            return Boolean(c.idEl.contains?.(htmlEl) || htmlEl.contains?.(c.idEl));
+          }
+          return false;
+        });
+        if (!isRedundantInternal) {
           idCandidates.push({ idEl: htmlEl, idInfo });
+        }
+      } else {
+        // Detect malformed identifier labels
+        const malformedMatch = text.match(/(?:Library\s+ID|Ad\s+Library\s+ID|Identifiant\s+de\s+la\s+biblioth[eè]que|Bibliotheks-?ID|ID\s+della\s+libreria|ID\s+da\s+biblioteca|ID\s+de\s+la\s+biblioteca|Bibliotheek-?ID|Identyfikator\s+(?:w\s+)?Bibliotece)\s*:\s*(\S*)/i);
+        if (malformedMatch) {
+          const extractedVal = malformedMatch[1]?.trim() || '';
+          idCandidates.push({
+            idEl: htmlEl,
+            idInfo: {
+              id: extractedVal,
+              rawLabel: malformedMatch[0],
+              confidence: 'LOW',
+              isAmbiguous: true,
+              ambiguityReason: `Malformed or missing identifier digits: "${extractedVal}"`
+            }
+          });
+        }
+      }
+    }
+
+    // Priority 3: Check for structural ad card containers in the DOM that have no identifier
+    const structuralCards = Array.from(doc.querySelectorAll('article, [role="article"], div[class*="ad-card"], div[class*="result-card"]'));
+    for (const cardEl of structuralCards) {
+      const htmlCard = cardEl as HTMLElement;
+      const alreadyHasCandidate = idCandidates.some(c => htmlCard.contains?.(c.idEl) || htmlCard === c.idEl);
+      if (!alreadyHasCandidate) {
+        const hasAdSignal = /(?:Sponsored|Publicidad|Sponsoris|Gesponsert|Started\s+running)/i.test(htmlCard.textContent || '');
+        if (hasAdSignal) {
+          idCandidates.push({
+            idEl: htmlCard,
+            idInfo: {
+              id: '',
+              rawLabel: 'Unidentified Card Container',
+              confidence: 'LOW',
+              isAmbiguous: true,
+              ambiguityReason: 'Ad card container has no identifiable Library ID'
+            }
+          });
         }
       }
     }
@@ -677,11 +739,11 @@ export function extractAdCardsWithDiagnostics(
       cardsExamined++;
       const { id: libraryId } = idInfo;
 
-      if (idInfo.isAmbiguous) {
+      if (!libraryId || idInfo.isAmbiguous) {
         cardsRejectedMissingId++;
         diagnosticDetails.push({
-          libraryId,
-          outcome: 'AMBIGUOUS_CANDIDATE',
+          libraryId: libraryId || 'UNKNOWN',
+          outcome: !libraryId ? 'MISSING_IDENTIFIER' : 'AMBIGUOUS_CANDIDATE',
           reason: idInfo.ambiguityReason || 'Ambiguous identifier boundary without corroborating source'
         });
         continue;
@@ -720,14 +782,28 @@ export function extractAdCardsWithDiagnostics(
       seenCardRoots.add(containerResult.cardRoot);
 
       // Extract fields (with verified detail link if card has one)
-      const candidate = extractFieldsFromCard(containerResult.cardRoot, libraryId, observedKeyword);
-      candidates.push(candidate);
-      seenLibraryIds.add(candidate.libraryId);
-      diagnosticDetails.push({ libraryId: candidate.libraryId, outcome: 'VALID_CANDIDATE' });
+      try {
+        const candidate = extractFieldsFromCard(containerResult.cardRoot, libraryId, observedKeyword);
+        candidates.push(candidate);
+        seenLibraryIds.add(candidate.libraryId);
+        diagnosticDetails.push({ libraryId: candidate.libraryId, outcome: 'VALID_CANDIDATE' });
+      } catch (cardErr: any) {
+        cardsRejectedMissingId++;
+        diagnosticDetails.push({
+          libraryId,
+          outcome: 'PARSING_FAILED',
+          reason: cardErr?.message || 'Field extraction failed'
+        });
+      }
     }
 
     const duration = Date.now() - startTime;
-    const status: ExtractionResultStatus = candidates.length > 0 ? 'RESULTS_FOUND' : 'NO_NEW_RESULTS_OBSERVED';
+    let status: ExtractionResultStatus = 'NO_NEW_RESULTS_OBSERVED';
+    if (candidates.length > 0) {
+      status = 'RESULTS_FOUND';
+    } else if (cardsRejectedMissingId > 0 && duplicateCardsIgnored === 0) {
+      status = 'EXTRACTION_ERROR';
+    }
 
     return {
       candidates,
@@ -746,19 +822,22 @@ export function extractAdCardsWithDiagnostics(
     };
   } catch (err: any) {
     return {
-      candidates: [],
+      candidates,
       diagnostics: {
         cardsExamined,
         identifierCandidatesFound,
-        validCardsAccepted: 0,
+        validCardsAccepted: candidates.length,
         cardsRejectedMissingId,
         duplicateCardsIgnored,
         extractionDurationMs: Date.now() - startTime,
         scrollIteration: options?.scrollIteration,
         relevantMutationsObserved: options?.relevantMutationsObserved,
-        details: [{ outcome: 'INVALID_CONTAINER', reason: err?.message || 'Extraction exception' }]
+        details: [
+          ...diagnosticDetails,
+          { outcome: 'INVALID_CONTAINER', reason: err?.message || 'Extraction exception' }
+        ]
       },
-      status: 'EXTRACTION_ERROR'
+      status: candidates.length > 0 ? 'RESULTS_FOUND' : 'EXTRACTION_ERROR'
     };
   }
 }
@@ -814,30 +893,155 @@ export function aggregateCandidatesToLeads(
     ? Math.min(maxResults, MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH)
     : MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH;
 
-  // Group all candidates by normalized advertiser name
+  const actualExistingLeads = Array.isArray(existingLeads) ? existingLeads : [];
+  const actualIntent = resolvedIntent || (!Array.isArray(existingLeads) && typeof existingLeads === 'object' ? existingLeads as unknown as ResearchIntent : undefined);
+
+  // Group all candidates by authoritative entity resolution key
   const candidateGroups = new Map<string, ScrapedAdCandidate[]>();
+  const entityIndex = new EntityResolutionIndex();
+  const indexLeadMap = new Map<string, ExtensionLead>();
   let totalAdsCount = 0;
   const reasonCodes: Record<string, number> = {};
 
-  for (const cand of candidates) {
-    totalAdsCount++;
-    const cleanName = (cand.pageName || 'Unknown Advertiser').trim();
-    if (!cleanName || cleanName === 'Unknown Advertiser') continue;
-
-    const key = cleanName.toLowerCase();
-    const group = candidateGroups.get(key) || [];
-    group.push(cand);
-    candidateGroups.set(key, group);
+  // Pre-index existing leads so incoming candidates match them by Page ID / Page Slug / Domain / Name
+  for (const lead of actualExistingLeads) {
+    if (!lead.destinationDomain && lead.destinationUrl) {
+      const dNorm = normalizeDestinationDomain(lead.destinationUrl);
+      if (dNorm.canonicalDomain) lead.destinationDomain = dNorm.canonicalDomain;
+    }
+    const key = lead.canonicalPageId
+      ? `fb_${lead.canonicalPageId}`
+      : (lead.canonicalPageSlug ? `fbslug_${lead.canonicalPageSlug}` : (lead.canonicalName ? `name_${getComparisonNameKey(lead.canonicalName)}` : lead.name.toLowerCase()));
+    indexLeadMap.set(key, lead);
+    entityIndex.indexEntity(key, lead);
   }
 
-  const actualExistingLeads = Array.isArray(existingLeads) ? existingLeads : [];
-  const actualIntent = resolvedIntent || (!Array.isArray(existingLeads) && typeof existingLeads === 'object' ? existingLeads as unknown as ResearchIntent : undefined);
+  // Track established domains and page IDs per name key to prevent conflicting merges
+  const nameToGroupKey = new Map<string, string>();
+
+  for (const cand of candidates) {
+    totalAdsCount++;
+    const cleanName = normalizeAdvertiserName(cand.pageName);
+    if (!cleanName || cleanName === 'Unknown Advertiser') continue;
+
+    const pageNorm = normalizeFacebookPage(cand.facebookPageUrl, cand.facebookPageId || (cand as any).pageId);
+    const domainNorm = normalizeDestinationDomain(cand.destinationUrl, cand.destinationDomain);
+    const compName = getComparisonNameKey(cleanName);
+
+    let groupKey: string;
+
+    // 1. Stable Page ID match (highest precedence)
+    if (pageNorm.pageId) {
+      if (entityIndex.pageIdToKey.has(pageNorm.pageId)) {
+        groupKey = entityIndex.pageIdToKey.get(pageNorm.pageId)!;
+      } else {
+        groupKey = `fb_${pageNorm.pageId}`;
+      }
+    }
+    // 2. Stable Page Slug match
+    else if (pageNorm.pageSlug) {
+      if (entityIndex.pageSlugToKey.has(pageNorm.pageSlug)) {
+        groupKey = entityIndex.pageSlugToKey.get(pageNorm.pageSlug)!;
+      } else {
+        groupKey = `fbslug_${pageNorm.pageSlug}`;
+      }
+    }
+    // 3. Short generic name without Page ID -> never merge unless exact domain match
+    else if (isShortGenericName(cleanName)) {
+      if (domainNorm.canonicalDomain && !domainNorm.isSharedMarketplace) {
+        const nameDomKey = `${compName}__${domainNorm.canonicalDomain}`;
+        if (entityIndex.nameDomainToKey.has(nameDomKey)) {
+          groupKey = entityIndex.nameDomainToKey.get(nameDomKey)!;
+        } else {
+          groupKey = `dom_${compName}_${domainNorm.canonicalDomain}`;
+        }
+      } else {
+        groupKey = `unres_${compName}_${cand.libraryId}`;
+      }
+    }
+    // 4. Non-generic brand name
+    else {
+      // Check if existing group exists for this comparison name
+      const existingKeyForName = nameToGroupKey.get(compName) || entityIndex.specificNameToKey.get(compName);
+      if (existingKeyForName && indexLeadMap.has(existingKeyForName)) {
+        const existingLead = indexLeadMap.get(existingKeyForName)!;
+        const existingPage = normalizeFacebookPage(existingLead.facebookPageUrl, existingLead.canonicalPageId);
+        const existingDomain = existingLead.destinationDomain;
+
+        // Check for conflicts:
+        const hasPageConflict = Boolean(
+          (pageNorm.pageId && existingPage.pageId && pageNorm.pageId !== existingPage.pageId) ||
+          (pageNorm.pageSlug && existingPage.pageSlug && pageNorm.pageSlug !== existingPage.pageSlug)
+        );
+        const hasDomainConflict = Boolean(
+          domainNorm.canonicalDomain &&
+          existingDomain &&
+          !domainNorm.isSharedMarketplace &&
+          !GENERIC_SHARED_DOMAINS.has(existingDomain) &&
+          domainNorm.canonicalDomain !== existingDomain
+        );
+
+        if (!hasPageConflict && !hasDomainConflict) {
+          groupKey = existingKeyForName;
+        } else {
+          // Conflict detected! Create distinct entity
+          groupKey = domainNorm.canonicalDomain
+            ? `dom_${compName}_${domainNorm.canonicalDomain}`
+            : `cand_${compName}_${cand.libraryId}`;
+        }
+      } else {
+        groupKey = `name_${compName}`;
+      }
+    }
+
+    const group = candidateGroups.get(groupKey) || [];
+    group.push(cand);
+    candidateGroups.set(groupKey, group);
+
+    // If new group, index mock lead and register name
+    if (!indexLeadMap.has(groupKey)) {
+      const mockLead: Partial<ExtensionLead> = {
+        name: cleanName,
+        canonicalName: cleanName,
+        canonicalPageId: pageNorm.pageId,
+        canonicalPageSlug: pageNorm.pageSlug,
+        facebookPageUrl: cand.facebookPageUrl,
+        destinationUrl: domainNorm.cleanUrl || cand.destinationUrl,
+        destinationDomain: domainNorm.canonicalDomain
+      };
+      indexLeadMap.set(groupKey, mockLead as ExtensionLead);
+      entityIndex.indexEntity(groupKey, mockLead as ExtensionLead);
+      if (!isShortGenericName(cleanName) && compName) {
+        nameToGroupKey.set(compName, groupKey);
+      }
+    } else {
+      // If candidate has stronger domain or page info, enrich the indexed lead
+      const existingLead = indexLeadMap.get(groupKey)!;
+      if (!existingLead.canonicalPageId && pageNorm.pageId) {
+        existingLead.canonicalPageId = pageNorm.pageId;
+        entityIndex.pageIdToKey.set(pageNorm.pageId, groupKey);
+      }
+      if (!existingLead.canonicalPageSlug && pageNorm.pageSlug) {
+        existingLead.canonicalPageSlug = pageNorm.pageSlug;
+        entityIndex.pageSlugToKey.set(pageNorm.pageSlug, groupKey);
+      }
+      if (!existingLead.destinationDomain && domainNorm.canonicalDomain) {
+        existingLead.destinationDomain = domainNorm.canonicalDomain;
+        if (compName && !domainNorm.isSharedMarketplace) {
+          entityIndex.nameDomainToKey.set(`${compName}__${domainNorm.canonicalDomain}`, groupKey);
+        }
+      }
+    }
+  }
 
   const leadMap = new Map<string, ExtensionLead>();
 
   // Initialize with existing leads
   for (const lead of actualExistingLeads) {
-    leadMap.set(lead.canonicalName.toLowerCase(), { ...lead });
+    const key = lead.canonicalPageId
+      ? `fb_${lead.canonicalPageId}`
+      : (lead.canonicalPageSlug ? `fbslug_${lead.canonicalPageSlug}` : (lead.canonicalName ? `name_${getComparisonNameKey(lead.canonicalName)}` : lead.name.toLowerCase()));
+    leadMap.set(key, { ...lead });
   }
 
   let rejectedCount = 0;
@@ -884,7 +1088,7 @@ export function aggregateCandidatesToLeads(
     // 2.5. Classify CTA and Destination for each candidate and build ad-level evidence
     const candsAdEvidence: AdLevelEvidence[] = cands.map(cand => {
       const ctaRes = cand.ctaType
-        ? { ctaType: cand.ctaType, normalizedText: cand.ctaText || '', reasonCode: 'CTA_TEXT_MATCH', reason: '' }
+        ? { ctaType: cand.ctaType, rawCtaText: cand.ctaText, originalCtaText: cand.ctaText, normalizedText: cand.ctaText || '', status: 'CLASSIFIED' as const, confidence: 'HIGH' as const, evidence: 'Pre-classified CTA intent.', reasonCode: 'CTA_TEXT_MATCH', reason: '' }
         : classifyCta(cand.ctaText);
       const destRes = cand.destinationType
         ? { destinationType: cand.destinationType, confidence: cand.destinationConfidence || 'HIGH', reasonCode: cand.destinationReasonCode || 'VISIBLE_EXTERNAL_DESTINATION', reason: '' }
@@ -905,6 +1109,9 @@ export function aggregateCandidatesToLeads(
       return {
         libraryId: cand.libraryId,
         ctaText: cand.ctaText,
+        normalizedCtaText: ctaRes.normalizedText,
+        ctaConfidence: ctaRes.confidence,
+        ctaStatus: ctaRes.status,
         ctaType: ctaRes.ctaType,
         destinationType: destRes.destinationType,
         destinationUrl: cand.destinationUrl,
@@ -937,7 +1144,8 @@ export function aggregateCandidatesToLeads(
 
     // Filter by user-configured Destination type requirements (if specified)
     if (actualIntent?.requiredDestinationTypes && actualIntent.requiredDestinationTypes.length > 0) {
-      const hasMatchingDest = candSummary.observedDestinationTypes.some(t => actualIntent.requiredDestinationTypes!.includes(t));
+      const effectiveReqDests = actualIntent.requiredDestinationTypes.map(d => (d === ('APP_STORE' as any) ? 'APP' : d));
+      const hasMatchingDest = candSummary.observedDestinationTypes.some(t => effectiveReqDests.includes(t));
       if (!hasMatchingDest) {
         rejectedCount++;
         reasonCodes['DESTINATION_FILTER_MISMATCH'] = (reasonCodes['DESTINATION_FILTER_MISMATCH'] || 0) + 1;
@@ -967,6 +1175,18 @@ export function aggregateCandidatesToLeads(
     const existing = leadMap.get(key);
 
     if (existing) {
+      if (!existing.canonicalPageId) {
+        const foundId = cands.find(c => c.facebookPageId || (c as any).pageId)?.facebookPageId || (cands.find(c => (c as any).pageId) as any)?.pageId;
+        if (foundId) existing.canonicalPageId = foundId;
+      }
+      if (!existing.canonicalPageSlug) {
+        const foundUrl = cands.find(c => c.facebookPageUrl)?.facebookPageUrl;
+        if (foundUrl) {
+          const norm = normalizeFacebookPage(foundUrl, existing.canonicalPageId);
+          if (norm.pageSlug) existing.canonicalPageSlug = norm.pageSlug;
+        }
+      }
+
       for (const cand of cands) {
         if (/^[0-9]{5,25}$/.test(cand.libraryId) && !existing.adLibraryIds.includes(cand.libraryId)) {
           existing.adLibraryIds.push(cand.libraryId);
@@ -1088,10 +1308,18 @@ export function aggregateCandidatesToLeads(
       const fbState = bestFbUrl ? 'found' : 'not_found';
       const webState = bestDestUrl ? 'found' : (candSummary.primaryDestinationType === 'NO_VISIBLE_DESTINATION' ? 'not_found' : 'unknown');
 
+      const pageNorm = normalizeFacebookPage(bestFbUrl, cands.find(c => c.facebookPageId || (c as any).pageId)?.facebookPageId || (cands.find(c => (c as any).pageId) as any)?.pageId);
+      const canonicalPageId = pageNorm.pageId;
+      const canonicalPageSlug = pageNorm.pageSlug;
+
       const lead: ExtensionLead = {
         id: `lead_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`,
         name: cleanName,
         canonicalName: cleanName,
+        canonicalPageId,
+        canonicalPageSlug,
+        identityConfidence: canonicalPageId || canonicalPageSlug ? 'STRONG' : (bestDestDomain ? 'MODERATE' : 'WEAK'),
+        relationshipType: 'INDEPENDENT_BUSINESS',
         facebookPageName: cleanName,
         facebookPageUrl: bestFbUrl,
         facebookPageState: fbState,
@@ -1264,7 +1492,12 @@ export function exportLeadsToCsv(
     'Website Category Match',
     'Website Commercial Signals',
     'Website Evidence Summary',
-    'Website Verified At'
+    'Website Verified At',
+    'Canonical Page ID',
+    'Canonical Page Slug',
+    'Identity Confidence',
+    'Relationship Type',
+    'Aliases'
   ];
 
   const rows = exportLeads.map(l => [
@@ -1301,12 +1534,17 @@ export function exportLeadsToCsv(
     sanitizeCsvField(l.destinationConfidence || 'NONE'),
     sanitizeCsvField(l.destinationReasonCode || 'DESTINATION_NOT_OBSERVED'),
     sanitizeCsvField(l.websiteVerification?.finalUrl || l.destinationUrl || ''),
-    sanitizeCsvField(l.websiteVerificationStatus || (l.websiteVerification?.status) || (l.destinationUrl ? 'NOT_VERIFIED' : 'NO_WEBSITE')),
+    sanitizeCsvField(l.websiteVerificationStatus || (l.websiteVerification?.status) || (l.destinationUrl ? 'NOT_VERIFIED' : 'NOT_OBSERVED')),
     sanitizeCsvField(l.websiteVerification?.identityMatch || 'UNKNOWN'),
     sanitizeCsvField(l.websiteVerification?.categoryMatch || 'UNKNOWN'),
     sanitizeCsvField((l.websiteVerification?.commercialSignals || []).join('; ')),
     sanitizeCsvField((l.websiteVerification?.evidence || []).map(e => e.reason).slice(0, 3).join(' | ')),
-    sanitizeCsvField(l.websiteVerification?.verifiedAt || '')
+    sanitizeCsvField(l.websiteVerification?.verifiedAt || ''),
+    sanitizeCsvField(l.canonicalPageId || ''),
+    sanitizeCsvField(l.canonicalPageSlug || ''),
+    sanitizeCsvField(l.identityConfidence || 'UNRESOLVED'),
+    sanitizeCsvField(l.relationshipType || 'INDEPENDENT_BUSINESS'),
+    sanitizeCsvField((l.aliases || []).join('; '))
   ]);
 
   return metaHeader + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');

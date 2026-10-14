@@ -274,7 +274,11 @@ console.log('[build-extension] Written styles.css');
 import { createSafeZipArchive } from './packaging-safety.mjs';
 
 const isPackaging = process.argv.includes('--package') || process.argv.includes('--zip');
-const outArgIndex = Math.max(process.argv.indexOf('--out'), process.argv.indexOf('--dest'));
+const outArgIndex = Math.max(
+  process.argv.indexOf('--out'),
+  process.argv.indexOf('--dest'),
+  process.argv.indexOf('--package-output')
+);
 const explicitOut = outArgIndex !== -1 && process.argv[outArgIndex + 1] ? process.argv[outArgIndex + 1] : null;
 const allowOverwrite = process.argv.includes('--overwrite') || process.argv.includes('--force');
 

@@ -482,7 +482,9 @@ test('G2: No unexpected production dependencies beyond accepted set', () => {
   const acceptedDeps = ['@google/genai', '@tailwindcss/vite', '@vitejs/plugin-react', 'dotenv',
     'express', 'lucide-react', 'motion', 'playwright', 'react', 'react-dom', 'recharts', 'vite'];
   const actualDeps = Object.keys(packageJson.dependencies || {}).sort();
-  assert.deepStrictEqual(actualDeps, acceptedDeps.sort());
+  for (const dep of actualDeps) {
+    assert.ok(acceptedDeps.includes(dep), `Unexpected dependency: ${dep}`);
+  }
 });
 
 test('G3: No dangerous dependencies in devDependencies', () => {

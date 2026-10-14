@@ -50,9 +50,10 @@ export const SHORT_GENERIC_BRAND_TOKENS = new Set([
 
 // Common legal and commercial suffixes stripped during comparison normalization
 const LEGAL_SUFFIXES = [
+  'private limited', 'pvt ltd', 'pte ltd',
   'llc', 'l.l.c.', 'inc', 'inc.', 'incorporated', 'corp', 'corp.', 'corporation',
-  'ltd', 'ltd.', 'limited', 'gmbh', 'co', 'co.', 'company', 'pvt', 'pvt.',
-  'private limited', 'enterprises', 'holdings', 'group'
+  'ltd', 'ltd.', 'limited', 'gmbh', 'co', 'co.', 'company', 'pvt', 'pvt.', 'pte', 'private',
+  'enterprises', 'holdings', 'group'
 ];
 
 export interface NormalizedPageIdentity {
@@ -68,21 +69,38 @@ export interface NormalizedDomainIdentity {
   cleanUrl?: string;
 }
 
+export type DuplicateMatchLevel =
+  | 'EXACT_DUPLICATE'
+  | 'PROBABLE_DUPLICATE'
+  | 'DISTINCT_ADVERTISER'
+  | 'UNKNOWN_IDENTITY';
+
+export interface DuplicateRelationshipResult {
+  matchLevel: DuplicateMatchLevel;
+  confidence: IdentityConfidence;
+  reason: string;
+}
+
 export interface EntityMergeDecision {
   shouldMerge: boolean;
   targetKey: string;
   confidence: IdentityConfidence;
   reason: string;
   relationshipType: EntityRelationshipType;
+  matchLevel?: DuplicateMatchLevel;
 }
 
 /**
  * Normalizes an advertiser display name:
- * Strips sponsorship tags, trailing metadata, repeated punctuation, and extra whitespace.
+ * Strips sponsorship tags, trailing metadata, repeated punctuation, zero-width characters, and extra whitespace.
+ * Applies Unicode NFKC normalization.
  */
 export function normalizeAdvertiserName(rawName?: string): string {
   let name = (rawName || '').trim();
   if (!name || name === 'Unknown Advertiser') return 'Unknown Advertiser';
+
+  // Strip zero-width characters and invisible joiners
+  name = name.replace(/[\u200B-\u200D\uFEFF]/g, '');
 
   // Strip trailing boilerplate
   name = name.replace(/\s*·\s*Sponsored.*$/i, '');
@@ -90,13 +108,14 @@ export function normalizeAdvertiserName(rawName?: string): string {
   name = name.replace(/\s+page$/i, '');
   name = name.replace(/\s*\(official\)$/i, '');
   name = name.replace(/\s*\(verified\)$/i, '');
+  name = name.normalize('NFKC');
   name = name.replace(/\s+/g, ' ');
 
   return name.trim();
 }
 
 /**
- * Strips legal entity suffixes for comparison purposes.
+ * Strips legal entity suffixes iteratively for comparison purposes.
  */
 export function getComparisonNameKey(name: string): string {
   let clean = normalizeAdvertiserName(name)
@@ -106,9 +125,13 @@ export function getComparisonNameKey(name: string): string {
     .replace(/\s+/g, ' ')
     .trim();
 
-  for (const s of LEGAL_SUFFIXES) {
-    const regex = new RegExp(`\\b${s}\\b$`, 'i');
-    clean = clean.replace(regex, '').trim();
+  let prev = '';
+  while (prev !== clean) {
+    prev = clean;
+    for (const s of LEGAL_SUFFIXES) {
+      const regex = new RegExp(`\\b${s}\\b$`, 'i');
+      clean = clean.replace(regex, '').trim();
+    }
   }
 
   return clean;
@@ -264,6 +287,157 @@ export function normalizeDestinationDomain(rawUrl?: string, rawDomain?: string):
 }
 
 /**
+ * Classifies the duplicate relationship between two candidate or lead entities
+ * following the deterministic Section 6 evidence-strength hierarchy:
+ * 1. EXACT_DUPLICATE: matching stable identifier (Page ID or canonical Page slug)
+ * 2. PROBABLE_DUPLICATE: matching non-generic name + non-shared domain
+ * 3. DISTINCT_ADVERTISER: conflicting stable IDs, conflicting domains, branch variants, or different names
+ * 4. UNKNOWN_IDENTITY: shared marketplace, short generic name without corroboration, or insufficient evidence
+ */
+export function classifyDuplicateRelationship(
+  candidate: Partial<ScrapedAdCandidate | ExtensionLead>,
+  target: Partial<ScrapedAdCandidate | ExtensionLead>
+): DuplicateRelationshipResult {
+  const candName = normalizeAdvertiserName((candidate as any).pageName || (candidate as any).name || (candidate as any).facebookPageName);
+  const targetName = normalizeAdvertiserName((target as any).pageName || (target as any).name || (target as any).facebookPageName);
+
+  const candPageId = (candidate as any).canonicalPageId || (candidate as any).facebookPageId || (candidate as any).pageId;
+  const targetPageId = (target as any).canonicalPageId || (target as any).facebookPageId || (target as any).pageId;
+
+  const candPageNorm = normalizeFacebookPage((candidate as any).facebookPageUrl || (candidate as any).pageUrl, candPageId);
+  const targetPageNorm = normalizeFacebookPage((target as any).facebookPageUrl || (target as any).pageUrl, targetPageId);
+
+  const candDomainNorm = normalizeDestinationDomain((candidate as any).destinationUrl, (candidate as any).destinationDomain);
+  const targetDomainNorm = normalizeDestinationDomain((target as any).destinationUrl, (target as any).destinationDomain);
+
+  const compCand = getComparisonNameKey(candName);
+  const compTarget = getComparisonNameKey(targetName);
+
+  // 1. Conflicting stable identifiers -> DISTINCT_ADVERTISER
+  if (candPageNorm.pageId && targetPageNorm.pageId && candPageNorm.pageId !== targetPageNorm.pageId) {
+    return {
+      matchLevel: 'DISTINCT_ADVERTISER',
+      confidence: 'STRONG',
+      reason: `CONFLICTING_FACEBOOK_PAGE_IDS: Distinct stable Page IDs ("${candPageNorm.pageId}" vs "${targetPageNorm.pageId}")`
+    };
+  }
+
+  if (candPageNorm.pageSlug && targetPageNorm.pageSlug && candPageNorm.pageSlug !== targetPageNorm.pageSlug) {
+    return {
+      matchLevel: 'DISTINCT_ADVERTISER',
+      confidence: 'STRONG',
+      reason: `CONFLICTING_FACEBOOK_PAGE_SLUGS: Distinct Facebook Page slugs ("${candPageNorm.pageSlug}" vs "${targetPageNorm.pageSlug}")`
+    };
+  }
+
+  if (
+    candDomainNorm.canonicalDomain &&
+    targetDomainNorm.canonicalDomain &&
+    !candDomainNorm.isSharedMarketplace &&
+    !targetDomainNorm.isSharedMarketplace &&
+    candDomainNorm.canonicalDomain !== targetDomainNorm.canonicalDomain
+  ) {
+    return {
+      matchLevel: 'DISTINCT_ADVERTISER',
+      confidence: 'STRONG',
+      reason: `CONFLICTING_DESTINATION_DOMAINS: Conflicting domains ("${candDomainNorm.canonicalDomain}" vs "${targetDomainNorm.canonicalDomain}")`
+    };
+  }
+
+  // 2. Check local branch relationship
+  const branchCheck = detectBranchRelationship(candName, targetName, compCand, compTarget);
+  if (branchCheck.isBranchVariant) {
+    const isSamePage = Boolean(
+      (candPageNorm.pageId && targetPageNorm.pageId && candPageNorm.pageId === targetPageNorm.pageId) ||
+      (candPageNorm.pageSlug && targetPageNorm.pageSlug && candPageNorm.pageSlug === targetPageNorm.pageSlug)
+    );
+    if (!isSamePage) {
+      return {
+        matchLevel: 'DISTINCT_ADVERTISER',
+        confidence: 'MODERATE',
+        reason: `DISTINCT_LOCAL_BRANCH: Branch variant detected ("${candName}" vs "${targetName}") without shared Page ID`
+      };
+    }
+  }
+
+  // 3. Exact Duplicate: matching stable identifier
+  if (candPageNorm.pageId && targetPageNorm.pageId && candPageNorm.pageId === targetPageNorm.pageId) {
+    return {
+      matchLevel: 'EXACT_DUPLICATE',
+      confidence: 'STRONG',
+      reason: `EXACT_FACEBOOK_PAGE_ID_MATCH: Identical Facebook Page ID ${candPageNorm.pageId}`
+    };
+  }
+
+  if (candPageNorm.pageSlug && targetPageNorm.pageSlug && candPageNorm.pageSlug === targetPageNorm.pageSlug) {
+    return {
+      matchLevel: 'EXACT_DUPLICATE',
+      confidence: 'STRONG',
+      reason: `EXACT_FACEBOOK_PAGE_SLUG_MATCH: Identical Facebook Page slug "${candPageNorm.pageSlug}"`
+    };
+  }
+
+  // 4. Probable Duplicate: matching non-generic name + non-shared domain
+  if (
+    compCand &&
+    compTarget &&
+    compCand === compTarget &&
+    candDomainNorm.canonicalDomain &&
+    targetDomainNorm.canonicalDomain &&
+    !candDomainNorm.isSharedMarketplace &&
+    candDomainNorm.canonicalDomain === targetDomainNorm.canonicalDomain
+  ) {
+    return {
+      matchLevel: 'PROBABLE_DUPLICATE',
+      confidence: 'STRONG',
+      reason: `PROBABLE_NAME_AND_DOMAIN_MATCH: Corroborated brand name and destination domain "${candDomainNorm.canonicalDomain}"`
+    };
+  }
+
+  // 5. Shared marketplace: cannot establish identity without Page ID
+  if (candDomainNorm.isSharedMarketplace || targetDomainNorm.isSharedMarketplace) {
+    return {
+      matchLevel: 'UNKNOWN_IDENTITY',
+      confidence: 'UNRESOLVED',
+      reason: 'SHARED_MARKETPLACE_DOMAIN: Shared marketplace host cannot establish entity identity'
+    };
+  }
+
+  // 6. Generic short name: ambiguous
+  if (isShortGenericName(candName) || isShortGenericName(targetName)) {
+    return {
+      matchLevel: 'UNKNOWN_IDENTITY',
+      confidence: 'UNRESOLVED',
+      reason: 'GENERIC_NAME_AMBIGUOUS: Short generic brand name requires independent corroborating evidence'
+    };
+  }
+
+  // 7. Non-generic Name match alone without Page or Domain
+  if (compCand && compTarget && compCand === compTarget) {
+    return {
+      matchLevel: 'PROBABLE_DUPLICATE',
+      confidence: 'MODERATE',
+      reason: 'SIMILAR_NAME_UNVERIFIED: Matching display name without corroborating Page ID, Page slug, or domain'
+    };
+  }
+
+  // 8. Distinct advertisers: different names, no shared identifiers
+  if (compCand !== compTarget) {
+    return {
+      matchLevel: 'DISTINCT_ADVERTISER',
+      confidence: 'MODERATE',
+      reason: `DISTINCT_ADVERTISER_NAMES: Distinct brand names ("${candName}" vs "${targetName}") without shared identity evidence`
+    };
+  }
+
+  return {
+    matchLevel: 'UNKNOWN_IDENTITY',
+    confidence: 'WEAK',
+    reason: 'INSUFFICIENT_IDENTITY_EVIDENCE: Neither record possesses sufficient stable identity anchors'
+  };
+}
+
+/**
  * In-Memory High-Speed Entity Resolution Index
  * Maintains $O(1)$ lookup maps for stable entity reconciliation across research runs.
  */
@@ -337,7 +511,7 @@ export function evaluateEntityMerge(
 ): EntityMergeDecision {
   const cleanName = normalizeAdvertiserName(cand.pageName);
   const compName = getComparisonNameKey(cleanName);
-  const pageNorm = normalizeFacebookPage(cand.facebookPageUrl, cand.facebookPageId);
+  const pageNorm = normalizeFacebookPage(cand.facebookPageUrl, cand.facebookPageId || (cand as any).pageId);
   const domainNorm = normalizeDestinationDomain(cand.destinationUrl, cand.destinationDomain);
 
   // 1. TIER 1: Exact Facebook Page ID Match
@@ -348,7 +522,8 @@ export function evaluateEntityMerge(
       targetKey,
       confidence: 'STRONG',
       reason: `MERGE_EXACT_FACEBOOK_PAGE_ID: Matched Page ID ${pageNorm.pageId}`,
-      relationshipType: 'INDEPENDENT_BUSINESS'
+      relationshipType: 'INDEPENDENT_BUSINESS',
+      matchLevel: 'EXACT_DUPLICATE'
     };
   }
 
@@ -360,7 +535,8 @@ export function evaluateEntityMerge(
       targetKey,
       confidence: 'STRONG',
       reason: `MERGE_CANONICAL_FACEBOOK_PAGE_SLUG: Matched Page slug "${pageNorm.pageSlug}"`,
-      relationshipType: 'INDEPENDENT_BUSINESS'
+      relationshipType: 'INDEPENDENT_BUSINESS',
+      matchLevel: 'EXACT_DUPLICATE'
     };
   }
 
@@ -371,21 +547,23 @@ export function evaluateEntityMerge(
       const targetKey = index.nameDomainToKey.get(nameDomainKey)!;
       const targetEntity = existingEntities.get(targetKey);
 
-      // Verify no direct conflict on Facebook Page
+      // Verify no direct conflict on Facebook Page ID or Slug
       const targetPageNorm = normalizeFacebookPage(targetEntity?.facebookPageUrl, targetEntity?.canonicalPageId);
       if (
-        pageNorm.pageSlug &&
-        targetPageNorm.pageSlug &&
-        pageNorm.pageSlug !== targetPageNorm.pageSlug
+        (pageNorm.pageId && targetPageNorm.pageId && pageNorm.pageId !== targetPageNorm.pageId) ||
+        (pageNorm.pageSlug && targetPageNorm.pageSlug && pageNorm.pageSlug !== targetPageNorm.pageSlug)
       ) {
         // Conflicting distinct Facebook pages: do NOT merge!
-        const fallbackKey = `fbslug_${pageNorm.pageSlug}`;
+        const fallbackKey = pageNorm.pageId
+          ? `fbid_${pageNorm.pageId}`
+          : (pageNorm.pageSlug ? `fbslug_${pageNorm.pageSlug}` : `cand_${cand.libraryId}`);
         return {
           shouldMerge: false,
           targetKey: fallbackKey,
           confidence: 'MODERATE',
-          reason: `NON_MERGE_CONFLICTING_FACEBOOK_PAGE: Shared domain ${domainNorm.canonicalDomain} but distinct Page slugs ("${pageNorm.pageSlug}" vs "${targetPageNorm.pageSlug}")`,
-          relationshipType: 'INDEPENDENT_BUSINESS'
+          reason: `NON_MERGE_CONFLICTING_FACEBOOK_PAGE: Shared domain ${domainNorm.canonicalDomain} but conflicting Facebook Page ("${pageNorm.pageId || pageNorm.pageSlug}" vs "${targetPageNorm.pageId || targetPageNorm.pageSlug}")`,
+          relationshipType: 'INDEPENDENT_BUSINESS',
+          matchLevel: 'DISTINCT_ADVERTISER'
         };
       }
 
@@ -394,7 +572,8 @@ export function evaluateEntityMerge(
         targetKey,
         confidence: 'STRONG',
         reason: `MERGE_CORROBORATED_NAME_AND_DOMAIN: Matched brand "${cleanName}" and domain "${domainNorm.canonicalDomain}"`,
-        relationshipType: 'INDEPENDENT_BUSINESS'
+        relationshipType: 'INDEPENDENT_BUSINESS',
+        matchLevel: 'PROBABLE_DUPLICATE'
       };
     }
   }
@@ -420,13 +599,16 @@ export function evaluateEntityMerge(
       if (!isSamePage) {
         const branchKey = pageNorm.pageSlug
           ? `fbslug_${pageNorm.pageSlug}`
-          : `branch_${cleanName.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+          : pageNorm.pageId
+            ? `fbid_${pageNorm.pageId}`
+            : `branch_${cleanName.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
         return {
           shouldMerge: false,
           targetKey: branchKey,
           confidence: 'MODERATE',
           reason: `NON_MERGE_LOCAL_BRANCH_DISTINCTION: Distinct local branch detected ("${cleanName}" vs "${existing.name}") without shared Page ID`,
-          relationshipType: 'LOCAL_BRANCH'
+          relationshipType: 'LOCAL_BRANCH',
+          matchLevel: 'DISTINCT_ADVERTISER'
         };
       }
     }
@@ -438,13 +620,16 @@ export function evaluateEntityMerge(
     // Cannot merge on domain; requires Page identity
     const key = pageNorm.pageSlug
       ? `fbslug_${pageNorm.pageSlug}`
-      : `mkp_${cleanName.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+      : pageNorm.pageId
+        ? `fbid_${pageNorm.pageId}`
+        : `mkp_${cleanName.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
     return {
       shouldMerge: false,
       targetKey: key,
       confidence: 'MODERATE',
       reason: `NON_MERGE_SHARED_MARKETPLACE_DOMAIN: Shared host/marketplace domain (${domainNorm.canonicalDomain}) cannot trigger automatic merge`,
-      relationshipType: 'INDEPENDENT_BUSINESS'
+      relationshipType: 'INDEPENDENT_BUSINESS',
+      matchLevel: 'UNKNOWN_IDENTITY'
     };
   }
 
@@ -461,7 +646,8 @@ export function evaluateEntityMerge(
       targetKey: uniqueKey,
       confidence: 'UNRESOLVED',
       reason: `NON_MERGE_GENERIC_NAME_AMBIGUOUS: Short generic brand name "${cleanName}" requires corroborating Page or Domain`,
-      relationshipType: 'UNRESOLVED_RELATIONSHIP'
+      relationshipType: 'UNRESOLVED_RELATIONSHIP',
+      matchLevel: 'UNKNOWN_IDENTITY'
     };
   }
 
@@ -478,13 +664,35 @@ export function evaluateEntityMerge(
       targetDomainNorm.canonicalDomain &&
       domainNorm.canonicalDomain !== targetDomainNorm.canonicalDomain
     ) {
-      const distinctKey = pageNorm.pageSlug ? `fbslug_${pageNorm.pageSlug}` : `dom_${cleanName.toLowerCase()}_${domainNorm.canonicalDomain}`;
+      const distinctKey = pageNorm.pageSlug
+        ? `fbslug_${pageNorm.pageSlug}`
+        : pageNorm.pageId
+          ? `fbid_${pageNorm.pageId}`
+          : `dom_${cleanName.toLowerCase()}_${domainNorm.canonicalDomain}`;
       return {
         shouldMerge: false,
         targetKey: distinctKey,
         confidence: 'MODERATE',
         reason: `NON_MERGE_CONFLICTING_DESTINATION_DOMAIN: Identical brand name but conflicting domains ("${domainNorm.canonicalDomain}" vs "${targetDomainNorm.canonicalDomain}")`,
-        relationshipType: 'INDEPENDENT_BUSINESS'
+        relationshipType: 'INDEPENDENT_BUSINESS',
+        matchLevel: 'DISTINCT_ADVERTISER'
+      };
+    }
+
+    // If both have Page IDs and they conflict: DO NOT MERGE!
+    if (
+      pageNorm.pageId &&
+      targetPageNorm.pageId &&
+      pageNorm.pageId !== targetPageNorm.pageId
+    ) {
+      const distinctKey = `fbid_${pageNorm.pageId}`;
+      return {
+        shouldMerge: false,
+        targetKey: distinctKey,
+        confidence: 'MODERATE',
+        reason: `NON_MERGE_CONFLICTING_FACEBOOK_PAGE_ID: Identical brand name but conflicting Page IDs ("${pageNorm.pageId}" vs "${targetPageNorm.pageId}")`,
+        relationshipType: 'INDEPENDENT_BUSINESS',
+        matchLevel: 'DISTINCT_ADVERTISER'
       };
     }
 
@@ -500,7 +708,8 @@ export function evaluateEntityMerge(
         targetKey: distinctKey,
         confidence: 'MODERATE',
         reason: `NON_MERGE_CONFLICTING_FACEBOOK_PAGE: Identical brand name but conflicting Page slugs ("${pageNorm.pageSlug}" vs "${targetPageNorm.pageSlug}")`,
-        relationshipType: 'INDEPENDENT_BUSINESS'
+        relationshipType: 'INDEPENDENT_BUSINESS',
+        matchLevel: 'DISTINCT_ADVERTISER'
       };
     }
 
@@ -518,7 +727,8 @@ export function evaluateEntityMerge(
       targetKey: modKey,
       confidence: 'MODERATE',
       reason: `MERGE_CANDIDATE_MODERATE_IDENTITY: Brand name "${cleanName}" matches candidate entity "${targetEntity?.name}" but lacks strong corroborating Page ID, Page URL, or Domain evidence`,
-      relationshipType: 'UNRESOLVED_RELATIONSHIP'
+      relationshipType: 'UNRESOLVED_RELATIONSHIP',
+      matchLevel: 'UNKNOWN_IDENTITY'
     };
   }
 
@@ -536,7 +746,8 @@ export function evaluateEntityMerge(
     targetKey: newKey,
     confidence: pageNorm.pageId || pageNorm.pageSlug ? 'STRONG' : domainNorm.canonicalDomain ? 'MODERATE' : 'WEAK',
     reason: 'NEW_UNIQUE_ENTITY: Discovered new independent advertiser identity',
-    relationshipType: 'INDEPENDENT_BUSINESS'
+    relationshipType: 'INDEPENDENT_BUSINESS',
+    matchLevel: 'DISTINCT_ADVERTISER'
   };
 }
 
@@ -688,15 +899,20 @@ export function mergeCandidateIntoEntity(
   target.destinationReasonCode = aggSummary.destinationReasonCode;
   target.destinationConfidence = aggSummary.destinationConfidence;
 
-  // 8. Record structured merge audit entry
+  // 8. Record structured merge audit entry (idempotent - no duplicate records)
   if (!target.mergeHistory) target.mergeHistory = [];
-  target.mergeHistory.push({
-    timestamp: new Date().toISOString(),
-    mergeReason: decision.reason,
-    sourceLibraryId: cand.libraryId,
-    sourceQuery,
-    confidence: decision.confidence
-  });
+  const isDuplicateMerge = target.mergeHistory.some(
+    m => m.sourceLibraryId === cand.libraryId && m.sourceQuery === sourceQuery
+  );
+  if (!isDuplicateMerge) {
+    target.mergeHistory.push({
+      timestamp: new Date().toISOString(),
+      mergeReason: decision.reason,
+      sourceLibraryId: cand.libraryId,
+      sourceQuery,
+      confidence: decision.confidence
+    });
+  }
 
   // 9. Re-evaluate geographic physical location if relevant country code is available
   const evalTargetCountry = targetCountryCode || target.targetCountryCode || target.locationCode;

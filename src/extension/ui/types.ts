@@ -80,6 +80,7 @@ export interface PlanReviewViewModel {
   strictLocal?: boolean;
   requiredCta?: string;
   requiredDestination?: string;
+  websiteRequirement?: string;
 }
 
 export interface StageStatusViewModel {

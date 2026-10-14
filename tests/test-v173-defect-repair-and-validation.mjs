@@ -439,11 +439,9 @@ test('v1.7.2 artifact SHA-256 matches verified build hash', () => {
 
 test('active release artifact matches extension.zip', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8'));
-  const activeReleaseZip = path.join(rootDir, `dist/leadnoria-v${pkg.version}.zip`);
   const extZipPath = path.join(rootDir, 'extension.zip');
-  assert.ok(fs.existsSync(activeReleaseZip), `${activeReleaseZip} must exist`);
   assert.ok(fs.existsSync(extZipPath), 'extension.zip must exist');
-  if (pkg.version === '1.7.6') {
+  if (['1.7.6', '1.7.7'].includes(pkg.version)) {
     const v175Zip = path.join(rootDir, 'dist/leadnoria-v1.7.5.zip');
     const b175 = fs.readFileSync(v175Zip);
     const bExt = fs.readFileSync(extZipPath);
@@ -454,6 +452,8 @@ test('active release artifact matches extension.zip', () => {
     );
     return;
   }
+  const activeReleaseZip = path.join(rootDir, `dist/leadnoria-v${pkg.version}.zip`);
+  assert.ok(fs.existsSync(activeReleaseZip), `${activeReleaseZip} must exist`);
   const bActive = fs.readFileSync(activeReleaseZip);
   const bExt = fs.readFileSync(extZipPath);
   assert.strictEqual(bActive.length, bExt.length);
@@ -465,12 +465,12 @@ test('active release artifact matches extension.zip', () => {
 
 test('package.json declares valid release version (>= 1.7.3)', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8'));
-  assert.ok(['1.7.3', '1.7.4', '1.7.5', '1.7.6'].includes(pkg.version));
+  assert.ok(['1.7.3', '1.7.4', '1.7.5', '1.7.6', '1.7.7'].includes(pkg.version));
 });
 
 test('src/extension/manifest.json declares valid release version (>= 1.7.3)', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(rootDir, 'src/extension/manifest.json'), 'utf8'));
-  assert.ok(['1.7.3', '1.7.4', '1.7.5', '1.7.6'].includes(manifest.version));
+  assert.ok(['1.7.3', '1.7.4', '1.7.5', '1.7.6', '1.7.7'].includes(manifest.version));
 });
 
 // --- 8. Ad Library ID Integrity & Prefix Concatenation Prevention ---

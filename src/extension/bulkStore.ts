@@ -25,6 +25,7 @@ import type {
 } from './types.ts';
 import { classifyCta, classifyDestination, aggregateAdEvidence } from './destinationClassifier.ts';
 import { evaluateLeadQualificationGates } from './qualificationGate.ts';
+import { normalizeFacebookPage } from './entityResolver.ts';
 
 const DB_NAME = 'leadnoria-research';
 const DB_VERSION = 2;
@@ -70,6 +71,9 @@ export function normalizeStoredLead(raw: any): ExtensionLead {
     adEvidence.push({
       libraryId: libId,
       ctaText: rawCta || undefined,
+      normalizedCtaText: ctaRes.normalizedText,
+      ctaConfidence: ctaRes.confidence,
+      ctaStatus: ctaRes.status,
       ctaType: raw.primaryCtaType || ctaRes.ctaType,
       destinationType: raw.primaryDestinationType || destRes.destinationType,
       destinationUrl: raw.destinationUrl,
@@ -126,10 +130,20 @@ export function normalizeStoredLead(raw: any): ExtensionLead {
     websiteState: webState
   });
 
+  const pageNorm = normalizeFacebookPage(raw.facebookPageUrl, raw.canonicalPageId || raw.facebookPageId);
+  const canonicalPageId = raw.canonicalPageId || pageNorm.pageId || undefined;
+  const canonicalPageSlug = raw.canonicalPageSlug || pageNorm.pageSlug || undefined;
+  const aliases = Array.isArray(raw.aliases)
+    ? Array.from(new Set(raw.aliases.filter((a: any): a is string => typeof a === 'string' && a.trim().length > 0)))
+    : [];
+
   return {
     ...raw,
     name: cleanName,
     canonicalName,
+    canonicalPageId,
+    canonicalPageSlug,
+    aliases,
     facebookPageName: raw.facebookPageName || cleanName,
     facebookPageState: raw.facebookPageState || (raw.facebookPageUrl ? 'found' : 'unknown'),
     destinationUrl: raw.destinationUrl,
@@ -230,7 +244,7 @@ class MemoryStoreFallback {
     }
 
     for (const ent of payload.entities) {
-      const canonicalKey = ent.canonicalName ? ent.canonicalName.toLowerCase() : ent.name.toLowerCase();
+      const canonicalKey = (ent as any).canonicalKey || (ent.canonicalPageId ? `fb_${ent.canonicalPageId}` : (ent.canonicalPageSlug ? `fbslug_${ent.canonicalPageSlug}` : (ent.canonicalName ? ent.canonicalName.toLowerCase() : ent.name.toLowerCase())));
       this.entities.set(`${runId}_${canonicalKey}`, { ...ent, runId, canonicalKey });
       entSet.add(canonicalKey);
     }
@@ -491,6 +505,33 @@ export async function saveRunRecord(run: ExtensionResearchRun): Promise<void> {
 }
 
 /**
+ * Retrieves authoritative run record by runId
+ */
+export async function getRunRecord(runId: string): Promise<ExtensionResearchRun | null> {
+  if (!hasIndexedDB()) {
+    return memoryFallback.getRun(runId);
+  }
+
+  try {
+    const db = await openDB();
+    return await new Promise<ExtensionResearchRun | null>((resolve, reject) => {
+      const tx = db.transaction('runs', 'readonly');
+      const req = tx.objectStore('runs').get(runId);
+      req.onsuccess = () => {
+        db.close();
+        resolve(req.result || null);
+      };
+      req.onerror = () => {
+        db.close();
+        reject(req.error);
+      };
+    });
+  } catch {
+    return memoryFallback.getRun(runId);
+  }
+}
+
+/**
  * Atomically saves a processed batch into IndexedDB (or fallback)
  */
 export async function saveBatch(runId: string, payload: BulkBatchPayload): Promise<void> {
@@ -521,7 +562,7 @@ export async function saveBatch(runId: string, payload: BulkBatchPayload): Promi
 
       // 2. Persist updated/new entities
       for (const ent of payload.entities) {
-        const canonicalKey = ent.canonicalName ? ent.canonicalName.toLowerCase() : ent.name.toLowerCase();
+        const canonicalKey = (ent as any).canonicalKey || (ent.canonicalPageId ? `fb_${ent.canonicalPageId}` : (ent.canonicalPageSlug ? `fbslug_${ent.canonicalPageSlug}` : (ent.canonicalName ? ent.canonicalName.toLowerCase() : ent.name.toLowerCase())));
         entStore.put({ ...ent, runId, canonicalKey });
         dedupStore.put({ runId, idType: 'ENTITY_KEY', idVal: canonicalKey });
       }

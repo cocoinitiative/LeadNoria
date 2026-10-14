@@ -48,7 +48,12 @@ const TEST_SUITES = [
   { name: 'Dependency Hygiene & Runtime Boundary', file: 'tests/test-phase10b-dependency-hygiene.mjs' },
   { name: 'CI Safety Invariants & Boundary Enforcement', file: 'tests/test-phase10c-ci-safety-invariants.mjs' },
   { name: 'Phase 1.0D TypeScript & CI Integrity', file: 'tests/test-phase10d-typecheck-integrity.mjs' },
-  { name: 'Phase 1.0E Final Integration & Readiness', file: 'tests/test-phase10e-integration-readiness.mjs' }
+  { name: 'Phase 1.0E Final Integration & Readiness', file: 'tests/test-phase10e-integration-readiness.mjs' },
+  { name: 'Phase 2 CTA & Destination Remediation', file: 'tests/test-phase02-cta-destination-remediation.mjs' },
+  { name: 'Phase 3 Niche Relevance & Qualification Remediation', file: 'tests/test-phase03-niche-qualification-remediation.mjs' },
+  { name: 'Phase 4 Advertiser Identity & Deduplication', file: 'tests/test-phase04-identity-deduplication.mjs' },
+  { name: 'Phase 5 Discovery Coverage & Extraction Reliability', file: 'tests/test-phase05-discovery-extraction.mjs' },
+  { name: 'Master Audit End-to-End Verification', file: 'tests/test-master-audit-e2e.mjs' }
 ];
 
 function sha256(filePath) {

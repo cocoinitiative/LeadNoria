@@ -312,7 +312,10 @@ async function executeResearchPipeline(
     countryCode,
     {
       strictLocalMode: payload.strictLocalMode,
-      allowProbableLocal: payload.allowProbableLocal
+      allowProbableLocal: payload.allowProbableLocal,
+      requiredCtaTypes: payload.requiredCtaTypes as any,
+      requiredDestinationTypes: payload.requiredDestinationTypes as any,
+      websiteRequirement: payload.websiteRequirement
     }
   );
 
@@ -325,6 +328,12 @@ async function executeResearchPipeline(
     keywords,
     countryCode,
     locationName: payload.locationName,
+    strictLocalMode: payload.strictLocalMode,
+    allowProbableLocal: payload.allowProbableLocal,
+    requiredCtaTypes: payload.requiredCtaTypes,
+    requiredDestinationTypes: payload.requiredDestinationTypes,
+    websiteRequirement: payload.websiteRequirement,
+    researchIntent: researchIntent,
     researchMode: isAutoDiscovery ? 'AUTO_DISCOVERY' : undefined,
     maxFinalUniqueRelevantLeads: isAutoDiscovery ? MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH : undefined,
     maxResults: payload.maxResults ?? effectiveCeiling,
@@ -389,6 +398,19 @@ async function executeResearchPipeline(
 
   const queriesToRun = plannedQueries.map(p => p.query);
 
+  if (queriesToRun.length === 0) {
+    initialRun.status = 'PARTIAL';
+    initialRun.stopReason = 'NO_NEW_RESULTS_OBSERVED';
+    initialRun.warningMessages = ['No valid search queries or keywords provided for research run.'];
+    initialRun.hasWarnings = true;
+    broadcastProgress(initialRun, 'PARTIAL', 'Research completed: No valid search queries provided.');
+    initialRun.completedAt = new Date().toISOString();
+    await saveRunRecord(initialRun);
+    await saveActiveRun(initialRun);
+    await appendToHistory(initialRun);
+    return initialRun;
+  }
+
   const startBroadcastMsg = isAutoDiscovery
     ? `Auto-discovery research initiated in ${payload.locationName} (${queriesToRun.length} planned queries)...`
     : `Research initiated for ${targetLeadCount} leads in ${payload.locationName} (${queriesToRun.length} planned queries)...`;
@@ -431,20 +453,29 @@ async function executeResearchPipeline(
       const queryTypeLabel = currentPlannedQuery.variantType === 'SEED' ? 'Primary Seed' : `Expansion: ${currentPlannedQuery.variantType}`;
       broadcastProgress(initialRun, 'NAVIGATING', `[${qi + 1}/${queriesToRun.length} ${queryTypeLabel}] Opening Meta Ad Library for "${currentKeyword}" in ${countryCode}...`);
 
-      if (!currentTabId) {
-        const tab = await chrome.tabs.create({ url: searchUrl, active: false });
-        currentTabId = tab.id || null;
-      } else {
-        await chrome.tabs.update(currentTabId, { url: searchUrl });
-      }
+      try {
+        if (!currentTabId) {
+          const tab = await chrome.tabs.create({ url: searchUrl, active: false });
+          currentTabId = tab.id || null;
+        } else {
+          await chrome.tabs.update(currentTabId, { url: searchUrl });
+        }
 
-      if (!currentTabId) {
-        throw new Error('Failed to create or update browser tab for research.');
-      }
+        if (!currentTabId) {
+          throw new Error('Failed to create or update browser tab for research.');
+        }
 
-      await waitForTabLoad(currentTabId, searchUrl);
-      // Give DOM extra settle time for dynamic scripts
-      await wait(3000);
+        await waitForTabLoad(currentTabId, searchUrl);
+        // Give DOM extra settle time for dynamic scripts
+        await wait(2000);
+      } catch (navErr: any) {
+        broadcastProgress(initialRun, 'COLLECTING', `Query "${currentKeyword}" failed navigation: ${navErr.message}`);
+        if (!initialRun.warningMessages) initialRun.warningMessages = [];
+        initialRun.warningMessages.push(`Query "${currentKeyword}" navigation failed: ${navErr.message}`);
+        initialRun.hasWarnings = true;
+        completedKeywords.push(currentKeyword);
+        continue;
+      }
 
       initialRun.status = 'COLLECTING';
       broadcastProgress(initialRun, 'COLLECTING', `Connected to Ad Library. Starting ad collection for "${currentKeyword}"...`);
@@ -476,10 +507,23 @@ async function executeResearchPipeline(
           break;
         }
 
-        // Send scan command to content script in the tab
+        // Send scan command to content script in the tab with timeout guard
         let response: any = null;
+        const sendScanWithTimeout = (msg: any, ms = 20000): Promise<any> => {
+          let timeoutTimer: any;
+          const timeoutPromise = new Promise((_, reject) => {
+            timeoutTimer = setTimeout(() => reject(new Error('TAB_TIMEOUT')), ms);
+          });
+          return Promise.race([
+            chrome.tabs.sendMessage(currentTabId!, msg),
+            timeoutPromise
+          ]).finally(() => {
+            if (timeoutTimer) clearTimeout(timeoutTimer);
+          });
+        };
+
         try {
-          response = await chrome.tabs.sendMessage(currentTabId, {
+          response = await sendScanWithTimeout({
             type: 'SCAN_AND_EXTRACT',
             payload: {
               keyword: currentKeyword,
@@ -489,24 +533,31 @@ async function executeResearchPipeline(
             }
           });
         } catch (err: any) {
-          // Content script might need dynamic injection if not yet auto-injected
-          try {
-            await chrome.scripting.executeScript({
-              target: { tabId: currentTabId },
-              files: ['content-script.js']
-            });
-            await wait(1000);
-            response = await chrome.tabs.sendMessage(currentTabId, {
-              type: 'SCAN_AND_EXTRACT',
-              payload: {
-                keyword: currentKeyword,
-                scroll: true,
-                scrollIteration: scrollAttempts,
-                seenLibraryIds: Array.from(seenAdLibraryIds)
-              }
-            });
-          } catch (scriptErr: any) {
-            broadcastProgress(initialRun, 'COLLECTING', `Tab communication retry: ${scriptErr.message}`);
+          if (err?.message === 'TAB_TIMEOUT') {
+            broadcastProgress(initialRun, 'COLLECTING', `Scan request timed out on "${currentKeyword}".`);
+            if (!initialRun.warningMessages) initialRun.warningMessages = [];
+            initialRun.warningMessages.push(`Tab scan timed out for "${currentKeyword}" on attempt ${scrollAttempts}.`);
+            initialRun.hasWarnings = true;
+          } else {
+            // Content script might need dynamic injection if not yet auto-injected
+            try {
+              await chrome.scripting.executeScript({
+                target: { tabId: currentTabId },
+                files: ['content-script.js']
+              });
+              await wait(1000);
+              response = await sendScanWithTimeout({
+                type: 'SCAN_AND_EXTRACT',
+                payload: {
+                  keyword: currentKeyword,
+                  scroll: true,
+                  scrollIteration: scrollAttempts,
+                  seenLibraryIds: Array.from(seenAdLibraryIds)
+                }
+              });
+            } catch (scriptErr: any) {
+              broadcastProgress(initialRun, 'COLLECTING', `Tab communication retry: ${scriptErr.message}`);
+            }
           }
         }
 
@@ -524,6 +575,9 @@ async function executeResearchPipeline(
 
         if (response?.payload?.status === 'EXTRACTION_ERROR') {
           encounteredExtractionError = true;
+          if (!initialRun.warningMessages) initialRun.warningMessages = [];
+          initialRun.warningMessages.push(`Extraction error on "${currentKeyword}": ${response.payload.error || 'DOM structure issue encountered during scan'}`);
+          initialRun.hasWarnings = true;
           broadcastProgress(initialRun, 'COLLECTING', `Extraction diagnostic warning: ${response.payload.error || 'DOM structure issue encountered during scan'}`);
         }
 
@@ -719,6 +773,11 @@ async function executeResearchPipeline(
         broadcastProgress(initialRun, 'FAILED', `Extraction error: Could not extract ad cards from page.`);
       } else {
         initialRun.status = 'PARTIAL';
+        if (encounteredExtractionError) {
+          if (!initialRun.warningMessages) initialRun.warningMessages = [];
+          initialRun.warningMessages.push('One or more queries encountered an extraction error during collection; partial valid results preserved.');
+          initialRun.hasWarnings = true;
+        }
         if (initialRun.totalAdsInspected === 0) {
           initialRun.stopReason = 'NO_NEW_RESULTS_OBSERVED';
         } else if (isStalled) {
@@ -739,10 +798,19 @@ async function executeResearchPipeline(
     }
 
   } catch (err: any) {
-    initialRun.status = 'FAILED';
-    initialRun.stopReason = 'FAILED';
-    initialRun.challengeReason = err.message || 'Unexpected error occurred during research.';
-    broadcastProgress(initialRun, 'FAILED', `Error: ${initialRun.challengeReason}`);
+    if (existingEntitiesMap.size > 0) {
+      initialRun.status = 'PARTIAL';
+      initialRun.stopReason = 'PARTIAL_ERROR';
+      if (!initialRun.warningMessages) initialRun.warningMessages = [];
+      initialRun.warningMessages.push(`Research halted unexpectedly, but ${existingEntitiesMap.size} discovered leads were preserved: ${err.message}`);
+      initialRun.hasWarnings = true;
+      broadcastProgress(initialRun, 'PARTIAL', `Partial results saved (${existingEntitiesMap.size} leads): ${err.message}`);
+    } else {
+      initialRun.status = 'FAILED';
+      initialRun.stopReason = 'FAILED';
+      initialRun.challengeReason = err.message || 'Unexpected error occurred during research.';
+      broadcastProgress(initialRun, 'FAILED', `Error: ${initialRun.challengeReason}`);
+    }
   } finally {
     // Optionally close the automated research tab
     if (currentTabId) {
@@ -790,6 +858,20 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
         const targetLeadCount = isAutoDiscovery ? undefined : effectiveCeiling;
         const keywords = message.payload.keywords.map(k => (k || '').trim()).filter(Boolean);
 
+        const researchIntent = compileResearchIntent(
+          message.payload.mode,
+          keywords,
+          message.payload.presetId,
+          message.payload.countryCode || 'US',
+          {
+            strictLocalMode: message.payload.strictLocalMode,
+            allowProbableLocal: message.payload.allowProbableLocal,
+            requiredCtaTypes: message.payload.requiredCtaTypes as any,
+            requiredDestinationTypes: message.payload.requiredDestinationTypes as any,
+            websiteRequirement: message.payload.websiteRequirement
+          }
+        );
+
         const initialRun: ExtensionResearchRun = {
           runId,
           researchName: message.payload.researchName || `${message.payload.mode === 'PRESET' ? message.payload.presetName || 'Preset' : keywords[0]} in ${message.payload.locationName}`,
@@ -799,6 +881,12 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
           keywords,
           countryCode: message.payload.countryCode || 'US',
           locationName: message.payload.locationName,
+          strictLocalMode: message.payload.strictLocalMode,
+          allowProbableLocal: message.payload.allowProbableLocal,
+          requiredCtaTypes: message.payload.requiredCtaTypes,
+          requiredDestinationTypes: message.payload.requiredDestinationTypes,
+          websiteRequirement: message.payload.websiteRequirement,
+          researchIntent: researchIntent,
           researchMode: isAutoDiscovery ? 'AUTO_DISCOVERY' : undefined,
           maxFinalUniqueRelevantLeads: isAutoDiscovery ? MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH : undefined,
           maxResults: message.payload.maxResults ?? effectiveCeiling,

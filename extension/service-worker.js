@@ -724,11 +724,12 @@ function createEvidenceSignature(type, source, strength, value) {
   const normVal = (value || "").toLowerCase().trim().replace(/\s+/g, " ");
   return `${type}::${source}::${strength}::${normVal}`;
 }
-function createEntityEvidenceProfile(entityKey, advertiserName, canonicalName) {
+function createEntityEvidenceProfile(entityKey, advertiserName = "", canonicalName) {
+  const safeName = advertiserName || "";
   return {
     entityKey,
-    advertiserName,
-    canonicalName: canonicalName || advertiserName,
+    advertiserName: safeName,
+    canonicalName: canonicalName || safeName,
     uniqueEvidenceMap: /* @__PURE__ */ new Map(),
     observedEvidenceOccurrences: 0,
     distinctAdCopyHashes: /* @__PURE__ */ new Set(),
@@ -1193,7 +1194,7 @@ function evaluateStrictRelevanceV3(candidateOrProfile, intent) {
   if ("uniqueEvidenceMap" in candidateOrProfile) {
     profile = candidateOrProfile;
   } else {
-    profile = createEntityEvidenceProfile("cand", candidateOrProfile.advertiserName);
+    profile = createEntityEvidenceProfile("cand", candidateOrProfile.advertiserName || "");
     recordCandidateEvidenceInProfile(profile, candidateOrProfile, intent);
   }
   const candEvidence = {
@@ -1270,7 +1271,7 @@ function evaluateStrictRelevanceV3(candidateOrProfile, intent) {
     (e) => e.type === "ENTITY_IDENTITY" && (e.reasonCode === "SIGNAL_ENTITY_NAME_EXACT" || e.reasonCode === "SIGNAL_ENTITY_NAME_CORE")
   );
   const isAccessoryOnly = ACCESSORY_ONLY_INDICATORS.some(
-    (ind) => profile.advertiserName.toLowerCase().includes(ind) || Array.from(profile.distinctAdCopyHashes).some((copy) => copy.toLowerCase().includes(ind))
+    (ind) => (profile.advertiserName || "").toLowerCase().includes(ind) || Array.from(profile.distinctAdCopyHashes).some((copy) => (copy || "").toLowerCase().includes(ind))
   ) && !hasRootVerticalEntity;
   if (isAccessoryOnly) {
     decision = "UNCERTAIN";
@@ -1527,6 +1528,7 @@ function compileResearchIntent(modeOrConfig, keywords = [], presetId, locationCo
       requiredCtaTypes: modeOrConfig.requiredCtaTypes,
       requiredDestinationTypes: modeOrConfig.requiredDestinationTypes,
       requireWebsiteFound: modeOrConfig.requireWebsiteFound,
+      websiteRequirement: modeOrConfig.websiteRequirement,
       ...options
     };
   }
@@ -1549,7 +1551,8 @@ function compileResearchIntent(modeOrConfig, keywords = [], presetId, locationCo
         allowProbableLocal: opts?.allowProbableLocal,
         requiredCtaTypes: opts?.requiredCtaTypes,
         requiredDestinationTypes: opts?.requiredDestinationTypes,
-        requireWebsiteFound: opts?.requireWebsiteFound
+        requireWebsiteFound: opts?.requireWebsiteFound,
+        websiteRequirement: opts?.websiteRequirement
       };
     }
   }
@@ -1564,7 +1567,8 @@ function compileResearchIntent(modeOrConfig, keywords = [], presetId, locationCo
     allowProbableLocal: opts?.allowProbableLocal,
     requiredCtaTypes: opts?.requiredCtaTypes,
     requiredDestinationTypes: opts?.requiredDestinationTypes,
-    requireWebsiteFound: opts?.requireWebsiteFound
+    requireWebsiteFound: opts?.requireWebsiteFound,
+    websiteRequirement: opts?.websiteRequirement
   };
 }
 var RELEVANCE_STRATEGY_VERSION, RELEVANCE_ENGINE_VERSION, BOUNDED_TAXONOMY, NEGATIVE_CATEGORIES, ACCESSORY_ONLY_INDICATORS, STOP_WORDS, LeadRelevanceEngine;
@@ -2848,7 +2852,11 @@ function classifyCta(rawCtaText) {
     return {
       ctaType: "UNKNOWN",
       rawCtaText: void 0,
+      originalCtaText: void 0,
       normalizedText: "",
+      status: "MISSING",
+      confidence: "NONE",
+      evidence: "No visible call-to-action button or text observed.",
       reasonCode: "CTA_TEXT_MISSING",
       reason: "No visible call-to-action button or text observed."
     };
@@ -2859,17 +2867,43 @@ function classifyCta(rawCtaText) {
     return {
       ctaType: "UNKNOWN",
       rawCtaText: void 0,
+      originalCtaText: void 0,
       normalizedText: "",
+      status: "MISSING",
+      confidence: "NONE",
+      evidence: "Call-to-action text is whitespace-only.",
       reasonCode: "CTA_TEXT_MISSING",
       reason: "Call-to-action text is whitespace-only."
     };
   }
   const clean = normalizedText.replace(/^[\p{P}\s]+|[\p{P}\s]+$/gu, "").toLowerCase();
+  const hasCall = /\b(?:call|phone)\b/i.test(clean);
+  const hasDownload = /\b(?:download|install|app)\b/i.test(clean);
+  const hasShop = /\b(?:shop|buy|order)\b/i.test(clean);
+  const hasMsg = /\b(?:message|whatsapp|chat)\b/i.test(clean);
+  const intentCount = [hasCall, hasDownload, hasShop, hasMsg].filter(Boolean).length;
+  if (intentCount >= 2) {
+    return {
+      ctaType: "OTHER",
+      rawCtaText: rawPreserved,
+      originalCtaText: rawPreserved,
+      normalizedText,
+      status: "AMBIGUOUS",
+      confidence: "LOW",
+      evidence: `Ambiguous CTA text containing multiple conflicting action intents: "${normalizedText}".`,
+      reasonCode: "CTA_TEXT_AMBIGUOUS",
+      reason: `Call-to-action text combines multiple distinct intents ("${normalizedText}").`
+    };
+  }
   if (/^(?:shop(?:\s*now|\s*collection)?|buy(?:\s*now)?|order(?:\s*now)?)$/i.test(clean)) {
     return {
       ctaType: "SHOP_NOW",
       rawCtaText: rawPreserved,
+      originalCtaText: rawPreserved,
       normalizedText,
+      status: "CLASSIFIED",
+      confidence: "HIGH",
+      evidence: "Recognized call-to-action intent: SHOP_NOW.",
       reasonCode: "CTA_TEXT_MATCH",
       reason: "Recognized call-to-action intent: SHOP_NOW."
     };
@@ -2878,7 +2912,11 @@ function classifyCta(rawCtaText) {
     return {
       ctaType: "LEARN_MORE",
       rawCtaText: rawPreserved,
+      originalCtaText: rawPreserved,
       normalizedText,
+      status: "CLASSIFIED",
+      confidence: "HIGH",
+      evidence: "Recognized call-to-action intent: LEARN_MORE.",
       reasonCode: "CTA_TEXT_MATCH",
       reason: "Recognized call-to-action intent: LEARN_MORE."
     };
@@ -2887,7 +2925,11 @@ function classifyCta(rawCtaText) {
     return {
       ctaType: "SIGN_UP",
       rawCtaText: rawPreserved,
+      originalCtaText: rawPreserved,
       normalizedText,
+      status: "CLASSIFIED",
+      confidence: "HIGH",
+      evidence: "Recognized call-to-action intent: SIGN_UP.",
       reasonCode: "CTA_TEXT_MATCH",
       reason: "Recognized call-to-action intent: SIGN_UP."
     };
@@ -2896,7 +2938,11 @@ function classifyCta(rawCtaText) {
     return {
       ctaType: "CONTACT_US",
       rawCtaText: rawPreserved,
+      originalCtaText: rawPreserved,
       normalizedText,
+      status: "CLASSIFIED",
+      confidence: "HIGH",
+      evidence: "Recognized call-to-action intent: CONTACT_US.",
       reasonCode: "CTA_TEXT_MATCH",
       reason: "Recognized call-to-action intent: CONTACT_US."
     };
@@ -2905,7 +2951,11 @@ function classifyCta(rawCtaText) {
     return {
       ctaType: "SEND_MESSAGE",
       rawCtaText: rawPreserved,
+      originalCtaText: rawPreserved,
       normalizedText,
+      status: "CLASSIFIED",
+      confidence: "HIGH",
+      evidence: "Recognized call-to-action intent: SEND_MESSAGE.",
       reasonCode: "CTA_TEXT_MATCH",
       reason: "Recognized call-to-action intent: SEND_MESSAGE."
     };
@@ -2914,7 +2964,11 @@ function classifyCta(rawCtaText) {
     return {
       ctaType: "CALL_NOW",
       rawCtaText: rawPreserved,
+      originalCtaText: rawPreserved,
       normalizedText,
+      status: "CLASSIFIED",
+      confidence: "HIGH",
+      evidence: "Recognized call-to-action intent: CALL_NOW.",
       reasonCode: "CTA_TEXT_MATCH",
       reason: "Recognized call-to-action intent: CALL_NOW."
     };
@@ -2923,7 +2977,11 @@ function classifyCta(rawCtaText) {
     return {
       ctaType: "DOWNLOAD",
       rawCtaText: rawPreserved,
+      originalCtaText: rawPreserved,
       normalizedText,
+      status: "CLASSIFIED",
+      confidence: "HIGH",
+      evidence: "Recognized call-to-action intent: DOWNLOAD.",
       reasonCode: "CTA_TEXT_MATCH",
       reason: "Recognized call-to-action intent: DOWNLOAD."
     };
@@ -2932,7 +2990,11 @@ function classifyCta(rawCtaText) {
     return {
       ctaType: "GET_QUOTE",
       rawCtaText: rawPreserved,
+      originalCtaText: rawPreserved,
       normalizedText,
+      status: "CLASSIFIED",
+      confidence: "HIGH",
+      evidence: "Recognized call-to-action intent: GET_QUOTE.",
       reasonCode: "CTA_TEXT_MATCH",
       reason: "Recognized call-to-action intent: GET_QUOTE."
     };
@@ -2940,7 +3002,11 @@ function classifyCta(rawCtaText) {
   return {
     ctaType: "OTHER",
     rawCtaText: rawPreserved,
+    originalCtaText: rawPreserved,
     normalizedText,
+    status: "UNSUPPORTED",
+    confidence: "LOW",
+    evidence: `Observed visible CTA text: "${normalizedText}".`,
     reasonCode: "CTA_TEXT_OTHER",
     reason: `Observed visible CTA text: "${normalizedText}".`
   };
@@ -2973,25 +3039,109 @@ function classifyDestination(inputs) {
     };
   }
   const targetCtaType = inputs.ctaType || (inputs.ctaText ? classifyCta(inputs.ctaText).ctaType : "UNKNOWN");
-  let domain = (inputs.destinationDomain || "").toLowerCase().trim();
   if (rawUrl) {
-    let lowerUrl = rawUrl.toLowerCase();
+    const lowerUrl = rawUrl.toLowerCase();
+    if (lowerUrl.startsWith("javascript:") || lowerUrl.startsWith("data:") || lowerUrl.startsWith("about:")) {
+      return {
+        destinationType: "UNKNOWN",
+        confidence: "NONE",
+        reasonCode: "MALFORMED_DESTINATION_URL",
+        reason: `Unsupported or invalid script/data URL scheme: "${rawUrl}".`
+      };
+    }
+    if (lowerUrl.startsWith("tel:") || lowerUrl.startsWith("callto:")) {
+      if (targetCtaType === "DOWNLOAD") {
+        return {
+          destinationType: "OTHER",
+          confidence: "LOW",
+          reasonCode: "CONFLICTING_DESTINATION_SIGNALS",
+          reason: "Conflicting destination signals detected between telephone URI and download CTA."
+        };
+      }
+      return {
+        destinationType: "CALL",
+        destinationDomain: void 0,
+        confidence: "HIGH",
+        reasonCode: "EXPLICIT_CALL_SIGNAL",
+        reason: `Direct telephone call URI observed: "${rawUrl}".`
+      };
+    }
+    if (lowerUrl.startsWith("sms:") || lowerUrl.startsWith("whatsapp:") || lowerUrl.startsWith("fb-messenger:") || lowerUrl.startsWith("tg:")) {
+      if (targetCtaType === "CALL_NOW") {
+        return {
+          destinationType: "OTHER",
+          confidence: "LOW",
+          reasonCode: "CONFLICTING_DESTINATION_SIGNALS",
+          reason: "Conflicting destination signals detected between messaging URI and call CTA."
+        };
+      }
+      return {
+        destinationType: "MESSAGING",
+        destinationDomain: void 0,
+        confidence: "HIGH",
+        reasonCode: "EXPLICIT_MESSAGING_SIGNAL",
+        reason: `Direct messaging URI protocol observed: "${rawUrl}".`
+      };
+    }
+    if (lowerUrl.startsWith("market:") || lowerUrl.startsWith("itms-apps:")) {
+      if (targetCtaType === "CALL_NOW" || targetCtaType === "SEND_MESSAGE") {
+        return {
+          destinationType: "OTHER",
+          confidence: "LOW",
+          reasonCode: "CONFLICTING_DESTINATION_SIGNALS",
+          reason: "Conflicting destination signals detected between native app marketplace URI and CTA intent."
+        };
+      }
+      return {
+        destinationType: "APP",
+        destinationDomain: void 0,
+        confidence: "HIGH",
+        reasonCode: "EXPLICIT_APP_SIGNAL",
+        reason: `Native application marketplace protocol URI observed: "${rawUrl}".`
+      };
+    }
+    if (lowerUrl.startsWith("mailto:")) {
+      return {
+        destinationType: "OTHER",
+        destinationDomain: void 0,
+        confidence: "MEDIUM",
+        reasonCode: "EMAIL_DESTINATION_SIGNAL",
+        reason: `Direct email destination URI observed: "${rawUrl}".`
+      };
+    }
+    let resolvedUrl = lowerUrl;
     if (lowerUrl.includes("facebook.com/l.php")) {
       try {
         const u = new URL(rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`);
         const shimmed = u.searchParams.get("u");
         if (shimmed) {
-          lowerUrl = decodeURIComponent(shimmed).toLowerCase();
+          resolvedUrl = decodeURIComponent(shimmed).toLowerCase();
         }
       } catch {
       }
     }
+    let domain = (inputs.destinationDomain || "").toLowerCase().trim();
     if (!domain) {
       try {
-        const u = new URL(lowerUrl.startsWith("http") ? lowerUrl : `https://${lowerUrl}`);
-        domain = u.hostname.replace(/^(?:www\.|m\.|l\.)/, "");
+        const u = new URL(resolvedUrl.startsWith("http") ? resolvedUrl : `https://${resolvedUrl}`);
+        const host = u.hostname.toLowerCase();
+        domain = host === "m.me" ? "m.me" : host.replace(/^(?:www\.|m\.|l\.)/, "");
       } catch {
+        return {
+          destinationType: "UNKNOWN",
+          confidence: "NONE",
+          reasonCode: "MALFORMED_DESTINATION_URL",
+          reason: `Provided destination URL is malformed or invalid: "${rawUrl}".`
+        };
       }
+    }
+    if (!domain || !domain.includes(".") || domain.length < 4 || domain.endsWith(".") || domain.startsWith(".") || !/^[a-z0-9]([a-z0-9\-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9\-]*[a-z0-9])?)+$/i.test(domain)) {
+      return {
+        destinationType: "UNKNOWN",
+        confidence: "NONE",
+        reasonCode: "MALFORMED_DESTINATION_URL",
+        reason: `Provided destination URL does not contain a valid domain hostname: "${rawUrl}".`
+      };
     }
     const isAppUrl = /^(?:play\.google\.com|apps\.apple\.com|itunes\.apple\.com)$/i.test(domain);
     if (isAppUrl && (targetCtaType === "CALL_NOW" || targetCtaType === "SEND_MESSAGE")) {
@@ -3002,7 +3152,15 @@ function classifyDestination(inputs) {
         reason: "Conflicting destination signals detected between action URL (App) and CTA intent."
       };
     }
-    if (domain === "wa.me" || domain === "api.whatsapp.com" || domain === "whatsapp.com" || domain === "m.me" || domain === "messenger.com" || lowerUrl.startsWith("whatsapp:") || lowerUrl.includes("facebook.com/messages")) {
+    if (domain === "wa.me" || domain === "api.whatsapp.com" || domain === "whatsapp.com" || domain === "m.me" || domain === "messenger.com" || domain === "t.me" || domain === "telegram.me" || resolvedUrl.includes("facebook.com/messages")) {
+      if (targetCtaType === "CALL_NOW") {
+        return {
+          destinationType: "OTHER",
+          confidence: "LOW",
+          reasonCode: "CONFLICTING_DESTINATION_SIGNALS",
+          reason: "Conflicting destination signals detected between messaging URL and call CTA."
+        };
+      }
       return {
         destinationType: "MESSAGING",
         destinationDomain: domain || void 0,
@@ -3011,7 +3169,7 @@ function classifyDestination(inputs) {
         reason: "Verified messaging destination via WhatsApp or Messenger endpoint."
       };
     }
-    if (domain === "play.google.com" && lowerUrl.includes("/store/apps") || domain === "apps.apple.com" || domain === "itunes.apple.com") {
+    if (domain === "play.google.com" && resolvedUrl.includes("/store/apps") || domain === "apps.apple.com" || domain === "itunes.apple.com") {
       return {
         destinationType: "APP",
         destinationDomain: domain || void 0,
@@ -3020,7 +3178,7 @@ function classifyDestination(inputs) {
         reason: "Verified native application marketplace destination."
       };
     }
-    if (lowerUrl.includes("/lead_gen/") || lowerUrl.includes("fb.com/lead_gen") || lowerUrl.includes("/canvas_doc/") || lowerUrl.includes("instant_form")) {
+    if (resolvedUrl.includes("/lead_gen/") || resolvedUrl.includes("fb.com/lead_gen") || resolvedUrl.includes("/canvas_doc/") || resolvedUrl.includes("instant_form")) {
       return {
         destinationType: "INSTANT_FORM",
         destinationDomain: domain || void 0,
@@ -3074,7 +3232,7 @@ function classifyDestination(inputs) {
       reason: "Instant form destination indicated by ad metadata."
     };
   }
-  if (targetCtaType === "SHOP_NOW" || targetCtaType === "LEARN_MORE" || targetCtaType === "SIGN_UP" || targetCtaType === "GET_QUOTE") {
+  if (targetCtaType === "SHOP_NOW" || targetCtaType === "LEARN_MORE" || targetCtaType === "SIGN_UP" || targetCtaType === "GET_QUOTE" || targetCtaType === "DOWNLOAD" || targetCtaType === "CONTACT_US") {
     return {
       destinationType: "UNKNOWN",
       confidence: "LOW",
@@ -3211,8 +3369,9 @@ function evaluateLeadQualificationGates(lead, criteria) {
     }
   }
   if (criteria?.requiredDestinationTypes && criteria.requiredDestinationTypes.length > 0) {
+    const effectiveReqDests = criteria.requiredDestinationTypes.map((d) => d === "APP_STORE" ? "APP" : d);
     const observedDests = lead.observedDestinationTypes || (lead.primaryDestinationType ? [lead.primaryDestinationType] : []);
-    const matchesDest = observedDests.some((d) => criteria.requiredDestinationTypes.includes(d));
+    const matchesDest = observedDests.some((d) => effectiveReqDests.includes(d));
     if (matchesDest) {
       passedGates.push("GATE_DESTINATION");
     } else {
@@ -3220,546 +3379,53 @@ function evaluateLeadQualificationGates(lead, criteria) {
       reasons.push(`Observed destinations (${observedDests.join(", ") || "none"}) do not satisfy required destination types: ${criteria.requiredDestinationTypes.join(", ")}.`);
     }
   }
+  const reqWebMode = criteria?.websiteRequirement;
   const isWebsiteDestination = lead.primaryDestinationType === "EXTERNAL_WEBSITE" || lead.observedDestinationTypes && lead.observedDestinationTypes.includes("EXTERNAL_WEBSITE");
-  const requireWeb = criteria?.requireWebsiteFound ?? isWebsiteDestination;
-  if (requireWeb && lead.websiteState !== "found") {
-    failedGates.push("GATE_WEBSITE");
-    reasons.push("External website was required or classified as primary destination, but valid destination URL is missing.");
+  if (reqWebMode === "WITH_WEBSITE" || reqWebMode === "WITH") {
+    if (lead.websiteState !== "found" || !lead.destinationUrl && !lead.destinationDomain) {
+      failedGates.push("GATE_WEBSITE");
+      reasons.push("Configured website requirement (WITH_WEBSITE) failed: external website destination is unobserved, missing, or unverified.");
+    } else {
+      passedGates.push("GATE_WEBSITE");
+    }
+  } else if (reqWebMode === "WITHOUT_WEBSITE" || reqWebMode === "WITHOUT") {
+    if (lead.websiteState === "found" || Boolean(lead.destinationUrl || lead.destinationDomain)) {
+      failedGates.push("GATE_WEBSITE");
+      reasons.push("Configured website requirement (WITHOUT_WEBSITE) failed: business has an observed website destination.");
+    } else if (lead.websiteState === "not_found" && lead.primaryDestinationType === "NO_VISIBLE_DESTINATION") {
+      passedGates.push("GATE_WEBSITE");
+    } else {
+      failedGates.push("GATE_WEBSITE");
+      reasons.push("Configured website requirement (WITHOUT_WEBSITE) requires explicit evidence of absence; missing ad destination URL alone does not prove no website.");
+    }
+  } else {
+    const requireWeb = criteria?.requireWebsiteFound ?? isWebsiteDestination;
+    if (requireWeb && lead.websiteState !== "found") {
+      failedGates.push("GATE_WEBSITE");
+      reasons.push("External website was required or classified as primary destination, but valid destination URL is missing.");
+    } else {
+      passedGates.push("GATE_WEBSITE");
+    }
   }
   const isQualified = failedGates.length === 0;
+  let canonicalOutcome;
+  if (isQualified) {
+    canonicalOutcome = "QUALIFIED";
+  } else {
+    const isHardRejection = lead.relevanceDecision === "NOT_RELEVANT" || geo === "FOREIGN_VERIFIED" || (reqWebMode === "WITHOUT_WEBSITE" || reqWebMode === "WITHOUT") && (lead.websiteState === "found" || Boolean(lead.destinationUrl || lead.destinationDomain));
+    canonicalOutcome = isHardRejection ? "REJECTED" : "REVIEW";
+  }
   return {
     isQualified,
     status: isQualified ? "QUALIFIED" : "REVIEW_REQUIRED",
+    canonicalOutcome,
     failedGates,
     passedGates,
     reasons
   };
 }
 
-// src/extension/bulkStore.ts
-var DB_NAME = "leadnoria-research";
-var DB_VERSION = 2;
-function normalizeStoredLead(raw) {
-  if (!raw || typeof raw !== "object") {
-    throw new Error("INVALID_LEAD_RECORD: Cannot normalize non-object record");
-  }
-  const cleanName = (raw.name || raw.canonicalName || raw.facebookPageName || "Unknown Advertiser").trim();
-  const canonicalName = (raw.canonicalName || cleanName).trim();
-  let adEvidence = Array.isArray(raw.adEvidence) ? [...raw.adEvidence] : [];
-  const seenLibIds = /* @__PURE__ */ new Set();
-  adEvidence = adEvidence.filter((e) => {
-    if (!e || typeof e !== "object" || !e.libraryId) return false;
-    if (seenLibIds.has(e.libraryId)) return false;
-    seenLibIds.add(e.libraryId);
-    return true;
-  });
-  if (adEvidence.length === 0 && (raw.sampleCta || raw.destinationUrl || raw.adLibraryIds && raw.adLibraryIds.length > 0)) {
-    const rawCta = raw.sampleCta || raw.ctaText || "";
-    const ctaRes = classifyCta(rawCta);
-    const destRes = classifyDestination({
-      destinationUrl: raw.destinationUrl,
-      destinationDomain: raw.destinationDomain,
-      ctaText: rawCta,
-      ctaType: ctaRes.ctaType,
-      bodyCopy: raw.sampleCopy
-    });
-    const libId = Array.isArray(raw.adLibraryIds) && raw.adLibraryIds[0] ? raw.adLibraryIds[0] : `ad_legacy_${raw.id || "unknown"}`;
-    adEvidence.push({
-      libraryId: libId,
-      ctaText: rawCta || void 0,
-      ctaType: raw.primaryCtaType || ctaRes.ctaType,
-      destinationType: raw.primaryDestinationType || destRes.destinationType,
-      destinationUrl: raw.destinationUrl,
-      destinationDomain: raw.destinationDomain,
-      reasonCode: raw.destinationReasonCode || destRes.reasonCode,
-      confidence: raw.destinationConfidence || destRes.confidence,
-      observedAt: raw.discoveredAt || (/* @__PURE__ */ new Date()).toISOString()
-    });
-  }
-  const ctaSummary = aggregateAdEvidence(adEvidence);
-  let geoClassification = raw.geographicClassification;
-  if (!geoClassification) {
-    if (raw.businessCountryCode && raw.targetCountryCode && raw.businessCountryCode === raw.targetCountryCode) {
-      geoClassification = "LOCAL_PROBABLE";
-    } else if (raw.businessCountryCode && raw.targetCountryCode && raw.businessCountryCode !== raw.targetCountryCode) {
-      geoClassification = "FOREIGN_VERIFIED";
-    } else {
-      geoClassification = "LOCATION_UNKNOWN";
-    }
-  }
-  let relevanceDecision = raw.relevanceDecision;
-  if (!relevanceDecision) {
-    relevanceDecision = "UNASSESSED";
-  }
-  let webState = raw.websiteState;
-  if (!webState || webState === "not_found" && !raw.destinationUrl && ctaSummary.primaryDestinationType !== "NO_VISIBLE_DESTINATION") {
-    webState = raw.destinationUrl ? "found" : "unknown";
-  }
-  const adIds = Array.isArray(raw.adLibraryIds) ? Array.from(new Set(raw.adLibraryIds.filter((id) => typeof id === "string" && /^[0-9]{5,25}$/.test(id)))) : [];
-  const activeAdIds = Array.isArray(raw.activeAdLibraryIds) ? Array.from(new Set(raw.activeAdLibraryIds.filter((id) => typeof id === "string" && adIds.includes(id)))) : [...adIds];
-  const qualResult = evaluateLeadQualificationGates({
-    name: cleanName,
-    adLibraryIds: adIds,
-    relevanceDecision,
-    geographicClassification: geoClassification,
-    primaryCtaType: ctaSummary.primaryCtaType,
-    observedCtaTypes: ctaSummary.observedCtaTypes,
-    primaryDestinationType: ctaSummary.primaryDestinationType,
-    observedDestinationTypes: ctaSummary.observedDestinationTypes,
-    websiteState: webState
-  });
-  return {
-    ...raw,
-    name: cleanName,
-    canonicalName,
-    facebookPageName: raw.facebookPageName || cleanName,
-    facebookPageState: raw.facebookPageState || (raw.facebookPageUrl ? "found" : "unknown"),
-    destinationUrl: raw.destinationUrl,
-    destinationDomain: raw.destinationDomain,
-    websiteState: webState,
-    adCount: adIds.length || raw.adCount || 0,
-    activeAdCount: activeAdIds.length || raw.activeAdCount || 0,
-    adLibraryIds: adIds,
-    activeAdLibraryIds: activeAdIds,
-    adEvidence,
-    observedCtaTexts: ctaSummary.observedCtaTexts,
-    observedCtaTypes: ctaSummary.observedCtaTypes,
-    observedDestinationTypes: ctaSummary.observedDestinationTypes,
-    primaryCtaType: ctaSummary.primaryCtaType,
-    primaryDestinationType: ctaSummary.primaryDestinationType,
-    destinationReasonCode: ctaSummary.destinationReasonCode,
-    destinationConfidence: ctaSummary.destinationConfidence,
-    geographicClassification: geoClassification,
-    businessLocationConfidence: raw.businessLocationConfidence || "NONE",
-    businessLocationEvidence: Array.isArray(raw.businessLocationEvidence) ? raw.businessLocationEvidence : [],
-    businessLocationReason: raw.businessLocationReason || "Restored from persistent storage",
-    relevanceDecision,
-    relevanceConfidence: raw.relevanceConfidence || (relevanceDecision === "RELEVANT" ? "HIGH" : "LOW"),
-    relevanceScore: raw.relevanceScore,
-    status: qualResult.status,
-    qualificationFailedGates: qualResult.failedGates,
-    qualificationReasons: qualResult.reasons,
-    schemaVersion: 2
-  };
-}
-var MemoryStoreFallback = class {
-  constructor() {
-    this.runs = /* @__PURE__ */ new Map();
-    this.ads = /* @__PURE__ */ new Map();
-    // key: `${runId}_${libraryId}`
-    this.entities = /* @__PURE__ */ new Map();
-    // key: `${runId}_${canonicalKey}`
-    this.uncertainEntities = /* @__PURE__ */ new Map();
-    // key: `${runId}_${entityId}`
-    this.advertiserExpansions = /* @__PURE__ */ new Map();
-    // key: runId
-    this.evidence = /* @__PURE__ */ new Map();
-    // key: `${runId}_${canonicalKey}`
-    this.checkpoints = /* @__PURE__ */ new Map();
-    // key: `${runId}_${batchIndex}`
-    this.dedupAds = /* @__PURE__ */ new Map();
-    // runId -> Set<libraryId>
-    this.dedupEntities = /* @__PURE__ */ new Map();
-  }
-  // runId -> Set<canonicalKey>
-  async saveRun(run) {
-    this.runs.set(run.runId, JSON.parse(JSON.stringify(run)));
-  }
-  async getRun(runId) {
-    const r = this.runs.get(runId);
-    return r ? JSON.parse(JSON.stringify(r)) : null;
-  }
-  async saveBatch(runId, payload) {
-    if (!this.dedupAds.has(runId)) this.dedupAds.set(runId, /* @__PURE__ */ new Set());
-    if (!this.dedupEntities.has(runId)) this.dedupEntities.set(runId, /* @__PURE__ */ new Set());
-    const adSet = this.dedupAds.get(runId);
-    const entSet = this.dedupEntities.get(runId);
-    for (const ad of payload.ads) {
-      this.ads.set(`${runId}_${ad.libraryId}`, { ...ad, runId });
-      adSet.add(ad.libraryId);
-    }
-    for (const ent of payload.entities) {
-      const canonicalKey = ent.canonicalName ? ent.canonicalName.toLowerCase() : ent.name.toLowerCase();
-      this.entities.set(`${runId}_${canonicalKey}`, { ...ent, runId, canonicalKey });
-      entSet.add(canonicalKey);
-    }
-    if (payload.uncertainEntities) {
-      for (const unc of payload.uncertainEntities) {
-        this.uncertainEntities.set(`${runId}_${unc.entityId}`, { ...unc, runId });
-      }
-    }
-    if (payload.advertiserExpansions) {
-      const list = this.advertiserExpansions.get(runId) || [];
-      list.push(...payload.advertiserExpansions);
-      this.advertiserExpansions.set(runId, list);
-    }
-    if (payload.evidence) {
-      for (const ev of payload.evidence) {
-        this.evidence.set(`${runId}_${ev.canonicalKey}`, ev.evidence);
-      }
-    }
-    this.checkpoints.set(`${runId}_${payload.batchIndex}`, payload.checkpoint);
-  }
-  async getAllRelevantLeads(runId) {
-    const results = [];
-    for (const [key, ent] of this.entities.entries()) {
-      if (key.startsWith(`${runId}_`)) {
-        if (ent.relevanceDecision === "RELEVANT" && ent.evaluationStatus !== "UNCERTAIN" && ent.evaluationStatus !== "REJECTED") {
-          results.push(normalizeStoredLead(ent));
-        }
-      }
-    }
-    return results;
-  }
-  async getAllStoredLeads(runId) {
-    const results = [];
-    for (const [key, ent] of this.entities.entries()) {
-      if (key.startsWith(`${runId}_`)) {
-        results.push(normalizeStoredLead(ent));
-      }
-    }
-    return results;
-  }
-  async getAllUncertainEntities(runId) {
-    const list = [];
-    for (const [key, unc] of this.uncertainEntities.entries()) {
-      if (key.startsWith(`${runId}_`)) {
-        list.push(JSON.parse(JSON.stringify(unc)));
-      }
-    }
-    return list;
-  }
-  async getAllAdvertiserExpansions(runId) {
-    return JSON.parse(JSON.stringify(this.advertiserExpansions.get(runId) || []));
-  }
-  async getEntity(runId, canonicalKey) {
-    const ent = this.entities.get(`${runId}_${canonicalKey.toLowerCase()}`);
-    return ent ? normalizeStoredLead(ent) : null;
-  }
-  async getSeenAdIds(runId) {
-    return new Set(this.dedupAds.get(runId) || []);
-  }
-  async getSeenEntityKeys(runId) {
-    return new Set(this.dedupEntities.get(runId) || []);
-  }
-  async getLatestCheckpoint(runId) {
-    let latestIndex = -1;
-    let latestCp = null;
-    for (const [key, cp] of this.checkpoints.entries()) {
-      if (key.startsWith(`${runId}_`)) {
-        if (cp.batchIndex > latestIndex) {
-          latestIndex = cp.batchIndex;
-          latestCp = cp;
-        }
-      }
-    }
-    return latestCp ? JSON.parse(JSON.stringify(latestCp)) : null;
-  }
-  async getStorageStats(runId) {
-    let totalAds = 0;
-    let totalEntities = 0;
-    let totalRelevant = 0;
-    let totalCheckpoints = 0;
-    let bytes = 0;
-    for (const [k, v] of this.ads.entries()) {
-      if (k.startsWith(`${runId}_`)) {
-        totalAds++;
-        bytes += JSON.stringify(v).length;
-      }
-    }
-    for (const [k, v] of this.entities.entries()) {
-      if (k.startsWith(`${runId}_`)) {
-        totalEntities++;
-        if (v.relevanceDecision === "RELEVANT" && v.evaluationStatus !== "UNCERTAIN" && v.evaluationStatus !== "REJECTED") totalRelevant++;
-        bytes += JSON.stringify(v).length;
-      }
-    }
-    for (const [k, v] of this.checkpoints.entries()) {
-      if (k.startsWith(`${runId}_`)) {
-        totalCheckpoints++;
-        bytes += JSON.stringify(v).length;
-      }
-    }
-    return {
-      runId,
-      totalAds,
-      totalEntities,
-      totalRelevantLeads: totalRelevant,
-      totalCheckpoints,
-      estimatedBytes: bytes
-    };
-  }
-  async clearRun(runId) {
-    this.runs.delete(runId);
-    this.dedupAds.delete(runId);
-    this.dedupEntities.delete(runId);
-    for (const k of Array.from(this.ads.keys())) {
-      if (k.startsWith(`${runId}_`)) this.ads.delete(k);
-    }
-    for (const k of Array.from(this.entities.keys())) {
-      if (k.startsWith(`${runId}_`)) this.entities.delete(k);
-    }
-    for (const k of Array.from(this.evidence.keys())) {
-      if (k.startsWith(`${runId}_`)) this.evidence.delete(k);
-    }
-    for (const k of Array.from(this.checkpoints.keys())) {
-      if (k.startsWith(`${runId}_`)) this.checkpoints.delete(k);
-    }
-  }
-};
-var memoryFallback = new MemoryStoreFallback();
-function hasIndexedDB() {
-  return typeof indexedDB !== "undefined" && indexedDB !== null;
-}
-function openDB() {
-  return new Promise((resolve, reject) => {
-    if (!hasIndexedDB()) {
-      return reject(new Error("IndexedDB not available"));
-    }
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains("runs")) {
-        db.createObjectStore("runs", { keyPath: "runId" });
-      }
-      if (!db.objectStoreNames.contains("ads")) {
-        const adStore = db.createObjectStore("ads", { keyPath: ["runId", "libraryId"] });
-        adStore.createIndex("by_run", "runId", { unique: false });
-      }
-      if (!db.objectStoreNames.contains("entities")) {
-        const entStore = db.createObjectStore("entities", { keyPath: ["runId", "canonicalKey"] });
-        entStore.createIndex("by_run", "runId", { unique: false });
-        entStore.createIndex("by_run_decision", ["runId", "relevanceDecision"], { unique: false });
-      }
-      if (!db.objectStoreNames.contains("evidence")) {
-        const evStore = db.createObjectStore("evidence", { keyPath: ["runId", "canonicalKey"] });
-        evStore.createIndex("by_run", "runId", { unique: false });
-      }
-      if (!db.objectStoreNames.contains("checkpoints")) {
-        const cpStore = db.createObjectStore("checkpoints", { keyPath: ["runId", "batchIndex"] });
-        cpStore.createIndex("by_run", "runId", { unique: false });
-      }
-      if (!db.objectStoreNames.contains("dedupIndex")) {
-        const dedupStore = db.createObjectStore("dedupIndex", { keyPath: ["runId", "idType", "idVal"] });
-        dedupStore.createIndex("by_run", "runId", { unique: false });
-      }
-      if (!db.objectStoreNames.contains("uncertain_entities")) {
-        const uncStore = db.createObjectStore("uncertain_entities", { keyPath: ["runId", "entityId"] });
-        uncStore.createIndex("by_run", "runId", { unique: false });
-      }
-      if (!db.objectStoreNames.contains("advertiser_expansions")) {
-        const expStore = db.createObjectStore("advertiser_expansions", { keyPath: ["runId", "sourceEntityId"] });
-        expStore.createIndex("by_run", "runId", { unique: false });
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-async function initBulkStore() {
-  if (!hasIndexedDB()) {
-    return false;
-  }
-  try {
-    const db = await openDB();
-    db.close();
-    return true;
-  } catch (err) {
-    console.warn("[bulkStore] IndexedDB init failed, using memory fallback:", err);
-    return false;
-  }
-}
-async function saveRunRecord(run) {
-  if (!hasIndexedDB()) {
-    return memoryFallback.saveRun(run);
-  }
-  try {
-    const db = await openDB();
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction("runs", "readwrite");
-      tx.objectStore("runs").put(run);
-      tx.oncomplete = () => {
-        db.close();
-        resolve();
-      };
-      tx.onerror = () => {
-        db.close();
-        reject(tx.error);
-      };
-    });
-  } catch {
-    return memoryFallback.saveRun(run);
-  }
-}
-async function saveBatch(runId, payload) {
-  if (!hasIndexedDB()) {
-    return memoryFallback.saveBatch(runId, payload);
-  }
-  try {
-    const db = await openDB();
-    await new Promise((resolve, reject) => {
-      const storeNames = ["ads", "entities", "evidence", "checkpoints", "dedupIndex"];
-      if (db.objectStoreNames.contains("uncertain_entities")) storeNames.push("uncertain_entities");
-      if (db.objectStoreNames.contains("advertiser_expansions")) storeNames.push("advertiser_expansions");
-      const tx = db.transaction(storeNames, "readwrite");
-      const adStore = tx.objectStore("ads");
-      const entStore = tx.objectStore("entities");
-      const evStore = tx.objectStore("evidence");
-      const cpStore = tx.objectStore("checkpoints");
-      const dedupStore = tx.objectStore("dedupIndex");
-      for (const ad of payload.ads) {
-        adStore.put({ ...ad, runId });
-        dedupStore.put({ runId, idType: "AD_ID", idVal: ad.libraryId });
-      }
-      for (const ent of payload.entities) {
-        const canonicalKey = ent.canonicalName ? ent.canonicalName.toLowerCase() : ent.name.toLowerCase();
-        entStore.put({ ...ent, runId, canonicalKey });
-        dedupStore.put({ runId, idType: "ENTITY_KEY", idVal: canonicalKey });
-      }
-      if (payload.evidence) {
-        for (const ev of payload.evidence) {
-          evStore.put({ runId, canonicalKey: ev.canonicalKey, evidence: ev.evidence });
-        }
-      }
-      if (payload.uncertainEntities && db.objectStoreNames.contains("uncertain_entities")) {
-        const uncStore = tx.objectStore("uncertain_entities");
-        for (const unc of payload.uncertainEntities) {
-          uncStore.put({ ...unc, runId });
-        }
-      }
-      if (payload.advertiserExpansions && db.objectStoreNames.contains("advertiser_expansions")) {
-        const expStore = tx.objectStore("advertiser_expansions");
-        for (const exp of payload.advertiserExpansions) {
-          expStore.put({ ...exp, runId });
-        }
-      }
-      cpStore.put({ ...payload.checkpoint, runId, batchIndex: payload.batchIndex });
-      tx.oncomplete = () => {
-        db.close();
-        resolve();
-      };
-      tx.onerror = () => {
-        db.close();
-        reject(tx.error);
-      };
-    });
-  } catch {
-    return memoryFallback.saveBatch(runId, payload);
-  }
-}
-async function getAllRelevantLeads(runId) {
-  if (!hasIndexedDB()) {
-    return memoryFallback.getAllRelevantLeads(runId);
-  }
-  try {
-    const db = await openDB();
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction("entities", "readonly");
-      const store = tx.objectStore("entities");
-      const index = store.index("by_run");
-      const request = index.getAll(runId);
-      request.onsuccess = () => {
-        db.close();
-        const records = request.result || [];
-        const relevant = records.filter(
-          (r) => r.relevanceDecision === "RELEVANT" && r.evaluationStatus !== "UNCERTAIN" && r.evaluationStatus !== "REJECTED"
-        ).map((r) => normalizeStoredLead(r));
-        resolve(relevant);
-      };
-      request.onerror = () => {
-        db.close();
-        reject(request.error);
-      };
-    });
-  } catch {
-    return memoryFallback.getAllRelevantLeads(runId);
-  }
-}
-async function getAllStoredLeads(runId) {
-  if (!hasIndexedDB()) {
-    return memoryFallback.getAllStoredLeads(runId);
-  }
-  try {
-    const db = await openDB();
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction("entities", "readonly");
-      const store = tx.objectStore("entities");
-      const index = store.index("by_run");
-      const request = index.getAll(runId);
-      request.onsuccess = () => {
-        db.close();
-        const records = request.result || [];
-        resolve(records.map((r) => normalizeStoredLead(r)));
-      };
-      request.onerror = () => {
-        db.close();
-        reject(request.error);
-      };
-    });
-  } catch {
-    return memoryFallback.getAllStoredLeads(runId);
-  }
-}
-async function getSeenAdIds(runId) {
-  if (!hasIndexedDB()) {
-    return memoryFallback.getSeenAdIds(runId);
-  }
-  try {
-    const db = await openDB();
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction("dedupIndex", "readonly");
-      const store = tx.objectStore("dedupIndex");
-      const index = store.index("by_run");
-      const request = index.getAll(runId);
-      request.onsuccess = () => {
-        db.close();
-        const items = request.result || [];
-        const ids = /* @__PURE__ */ new Set();
-        for (const it of items) {
-          if (it.idType === "AD_ID") ids.add(it.idVal);
-        }
-        resolve(ids);
-      };
-      request.onerror = () => {
-        db.close();
-        reject(request.error);
-      };
-    });
-  } catch {
-    return memoryFallback.getSeenAdIds(runId);
-  }
-}
-async function getSeenEntityKeys(runId) {
-  if (!hasIndexedDB()) {
-    return memoryFallback.getSeenEntityKeys(runId);
-  }
-  try {
-    const db = await openDB();
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction("dedupIndex", "readonly");
-      const store = tx.objectStore("dedupIndex");
-      const index = store.index("by_run");
-      const request = index.getAll(runId);
-      request.onsuccess = () => {
-        db.close();
-        const items = request.result || [];
-        const keys = /* @__PURE__ */ new Set();
-        for (const it of items) {
-          if (it.idType === "ENTITY_KEY") keys.add(it.idVal);
-        }
-        resolve(keys);
-      };
-      request.onerror = () => {
-        db.close();
-        reject(request.error);
-      };
-    });
-  } catch {
-    return memoryFallback.getSeenEntityKeys(runId);
-  }
-}
-
-// src/extension/bulkProcessor.ts
+// src/extension/metaAdapter.ts
 init_relevanceEngine();
 
 // src/extension/countryProfiles/profiles/bd.ts
@@ -4852,11 +4518,7 @@ function evaluateGeographicOrigin(inputs, targetCountryCode = "BD") {
   };
 }
 
-// src/extension/bulkProcessor.ts
-init_evidenceWaterfall();
-
 // src/extension/metaAdapter.ts
-init_relevanceEngine();
 function sanitizeAdLibraryIds(ids, options) {
   if (!Array.isArray(ids)) return [];
   const unique = Array.from(new Set(ids.map((id) => (id || "").trim()).filter((id) => /^[0-9]{5,25}$/.test(id))));
@@ -4956,6 +4618,9 @@ var SHORT_GENERIC_BRAND_TOKENS = /* @__PURE__ */ new Set([
   "global"
 ]);
 var LEGAL_SUFFIXES = [
+  "private limited",
+  "pvt ltd",
+  "pte ltd",
   "llc",
   "l.l.c.",
   "inc",
@@ -4973,7 +4638,8 @@ var LEGAL_SUFFIXES = [
   "company",
   "pvt",
   "pvt.",
-  "private limited",
+  "pte",
+  "private",
   "enterprises",
   "holdings",
   "group"
@@ -4981,19 +4647,25 @@ var LEGAL_SUFFIXES = [
 function normalizeAdvertiserName(rawName) {
   let name = (rawName || "").trim();
   if (!name || name === "Unknown Advertiser") return "Unknown Advertiser";
+  name = name.replace(/[\u200B-\u200D\uFEFF]/g, "");
   name = name.replace(/\s*·\s*Sponsored.*$/i, "");
   name = name.replace(/\s*Sponsored.*$/i, "");
   name = name.replace(/\s+page$/i, "");
   name = name.replace(/\s*\(official\)$/i, "");
   name = name.replace(/\s*\(verified\)$/i, "");
+  name = name.normalize("NFKC");
   name = name.replace(/\s+/g, " ");
   return name.trim();
 }
 function getComparisonNameKey(name) {
   let clean = normalizeAdvertiserName(name).normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
-  for (const s of LEGAL_SUFFIXES) {
-    const regex = new RegExp(`\\b${s}\\b$`, "i");
-    clean = clean.replace(regex, "").trim();
+  let prev = "";
+  while (prev !== clean) {
+    prev = clean;
+    for (const s of LEGAL_SUFFIXES) {
+      const regex = new RegExp(`\\b${s}\\b$`, "i");
+      clean = clean.replace(regex, "").trim();
+    }
   }
   return clean;
 }
@@ -5158,10 +4830,10 @@ var EntityResolutionIndex = class {
     this.brandPrefixToKeys.clear();
   }
 };
-function evaluateEntityMerge(cand, existingEntities, index) {
+function evaluateEntityMerge2(cand, existingEntities, index) {
   const cleanName = normalizeAdvertiserName(cand.pageName);
   const compName = getComparisonNameKey(cleanName);
-  const pageNorm = normalizeFacebookPage(cand.facebookPageUrl, cand.facebookPageId);
+  const pageNorm = normalizeFacebookPage(cand.facebookPageUrl, cand.facebookPageId || cand.pageId);
   const domainNorm = normalizeDestinationDomain(cand.destinationUrl, cand.destinationDomain);
   if (pageNorm.pageId && index.pageIdToKey.has(pageNorm.pageId)) {
     const targetKey = index.pageIdToKey.get(pageNorm.pageId);
@@ -5170,7 +4842,8 @@ function evaluateEntityMerge(cand, existingEntities, index) {
       targetKey,
       confidence: "STRONG",
       reason: `MERGE_EXACT_FACEBOOK_PAGE_ID: Matched Page ID ${pageNorm.pageId}`,
-      relationshipType: "INDEPENDENT_BUSINESS"
+      relationshipType: "INDEPENDENT_BUSINESS",
+      matchLevel: "EXACT_DUPLICATE"
     };
   }
   if (pageNorm.pageSlug && index.pageSlugToKey.has(pageNorm.pageSlug)) {
@@ -5180,7 +4853,8 @@ function evaluateEntityMerge(cand, existingEntities, index) {
       targetKey,
       confidence: "STRONG",
       reason: `MERGE_CANONICAL_FACEBOOK_PAGE_SLUG: Matched Page slug "${pageNorm.pageSlug}"`,
-      relationshipType: "INDEPENDENT_BUSINESS"
+      relationshipType: "INDEPENDENT_BUSINESS",
+      matchLevel: "EXACT_DUPLICATE"
     };
   }
   if (compName && domainNorm.canonicalDomain && !domainNorm.isSharedMarketplace) {
@@ -5189,14 +4863,15 @@ function evaluateEntityMerge(cand, existingEntities, index) {
       const targetKey = index.nameDomainToKey.get(nameDomainKey);
       const targetEntity = existingEntities.get(targetKey);
       const targetPageNorm = normalizeFacebookPage(targetEntity?.facebookPageUrl, targetEntity?.canonicalPageId);
-      if (pageNorm.pageSlug && targetPageNorm.pageSlug && pageNorm.pageSlug !== targetPageNorm.pageSlug) {
-        const fallbackKey = `fbslug_${pageNorm.pageSlug}`;
+      if (pageNorm.pageId && targetPageNorm.pageId && pageNorm.pageId !== targetPageNorm.pageId || pageNorm.pageSlug && targetPageNorm.pageSlug && pageNorm.pageSlug !== targetPageNorm.pageSlug) {
+        const fallbackKey = pageNorm.pageId ? `fbid_${pageNorm.pageId}` : pageNorm.pageSlug ? `fbslug_${pageNorm.pageSlug}` : `cand_${cand.libraryId}`;
         return {
           shouldMerge: false,
           targetKey: fallbackKey,
           confidence: "MODERATE",
-          reason: `NON_MERGE_CONFLICTING_FACEBOOK_PAGE: Shared domain ${domainNorm.canonicalDomain} but distinct Page slugs ("${pageNorm.pageSlug}" vs "${targetPageNorm.pageSlug}")`,
-          relationshipType: "INDEPENDENT_BUSINESS"
+          reason: `NON_MERGE_CONFLICTING_FACEBOOK_PAGE: Shared domain ${domainNorm.canonicalDomain} but conflicting Facebook Page ("${pageNorm.pageId || pageNorm.pageSlug}" vs "${targetPageNorm.pageId || targetPageNorm.pageSlug}")`,
+          relationshipType: "INDEPENDENT_BUSINESS",
+          matchLevel: "DISTINCT_ADVERTISER"
         };
       }
       return {
@@ -5204,7 +4879,8 @@ function evaluateEntityMerge(cand, existingEntities, index) {
         targetKey,
         confidence: "STRONG",
         reason: `MERGE_CORROBORATED_NAME_AND_DOMAIN: Matched brand "${cleanName}" and domain "${domainNorm.canonicalDomain}"`,
-        relationshipType: "INDEPENDENT_BUSINESS"
+        relationshipType: "INDEPENDENT_BUSINESS",
+        matchLevel: "PROBABLE_DUPLICATE"
       };
     }
   }
@@ -5219,25 +4895,27 @@ function evaluateEntityMerge(cand, existingEntities, index) {
         pageNorm.pageId && existingPage.pageId && pageNorm.pageId === existingPage.pageId || pageNorm.pageSlug && existingPage.pageSlug && pageNorm.pageSlug === existingPage.pageSlug
       );
       if (!isSamePage) {
-        const branchKey = pageNorm.pageSlug ? `fbslug_${pageNorm.pageSlug}` : `branch_${cleanName.toLowerCase().replace(/[^a-z0-9]/g, "_")}`;
+        const branchKey = pageNorm.pageSlug ? `fbslug_${pageNorm.pageSlug}` : pageNorm.pageId ? `fbid_${pageNorm.pageId}` : `branch_${cleanName.toLowerCase().replace(/[^a-z0-9]/g, "_")}`;
         return {
           shouldMerge: false,
           targetKey: branchKey,
           confidence: "MODERATE",
           reason: `NON_MERGE_LOCAL_BRANCH_DISTINCTION: Distinct local branch detected ("${cleanName}" vs "${existing.name}") without shared Page ID`,
-          relationshipType: "LOCAL_BRANCH"
+          relationshipType: "LOCAL_BRANCH",
+          matchLevel: "DISTINCT_ADVERTISER"
         };
       }
     }
   }
   if (domainNorm.isSharedMarketplace) {
-    const key = pageNorm.pageSlug ? `fbslug_${pageNorm.pageSlug}` : `mkp_${cleanName.toLowerCase().replace(/[^a-z0-9]/g, "_")}`;
+    const key = pageNorm.pageSlug ? `fbslug_${pageNorm.pageSlug}` : pageNorm.pageId ? `fbid_${pageNorm.pageId}` : `mkp_${cleanName.toLowerCase().replace(/[^a-z0-9]/g, "_")}`;
     return {
       shouldMerge: false,
       targetKey: key,
       confidence: "MODERATE",
       reason: `NON_MERGE_SHARED_MARKETPLACE_DOMAIN: Shared host/marketplace domain (${domainNorm.canonicalDomain}) cannot trigger automatic merge`,
-      relationshipType: "INDEPENDENT_BUSINESS"
+      relationshipType: "INDEPENDENT_BUSINESS",
+      matchLevel: "UNKNOWN_IDENTITY"
     };
   }
   if (isShortGenericName(cleanName)) {
@@ -5247,7 +4925,8 @@ function evaluateEntityMerge(cand, existingEntities, index) {
       targetKey: uniqueKey,
       confidence: "UNRESOLVED",
       reason: `NON_MERGE_GENERIC_NAME_AMBIGUOUS: Short generic brand name "${cleanName}" requires corroborating Page or Domain`,
-      relationshipType: "UNRESOLVED_RELATIONSHIP"
+      relationshipType: "UNRESOLVED_RELATIONSHIP",
+      matchLevel: "UNKNOWN_IDENTITY"
     };
   }
   if (compName && index.specificNameToKey.has(compName)) {
@@ -5256,13 +4935,25 @@ function evaluateEntityMerge(cand, existingEntities, index) {
     const targetDomainNorm = normalizeDestinationDomain(targetEntity?.destinationUrl, targetEntity?.destinationDomain);
     const targetPageNorm = normalizeFacebookPage(targetEntity?.facebookPageUrl, targetEntity?.canonicalPageId);
     if (domainNorm.canonicalDomain && targetDomainNorm.canonicalDomain && domainNorm.canonicalDomain !== targetDomainNorm.canonicalDomain) {
-      const distinctKey = pageNorm.pageSlug ? `fbslug_${pageNorm.pageSlug}` : `dom_${cleanName.toLowerCase()}_${domainNorm.canonicalDomain}`;
+      const distinctKey = pageNorm.pageSlug ? `fbslug_${pageNorm.pageSlug}` : pageNorm.pageId ? `fbid_${pageNorm.pageId}` : `dom_${cleanName.toLowerCase()}_${domainNorm.canonicalDomain}`;
       return {
         shouldMerge: false,
         targetKey: distinctKey,
         confidence: "MODERATE",
         reason: `NON_MERGE_CONFLICTING_DESTINATION_DOMAIN: Identical brand name but conflicting domains ("${domainNorm.canonicalDomain}" vs "${targetDomainNorm.canonicalDomain}")`,
-        relationshipType: "INDEPENDENT_BUSINESS"
+        relationshipType: "INDEPENDENT_BUSINESS",
+        matchLevel: "DISTINCT_ADVERTISER"
+      };
+    }
+    if (pageNorm.pageId && targetPageNorm.pageId && pageNorm.pageId !== targetPageNorm.pageId) {
+      const distinctKey = `fbid_${pageNorm.pageId}`;
+      return {
+        shouldMerge: false,
+        targetKey: distinctKey,
+        confidence: "MODERATE",
+        reason: `NON_MERGE_CONFLICTING_FACEBOOK_PAGE_ID: Identical brand name but conflicting Page IDs ("${pageNorm.pageId}" vs "${targetPageNorm.pageId}")`,
+        relationshipType: "INDEPENDENT_BUSINESS",
+        matchLevel: "DISTINCT_ADVERTISER"
       };
     }
     if (pageNorm.pageSlug && targetPageNorm.pageSlug && pageNorm.pageSlug !== targetPageNorm.pageSlug) {
@@ -5272,7 +4963,8 @@ function evaluateEntityMerge(cand, existingEntities, index) {
         targetKey: distinctKey,
         confidence: "MODERATE",
         reason: `NON_MERGE_CONFLICTING_FACEBOOK_PAGE: Identical brand name but conflicting Page slugs ("${pageNorm.pageSlug}" vs "${targetPageNorm.pageSlug}")`,
-        relationshipType: "INDEPENDENT_BUSINESS"
+        relationshipType: "INDEPENDENT_BUSINESS",
+        matchLevel: "DISTINCT_ADVERTISER"
       };
     }
     const modKey = pageNorm.pageSlug ? `fbslug_${pageNorm.pageSlug}` : pageNorm.pageId ? `fbid_${pageNorm.pageId}` : domainNorm.canonicalDomain ? `dom_${compName}_${domainNorm.canonicalDomain}` : `cand_${compName}_${cand.libraryId}`;
@@ -5281,7 +4973,8 @@ function evaluateEntityMerge(cand, existingEntities, index) {
       targetKey: modKey,
       confidence: "MODERATE",
       reason: `MERGE_CANDIDATE_MODERATE_IDENTITY: Brand name "${cleanName}" matches candidate entity "${targetEntity?.name}" but lacks strong corroborating Page ID, Page URL, or Domain evidence`,
-      relationshipType: "UNRESOLVED_RELATIONSHIP"
+      relationshipType: "UNRESOLVED_RELATIONSHIP",
+      matchLevel: "UNKNOWN_IDENTITY"
     };
   }
   const baseKey = cand.facebookPageId && cand.facebookPageId.length > 4 ? `fb_${cand.facebookPageId}` : `name_${cleanName.toLowerCase().replace(/[^a-z0-9]/g, "_")}`;
@@ -5291,7 +4984,8 @@ function evaluateEntityMerge(cand, existingEntities, index) {
     targetKey: newKey,
     confidence: pageNorm.pageId || pageNorm.pageSlug ? "STRONG" : domainNorm.canonicalDomain ? "MODERATE" : "WEAK",
     reason: "NEW_UNIQUE_ENTITY: Discovered new independent advertiser identity",
-    relationshipType: "INDEPENDENT_BUSINESS"
+    relationshipType: "INDEPENDENT_BUSINESS",
+    matchLevel: "DISTINCT_ADVERTISER"
   };
 }
 function mergeCandidateIntoEntity(target, cand, decision, sourceQuery, targetCountryCode) {
@@ -5406,13 +5100,18 @@ function mergeCandidateIntoEntity(target, cand, decision, sourceQuery, targetCou
   target.destinationReasonCode = aggSummary.destinationReasonCode;
   target.destinationConfidence = aggSummary.destinationConfidence;
   if (!target.mergeHistory) target.mergeHistory = [];
-  target.mergeHistory.push({
-    timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-    mergeReason: decision.reason,
-    sourceLibraryId: cand.libraryId,
-    sourceQuery,
-    confidence: decision.confidence
-  });
+  const isDuplicateMerge = target.mergeHistory.some(
+    (m) => m.sourceLibraryId === cand.libraryId && m.sourceQuery === sourceQuery
+  );
+  if (!isDuplicateMerge) {
+    target.mergeHistory.push({
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      mergeReason: decision.reason,
+      sourceLibraryId: cand.libraryId,
+      sourceQuery,
+      confidence: decision.confidence
+    });
+  }
   const evalTargetCountry = targetCountryCode || target.targetCountryCode || target.locationCode;
   if (evalTargetCountry) {
     const updatedGeo = evaluateGeographicOrigin({
@@ -5438,6 +5137,543 @@ function mergeCandidateIntoEntity(target, cand, decision, sourceQuery, targetCou
     }
   }
 }
+
+// src/extension/bulkStore.ts
+var DB_NAME = "leadnoria-research";
+var DB_VERSION = 2;
+function normalizeStoredLead(raw) {
+  if (!raw || typeof raw !== "object") {
+    throw new Error("INVALID_LEAD_RECORD: Cannot normalize non-object record");
+  }
+  const cleanName = (raw.name || raw.canonicalName || raw.facebookPageName || "Unknown Advertiser").trim();
+  const canonicalName = (raw.canonicalName || cleanName).trim();
+  let adEvidence = Array.isArray(raw.adEvidence) ? [...raw.adEvidence] : [];
+  const seenLibIds = /* @__PURE__ */ new Set();
+  adEvidence = adEvidence.filter((e) => {
+    if (!e || typeof e !== "object" || !e.libraryId) return false;
+    if (seenLibIds.has(e.libraryId)) return false;
+    seenLibIds.add(e.libraryId);
+    return true;
+  });
+  if (adEvidence.length === 0 && (raw.sampleCta || raw.destinationUrl || raw.adLibraryIds && raw.adLibraryIds.length > 0)) {
+    const rawCta = raw.sampleCta || raw.ctaText || "";
+    const ctaRes = classifyCta(rawCta);
+    const destRes = classifyDestination({
+      destinationUrl: raw.destinationUrl,
+      destinationDomain: raw.destinationDomain,
+      ctaText: rawCta,
+      ctaType: ctaRes.ctaType,
+      bodyCopy: raw.sampleCopy
+    });
+    const libId = Array.isArray(raw.adLibraryIds) && raw.adLibraryIds[0] ? raw.adLibraryIds[0] : `ad_legacy_${raw.id || "unknown"}`;
+    adEvidence.push({
+      libraryId: libId,
+      ctaText: rawCta || void 0,
+      normalizedCtaText: ctaRes.normalizedText,
+      ctaConfidence: ctaRes.confidence,
+      ctaStatus: ctaRes.status,
+      ctaType: raw.primaryCtaType || ctaRes.ctaType,
+      destinationType: raw.primaryDestinationType || destRes.destinationType,
+      destinationUrl: raw.destinationUrl,
+      destinationDomain: raw.destinationDomain,
+      reasonCode: raw.destinationReasonCode || destRes.reasonCode,
+      confidence: raw.destinationConfidence || destRes.confidence,
+      observedAt: raw.discoveredAt || (/* @__PURE__ */ new Date()).toISOString()
+    });
+  }
+  const ctaSummary = aggregateAdEvidence(adEvidence);
+  let geoClassification = raw.geographicClassification;
+  if (!geoClassification) {
+    if (raw.businessCountryCode && raw.targetCountryCode && raw.businessCountryCode === raw.targetCountryCode) {
+      geoClassification = "LOCAL_PROBABLE";
+    } else if (raw.businessCountryCode && raw.targetCountryCode && raw.businessCountryCode !== raw.targetCountryCode) {
+      geoClassification = "FOREIGN_VERIFIED";
+    } else {
+      geoClassification = "LOCATION_UNKNOWN";
+    }
+  }
+  let relevanceDecision = raw.relevanceDecision;
+  if (!relevanceDecision) {
+    relevanceDecision = "UNASSESSED";
+  }
+  let webState = raw.websiteState;
+  if (!webState || webState === "not_found" && !raw.destinationUrl && ctaSummary.primaryDestinationType !== "NO_VISIBLE_DESTINATION") {
+    webState = raw.destinationUrl ? "found" : "unknown";
+  }
+  const adIds = Array.isArray(raw.adLibraryIds) ? Array.from(new Set(raw.adLibraryIds.filter((id) => typeof id === "string" && /^[0-9]{5,25}$/.test(id)))) : [];
+  const activeAdIds = Array.isArray(raw.activeAdLibraryIds) ? Array.from(new Set(raw.activeAdLibraryIds.filter((id) => typeof id === "string" && adIds.includes(id)))) : [...adIds];
+  const qualResult = evaluateLeadQualificationGates({
+    name: cleanName,
+    adLibraryIds: adIds,
+    relevanceDecision,
+    geographicClassification: geoClassification,
+    primaryCtaType: ctaSummary.primaryCtaType,
+    observedCtaTypes: ctaSummary.observedCtaTypes,
+    primaryDestinationType: ctaSummary.primaryDestinationType,
+    observedDestinationTypes: ctaSummary.observedDestinationTypes,
+    websiteState: webState
+  });
+  const pageNorm = normalizeFacebookPage(raw.facebookPageUrl, raw.canonicalPageId || raw.facebookPageId);
+  const canonicalPageId = raw.canonicalPageId || pageNorm.pageId || void 0;
+  const canonicalPageSlug = raw.canonicalPageSlug || pageNorm.pageSlug || void 0;
+  const aliases = Array.isArray(raw.aliases) ? Array.from(new Set(raw.aliases.filter((a) => typeof a === "string" && a.trim().length > 0))) : [];
+  return {
+    ...raw,
+    name: cleanName,
+    canonicalName,
+    canonicalPageId,
+    canonicalPageSlug,
+    aliases,
+    facebookPageName: raw.facebookPageName || cleanName,
+    facebookPageState: raw.facebookPageState || (raw.facebookPageUrl ? "found" : "unknown"),
+    destinationUrl: raw.destinationUrl,
+    destinationDomain: raw.destinationDomain,
+    websiteState: webState,
+    adCount: adIds.length || raw.adCount || 0,
+    activeAdCount: activeAdIds.length || raw.activeAdCount || 0,
+    adLibraryIds: adIds,
+    activeAdLibraryIds: activeAdIds,
+    adEvidence,
+    observedCtaTexts: ctaSummary.observedCtaTexts,
+    observedCtaTypes: ctaSummary.observedCtaTypes,
+    observedDestinationTypes: ctaSummary.observedDestinationTypes,
+    primaryCtaType: ctaSummary.primaryCtaType,
+    primaryDestinationType: ctaSummary.primaryDestinationType,
+    destinationReasonCode: ctaSummary.destinationReasonCode,
+    destinationConfidence: ctaSummary.destinationConfidence,
+    geographicClassification: geoClassification,
+    businessLocationConfidence: raw.businessLocationConfidence || "NONE",
+    businessLocationEvidence: Array.isArray(raw.businessLocationEvidence) ? raw.businessLocationEvidence : [],
+    businessLocationReason: raw.businessLocationReason || "Restored from persistent storage",
+    relevanceDecision,
+    relevanceConfidence: raw.relevanceConfidence || (relevanceDecision === "RELEVANT" ? "HIGH" : "LOW"),
+    relevanceScore: raw.relevanceScore,
+    status: qualResult.status,
+    qualificationFailedGates: qualResult.failedGates,
+    qualificationReasons: qualResult.reasons,
+    schemaVersion: 2
+  };
+}
+var MemoryStoreFallback = class {
+  constructor() {
+    this.runs = /* @__PURE__ */ new Map();
+    this.ads = /* @__PURE__ */ new Map();
+    // key: `${runId}_${libraryId}`
+    this.entities = /* @__PURE__ */ new Map();
+    // key: `${runId}_${canonicalKey}`
+    this.uncertainEntities = /* @__PURE__ */ new Map();
+    // key: `${runId}_${entityId}`
+    this.advertiserExpansions = /* @__PURE__ */ new Map();
+    // key: runId
+    this.evidence = /* @__PURE__ */ new Map();
+    // key: `${runId}_${canonicalKey}`
+    this.checkpoints = /* @__PURE__ */ new Map();
+    // key: `${runId}_${batchIndex}`
+    this.dedupAds = /* @__PURE__ */ new Map();
+    // runId -> Set<libraryId>
+    this.dedupEntities = /* @__PURE__ */ new Map();
+  }
+  // runId -> Set<canonicalKey>
+  async saveRun(run) {
+    this.runs.set(run.runId, JSON.parse(JSON.stringify(run)));
+  }
+  async getRun(runId) {
+    const r = this.runs.get(runId);
+    return r ? JSON.parse(JSON.stringify(r)) : null;
+  }
+  async saveBatch(runId, payload) {
+    if (!this.dedupAds.has(runId)) this.dedupAds.set(runId, /* @__PURE__ */ new Set());
+    if (!this.dedupEntities.has(runId)) this.dedupEntities.set(runId, /* @__PURE__ */ new Set());
+    const adSet = this.dedupAds.get(runId);
+    const entSet = this.dedupEntities.get(runId);
+    for (const ad of payload.ads) {
+      this.ads.set(`${runId}_${ad.libraryId}`, { ...ad, runId });
+      adSet.add(ad.libraryId);
+    }
+    for (const ent of payload.entities) {
+      const canonicalKey = ent.canonicalKey || (ent.canonicalPageId ? `fb_${ent.canonicalPageId}` : ent.canonicalPageSlug ? `fbslug_${ent.canonicalPageSlug}` : ent.canonicalName ? ent.canonicalName.toLowerCase() : ent.name.toLowerCase());
+      this.entities.set(`${runId}_${canonicalKey}`, { ...ent, runId, canonicalKey });
+      entSet.add(canonicalKey);
+    }
+    if (payload.uncertainEntities) {
+      for (const unc of payload.uncertainEntities) {
+        this.uncertainEntities.set(`${runId}_${unc.entityId}`, { ...unc, runId });
+      }
+    }
+    if (payload.advertiserExpansions) {
+      const list = this.advertiserExpansions.get(runId) || [];
+      list.push(...payload.advertiserExpansions);
+      this.advertiserExpansions.set(runId, list);
+    }
+    if (payload.evidence) {
+      for (const ev of payload.evidence) {
+        this.evidence.set(`${runId}_${ev.canonicalKey}`, ev.evidence);
+      }
+    }
+    this.checkpoints.set(`${runId}_${payload.batchIndex}`, payload.checkpoint);
+  }
+  async getAllRelevantLeads(runId) {
+    const results = [];
+    for (const [key, ent] of this.entities.entries()) {
+      if (key.startsWith(`${runId}_`)) {
+        if (ent.relevanceDecision === "RELEVANT" && ent.evaluationStatus !== "UNCERTAIN" && ent.evaluationStatus !== "REJECTED") {
+          results.push(normalizeStoredLead(ent));
+        }
+      }
+    }
+    return results;
+  }
+  async getAllStoredLeads(runId) {
+    const results = [];
+    for (const [key, ent] of this.entities.entries()) {
+      if (key.startsWith(`${runId}_`)) {
+        results.push(normalizeStoredLead(ent));
+      }
+    }
+    return results;
+  }
+  async getAllUncertainEntities(runId) {
+    const list = [];
+    for (const [key, unc] of this.uncertainEntities.entries()) {
+      if (key.startsWith(`${runId}_`)) {
+        list.push(JSON.parse(JSON.stringify(unc)));
+      }
+    }
+    return list;
+  }
+  async getAllAdvertiserExpansions(runId) {
+    return JSON.parse(JSON.stringify(this.advertiserExpansions.get(runId) || []));
+  }
+  async getEntity(runId, canonicalKey) {
+    const ent = this.entities.get(`${runId}_${canonicalKey.toLowerCase()}`);
+    return ent ? normalizeStoredLead(ent) : null;
+  }
+  async getSeenAdIds(runId) {
+    return new Set(this.dedupAds.get(runId) || []);
+  }
+  async getSeenEntityKeys(runId) {
+    return new Set(this.dedupEntities.get(runId) || []);
+  }
+  async getLatestCheckpoint(runId) {
+    let latestIndex = -1;
+    let latestCp = null;
+    for (const [key, cp] of this.checkpoints.entries()) {
+      if (key.startsWith(`${runId}_`)) {
+        if (cp.batchIndex > latestIndex) {
+          latestIndex = cp.batchIndex;
+          latestCp = cp;
+        }
+      }
+    }
+    return latestCp ? JSON.parse(JSON.stringify(latestCp)) : null;
+  }
+  async getStorageStats(runId) {
+    let totalAds = 0;
+    let totalEntities = 0;
+    let totalRelevant = 0;
+    let totalCheckpoints = 0;
+    let bytes = 0;
+    for (const [k, v] of this.ads.entries()) {
+      if (k.startsWith(`${runId}_`)) {
+        totalAds++;
+        bytes += JSON.stringify(v).length;
+      }
+    }
+    for (const [k, v] of this.entities.entries()) {
+      if (k.startsWith(`${runId}_`)) {
+        totalEntities++;
+        if (v.relevanceDecision === "RELEVANT" && v.evaluationStatus !== "UNCERTAIN" && v.evaluationStatus !== "REJECTED") totalRelevant++;
+        bytes += JSON.stringify(v).length;
+      }
+    }
+    for (const [k, v] of this.checkpoints.entries()) {
+      if (k.startsWith(`${runId}_`)) {
+        totalCheckpoints++;
+        bytes += JSON.stringify(v).length;
+      }
+    }
+    return {
+      runId,
+      totalAds,
+      totalEntities,
+      totalRelevantLeads: totalRelevant,
+      totalCheckpoints,
+      estimatedBytes: bytes
+    };
+  }
+  async clearRun(runId) {
+    this.runs.delete(runId);
+    this.dedupAds.delete(runId);
+    this.dedupEntities.delete(runId);
+    for (const k of Array.from(this.ads.keys())) {
+      if (k.startsWith(`${runId}_`)) this.ads.delete(k);
+    }
+    for (const k of Array.from(this.entities.keys())) {
+      if (k.startsWith(`${runId}_`)) this.entities.delete(k);
+    }
+    for (const k of Array.from(this.evidence.keys())) {
+      if (k.startsWith(`${runId}_`)) this.evidence.delete(k);
+    }
+    for (const k of Array.from(this.checkpoints.keys())) {
+      if (k.startsWith(`${runId}_`)) this.checkpoints.delete(k);
+    }
+  }
+};
+var memoryFallback = new MemoryStoreFallback();
+function hasIndexedDB() {
+  return typeof indexedDB !== "undefined" && indexedDB !== null;
+}
+function openDB() {
+  return new Promise((resolve, reject) => {
+    if (!hasIndexedDB()) {
+      return reject(new Error("IndexedDB not available"));
+    }
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains("runs")) {
+        db.createObjectStore("runs", { keyPath: "runId" });
+      }
+      if (!db.objectStoreNames.contains("ads")) {
+        const adStore = db.createObjectStore("ads", { keyPath: ["runId", "libraryId"] });
+        adStore.createIndex("by_run", "runId", { unique: false });
+      }
+      if (!db.objectStoreNames.contains("entities")) {
+        const entStore = db.createObjectStore("entities", { keyPath: ["runId", "canonicalKey"] });
+        entStore.createIndex("by_run", "runId", { unique: false });
+        entStore.createIndex("by_run_decision", ["runId", "relevanceDecision"], { unique: false });
+      }
+      if (!db.objectStoreNames.contains("evidence")) {
+        const evStore = db.createObjectStore("evidence", { keyPath: ["runId", "canonicalKey"] });
+        evStore.createIndex("by_run", "runId", { unique: false });
+      }
+      if (!db.objectStoreNames.contains("checkpoints")) {
+        const cpStore = db.createObjectStore("checkpoints", { keyPath: ["runId", "batchIndex"] });
+        cpStore.createIndex("by_run", "runId", { unique: false });
+      }
+      if (!db.objectStoreNames.contains("dedupIndex")) {
+        const dedupStore = db.createObjectStore("dedupIndex", { keyPath: ["runId", "idType", "idVal"] });
+        dedupStore.createIndex("by_run", "runId", { unique: false });
+      }
+      if (!db.objectStoreNames.contains("uncertain_entities")) {
+        const uncStore = db.createObjectStore("uncertain_entities", { keyPath: ["runId", "entityId"] });
+        uncStore.createIndex("by_run", "runId", { unique: false });
+      }
+      if (!db.objectStoreNames.contains("advertiser_expansions")) {
+        const expStore = db.createObjectStore("advertiser_expansions", { keyPath: ["runId", "sourceEntityId"] });
+        expStore.createIndex("by_run", "runId", { unique: false });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+async function initBulkStore() {
+  if (!hasIndexedDB()) {
+    return false;
+  }
+  try {
+    const db = await openDB();
+    db.close();
+    return true;
+  } catch (err) {
+    console.warn("[bulkStore] IndexedDB init failed, using memory fallback:", err);
+    return false;
+  }
+}
+async function saveRunRecord(run) {
+  if (!hasIndexedDB()) {
+    return memoryFallback.saveRun(run);
+  }
+  try {
+    const db = await openDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction("runs", "readwrite");
+      tx.objectStore("runs").put(run);
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => {
+        db.close();
+        reject(tx.error);
+      };
+    });
+  } catch {
+    return memoryFallback.saveRun(run);
+  }
+}
+async function saveBatch(runId, payload) {
+  if (!hasIndexedDB()) {
+    return memoryFallback.saveBatch(runId, payload);
+  }
+  try {
+    const db = await openDB();
+    await new Promise((resolve, reject) => {
+      const storeNames = ["ads", "entities", "evidence", "checkpoints", "dedupIndex"];
+      if (db.objectStoreNames.contains("uncertain_entities")) storeNames.push("uncertain_entities");
+      if (db.objectStoreNames.contains("advertiser_expansions")) storeNames.push("advertiser_expansions");
+      const tx = db.transaction(storeNames, "readwrite");
+      const adStore = tx.objectStore("ads");
+      const entStore = tx.objectStore("entities");
+      const evStore = tx.objectStore("evidence");
+      const cpStore = tx.objectStore("checkpoints");
+      const dedupStore = tx.objectStore("dedupIndex");
+      for (const ad of payload.ads) {
+        adStore.put({ ...ad, runId });
+        dedupStore.put({ runId, idType: "AD_ID", idVal: ad.libraryId });
+      }
+      for (const ent of payload.entities) {
+        const canonicalKey = ent.canonicalKey || (ent.canonicalPageId ? `fb_${ent.canonicalPageId}` : ent.canonicalPageSlug ? `fbslug_${ent.canonicalPageSlug}` : ent.canonicalName ? ent.canonicalName.toLowerCase() : ent.name.toLowerCase());
+        entStore.put({ ...ent, runId, canonicalKey });
+        dedupStore.put({ runId, idType: "ENTITY_KEY", idVal: canonicalKey });
+      }
+      if (payload.evidence) {
+        for (const ev of payload.evidence) {
+          evStore.put({ runId, canonicalKey: ev.canonicalKey, evidence: ev.evidence });
+        }
+      }
+      if (payload.uncertainEntities && db.objectStoreNames.contains("uncertain_entities")) {
+        const uncStore = tx.objectStore("uncertain_entities");
+        for (const unc of payload.uncertainEntities) {
+          uncStore.put({ ...unc, runId });
+        }
+      }
+      if (payload.advertiserExpansions && db.objectStoreNames.contains("advertiser_expansions")) {
+        const expStore = tx.objectStore("advertiser_expansions");
+        for (const exp of payload.advertiserExpansions) {
+          expStore.put({ ...exp, runId });
+        }
+      }
+      cpStore.put({ ...payload.checkpoint, runId, batchIndex: payload.batchIndex });
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => {
+        db.close();
+        reject(tx.error);
+      };
+    });
+  } catch {
+    return memoryFallback.saveBatch(runId, payload);
+  }
+}
+async function getAllRelevantLeads(runId) {
+  if (!hasIndexedDB()) {
+    return memoryFallback.getAllRelevantLeads(runId);
+  }
+  try {
+    const db = await openDB();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction("entities", "readonly");
+      const store = tx.objectStore("entities");
+      const index = store.index("by_run");
+      const request = index.getAll(runId);
+      request.onsuccess = () => {
+        db.close();
+        const records = request.result || [];
+        const relevant = records.filter(
+          (r) => r.relevanceDecision === "RELEVANT" && r.evaluationStatus !== "UNCERTAIN" && r.evaluationStatus !== "REJECTED"
+        ).map((r) => normalizeStoredLead(r));
+        resolve(relevant);
+      };
+      request.onerror = () => {
+        db.close();
+        reject(request.error);
+      };
+    });
+  } catch {
+    return memoryFallback.getAllRelevantLeads(runId);
+  }
+}
+async function getAllStoredLeads(runId) {
+  if (!hasIndexedDB()) {
+    return memoryFallback.getAllStoredLeads(runId);
+  }
+  try {
+    const db = await openDB();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction("entities", "readonly");
+      const store = tx.objectStore("entities");
+      const index = store.index("by_run");
+      const request = index.getAll(runId);
+      request.onsuccess = () => {
+        db.close();
+        const records = request.result || [];
+        resolve(records.map((r) => normalizeStoredLead(r)));
+      };
+      request.onerror = () => {
+        db.close();
+        reject(request.error);
+      };
+    });
+  } catch {
+    return memoryFallback.getAllStoredLeads(runId);
+  }
+}
+async function getSeenAdIds(runId) {
+  if (!hasIndexedDB()) {
+    return memoryFallback.getSeenAdIds(runId);
+  }
+  try {
+    const db = await openDB();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction("dedupIndex", "readonly");
+      const store = tx.objectStore("dedupIndex");
+      const index = store.index("by_run");
+      const request = index.getAll(runId);
+      request.onsuccess = () => {
+        db.close();
+        const items = request.result || [];
+        const ids = /* @__PURE__ */ new Set();
+        for (const it of items) {
+          if (it.idType === "AD_ID") ids.add(it.idVal);
+        }
+        resolve(ids);
+      };
+      request.onerror = () => {
+        db.close();
+        reject(request.error);
+      };
+    });
+  } catch {
+    return memoryFallback.getSeenAdIds(runId);
+  }
+}
+async function getSeenEntityKeys(runId) {
+  if (!hasIndexedDB()) {
+    return memoryFallback.getSeenEntityKeys(runId);
+  }
+  try {
+    const db = await openDB();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction("dedupIndex", "readonly");
+      const store = tx.objectStore("dedupIndex");
+      const index = store.index("by_run");
+      const request = index.getAll(runId);
+      request.onsuccess = () => {
+        db.close();
+        const items = request.result || [];
+        const keys = /* @__PURE__ */ new Set();
+        for (const it of items) {
+          if (it.idType === "ENTITY_KEY") keys.add(it.idVal);
+        }
+        resolve(keys);
+      };
+      request.onerror = () => {
+        db.close();
+        reject(request.error);
+      };
+    });
+  } catch {
+    return memoryFallback.getSeenEntityKeys(runId);
+  }
+}
+
+// src/extension/bulkProcessor.ts
+init_relevanceEngine();
+init_evidenceWaterfall();
 
 // src/extension/creativeSignals.ts
 var CTA_NORMALIZATION_MAP = {
@@ -6010,7 +6246,7 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
     counters.rawAds++;
     counters.normalizedCandidates++;
     processedAds.push(cand);
-    const mergeDecision = evaluateEntityMerge(cand, existingEntitiesMap, entityIndex);
+    const mergeDecision = evaluateEntityMerge2(cand, existingEntitiesMap, entityIndex);
     if (mergeDecision.shouldMerge) {
       const existingEntity = existingEntitiesMap.get(mergeDecision.targetKey);
       if (existingEntity) {
@@ -6075,12 +6311,12 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
     if (intent) {
       evalResult = LeadRelevanceEngine.evaluateCandidate(cand, intent);
       v3Result = evaluateStrictRelevanceV3({
-        advertiserName: cand.pageName,
-        adText: cand.bodyCopy,
+        advertiserName: cand.pageName || cand.advertiserName || "",
+        adText: cand.bodyCopy || cand.adText || "",
         destinationUrl: cand.destinationUrl,
         destinationDomain: cand.destinationDomain,
-        facebookPageUrl: cand.facebookPageUrl,
-        ctaText: cand.ctaText,
+        facebookPageUrl: cand.facebookPageUrl || cand.pageUrl,
+        ctaText: cand.ctaText || cand.callToAction,
         matchedKeyword: cand.observedKeyword || currentKeyword
       }, intent);
       if (v3Result.reasonCode) {
@@ -6100,7 +6336,7 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
       }
       if (v3Result.decision === "UNCERTAIN") {
         counters.uncertainCandidates++;
-        if (!existingEntitiesMap.has(entityKey) && !seenRejectedEntityKeys.has(entityKey)) {
+        if (!existingEntitiesMap.has(entityKey)) {
           seenUncertainEntityKeys.add(entityKey);
         }
         counters.notRelevantEntities = seenRejectedEntityKeys.size;
@@ -6114,16 +6350,16 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
         continue;
       }
     }
-    const cleanName = normalizeAdvertiserName2(cand.pageName);
-    const pageNorm = normalizeFacebookPage(cand.facebookPageUrl, cand.facebookPageId);
+    const cleanName = normalizeAdvertiserName2(cand.pageName || cand.advertiserName);
+    const pageNorm = normalizeFacebookPage(cand.facebookPageUrl || cand.pageUrl, cand.facebookPageId || cand.pageId);
     const domainNorm = normalizeDestinationDomain(cand.destinationUrl, cand.destinationDomain);
     const geoEval = evaluateGeographicOrigin({
       pageName: cleanName,
-      pageUrl: pageNorm.canonicalUrl || cand.facebookPageUrl,
+      pageUrl: pageNorm.canonicalUrl || cand.facebookPageUrl || cand.pageUrl,
       destinationUrl: domainNorm.cleanUrl || cand.destinationUrl,
       destinationDomain: domainNorm.canonicalDomain || cand.destinationDomain,
-      bodyCopy: cand.bodyCopy,
-      ctaText: cand.ctaText
+      bodyCopy: cand.bodyCopy || cand.adText,
+      ctaText: cand.ctaText || cand.callToAction
     }, countryCode);
     if (intent?.strictLocalMode) {
       if (geoEval.classification === "FOREIGN_VERIFIED") {
@@ -6157,13 +6393,14 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
         continue;
       }
     }
-    const candCtaRes = cand.ctaType ? { ctaType: cand.ctaType, normalizedText: cand.ctaText || "", reasonCode: "CTA_TEXT_MATCH", reason: "" } : classifyCta(cand.ctaText);
+    const ctaInputText = cand.ctaText || cand.callToAction;
+    const candCtaRes = cand.ctaType ? { ctaType: cand.ctaType, rawCtaText: ctaInputText, originalCtaText: ctaInputText, normalizedText: ctaInputText || "", status: "CLASSIFIED", confidence: "HIGH", evidence: "Pre-classified CTA intent.", reasonCode: "CTA_TEXT_MATCH", reason: "" } : classifyCta(ctaInputText);
     const candDestRes = cand.destinationType ? { destinationType: cand.destinationType, confidence: cand.destinationConfidence || "HIGH", reasonCode: cand.destinationReasonCode || "VISIBLE_EXTERNAL_DESTINATION", reason: "" } : classifyDestination({
       destinationUrl: domainNorm.cleanUrl || cand.destinationUrl,
       destinationDomain: domainNorm.canonicalDomain || cand.destinationDomain,
-      ctaText: cand.ctaText,
+      ctaText: ctaInputText,
       ctaType: candCtaRes.ctaType,
-      bodyCopy: cand.bodyCopy,
+      bodyCopy: cand.bodyCopy || cand.adText,
       rawText: cand.rawText
     });
     cand.ctaType = candCtaRes.ctaType;
@@ -6181,7 +6418,8 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
       }
     }
     if (intent?.requiredDestinationTypes && intent.requiredDestinationTypes.length > 0) {
-      if (!intent.requiredDestinationTypes.includes(candDestRes.destinationType)) {
+      const effectiveReqDests = intent.requiredDestinationTypes.map((d) => d === "APP_STORE" ? "APP" : d);
+      if (!effectiveReqDests.includes(candDestRes.destinationType)) {
         counters.notRelevantCandidates++;
         if (!existingEntitiesMap.has(entityKey)) {
           seenRejectedEntityKeys.add(entityKey);
@@ -6201,6 +6439,9 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
     const candAdEvidenceItem = {
       libraryId: cand.libraryId,
       ctaText: cand.ctaText,
+      normalizedCtaText: candCtaRes.normalizedText,
+      ctaConfidence: candCtaRes.confidence,
+      ctaStatus: candCtaRes.status,
       ctaType: candCtaRes.ctaType,
       destinationType: candDestRes.destinationType,
       destinationUrl: domainNorm.cleanUrl || cand.destinationUrl,
@@ -10731,7 +10972,10 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
     countryCode,
     {
       strictLocalMode: payload.strictLocalMode,
-      allowProbableLocal: payload.allowProbableLocal
+      allowProbableLocal: payload.allowProbableLocal,
+      requiredCtaTypes: payload.requiredCtaTypes,
+      requiredDestinationTypes: payload.requiredDestinationTypes,
+      websiteRequirement: payload.websiteRequirement
     }
   );
   const initialRun = providedRun || {
@@ -10743,6 +10987,12 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
     keywords,
     countryCode,
     locationName: payload.locationName,
+    strictLocalMode: payload.strictLocalMode,
+    allowProbableLocal: payload.allowProbableLocal,
+    requiredCtaTypes: payload.requiredCtaTypes,
+    requiredDestinationTypes: payload.requiredDestinationTypes,
+    websiteRequirement: payload.websiteRequirement,
+    researchIntent,
     researchMode: isAutoDiscovery ? "AUTO_DISCOVERY" : void 0,
     maxFinalUniqueRelevantLeads: isAutoDiscovery ? MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH : void 0,
     maxResults: payload.maxResults ?? effectiveCeiling,
@@ -10795,6 +11045,18 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
   );
   initialRun.queryFrontier = queryFrontier.serialize();
   const queriesToRun = plannedQueries.map((p) => p.query);
+  if (queriesToRun.length === 0) {
+    initialRun.status = "PARTIAL";
+    initialRun.stopReason = "NO_NEW_RESULTS_OBSERVED";
+    initialRun.warningMessages = ["No valid search queries or keywords provided for research run."];
+    initialRun.hasWarnings = true;
+    broadcastProgress(initialRun, "PARTIAL", "Research completed: No valid search queries provided.");
+    initialRun.completedAt = (/* @__PURE__ */ new Date()).toISOString();
+    await saveRunRecord(initialRun);
+    await saveActiveRun(initialRun);
+    await appendToHistory(initialRun);
+    return initialRun;
+  }
   const startBroadcastMsg = isAutoDiscovery ? `Auto-discovery research initiated in ${payload.locationName} (${queriesToRun.length} planned queries)...` : `Research initiated for ${targetLeadCount} leads in ${payload.locationName} (${queriesToRun.length} planned queries)...`;
   broadcastProgress(initialRun, "STARTING", startBroadcastMsg);
   let currentTabId = null;
@@ -10827,17 +11089,26 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
       const searchUrl = `https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=${encodeURIComponent(countryCode)}&q=${encodeURIComponent(currentKeyword)}&search_type=keyword_unordered&media_type=all`;
       const queryTypeLabel = currentPlannedQuery.variantType === "SEED" ? "Primary Seed" : `Expansion: ${currentPlannedQuery.variantType}`;
       broadcastProgress(initialRun, "NAVIGATING", `[${qi + 1}/${queriesToRun.length} ${queryTypeLabel}] Opening Meta Ad Library for "${currentKeyword}" in ${countryCode}...`);
-      if (!currentTabId) {
-        const tab = await chrome.tabs.create({ url: searchUrl, active: false });
-        currentTabId = tab.id || null;
-      } else {
-        await chrome.tabs.update(currentTabId, { url: searchUrl });
+      try {
+        if (!currentTabId) {
+          const tab = await chrome.tabs.create({ url: searchUrl, active: false });
+          currentTabId = tab.id || null;
+        } else {
+          await chrome.tabs.update(currentTabId, { url: searchUrl });
+        }
+        if (!currentTabId) {
+          throw new Error("Failed to create or update browser tab for research.");
+        }
+        await waitForTabLoad(currentTabId, searchUrl);
+        await wait(2e3);
+      } catch (navErr) {
+        broadcastProgress(initialRun, "COLLECTING", `Query "${currentKeyword}" failed navigation: ${navErr.message}`);
+        if (!initialRun.warningMessages) initialRun.warningMessages = [];
+        initialRun.warningMessages.push(`Query "${currentKeyword}" navigation failed: ${navErr.message}`);
+        initialRun.hasWarnings = true;
+        completedKeywords.push(currentKeyword);
+        continue;
       }
-      if (!currentTabId) {
-        throw new Error("Failed to create or update browser tab for research.");
-      }
-      await waitForTabLoad(currentTabId, searchUrl);
-      await wait(3e3);
       initialRun.status = "COLLECTING";
       broadcastProgress(initialRun, "COLLECTING", `Connected to Ad Library. Starting ad collection for "${currentKeyword}"...`);
       let consecutiveNoNewCards = 0;
@@ -10862,8 +11133,20 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
           break;
         }
         let response = null;
+        const sendScanWithTimeout = (msg, ms = 2e4) => {
+          let timeoutTimer;
+          const timeoutPromise = new Promise((_, reject) => {
+            timeoutTimer = setTimeout(() => reject(new Error("TAB_TIMEOUT")), ms);
+          });
+          return Promise.race([
+            chrome.tabs.sendMessage(currentTabId, msg),
+            timeoutPromise
+          ]).finally(() => {
+            if (timeoutTimer) clearTimeout(timeoutTimer);
+          });
+        };
         try {
-          response = await chrome.tabs.sendMessage(currentTabId, {
+          response = await sendScanWithTimeout({
             type: "SCAN_AND_EXTRACT",
             payload: {
               keyword: currentKeyword,
@@ -10873,23 +11156,30 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
             }
           });
         } catch (err) {
-          try {
-            await chrome.scripting.executeScript({
-              target: { tabId: currentTabId },
-              files: ["content-script.js"]
-            });
-            await wait(1e3);
-            response = await chrome.tabs.sendMessage(currentTabId, {
-              type: "SCAN_AND_EXTRACT",
-              payload: {
-                keyword: currentKeyword,
-                scroll: true,
-                scrollIteration: scrollAttempts,
-                seenLibraryIds: Array.from(seenAdLibraryIds)
-              }
-            });
-          } catch (scriptErr) {
-            broadcastProgress(initialRun, "COLLECTING", `Tab communication retry: ${scriptErr.message}`);
+          if (err?.message === "TAB_TIMEOUT") {
+            broadcastProgress(initialRun, "COLLECTING", `Scan request timed out on "${currentKeyword}".`);
+            if (!initialRun.warningMessages) initialRun.warningMessages = [];
+            initialRun.warningMessages.push(`Tab scan timed out for "${currentKeyword}" on attempt ${scrollAttempts}.`);
+            initialRun.hasWarnings = true;
+          } else {
+            try {
+              await chrome.scripting.executeScript({
+                target: { tabId: currentTabId },
+                files: ["content-script.js"]
+              });
+              await wait(1e3);
+              response = await sendScanWithTimeout({
+                type: "SCAN_AND_EXTRACT",
+                payload: {
+                  keyword: currentKeyword,
+                  scroll: true,
+                  scrollIteration: scrollAttempts,
+                  seenLibraryIds: Array.from(seenAdLibraryIds)
+                }
+              });
+            } catch (scriptErr) {
+              broadcastProgress(initialRun, "COLLECTING", `Tab communication retry: ${scriptErr.message}`);
+            }
           }
         }
         if (response && (response.type === "CHALLENGE_DETECTED" || response.payload?.status === "CHALLENGED" || response.payload?.status === "RATE_LIMITED")) {
@@ -10905,6 +11195,9 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
         }
         if (response?.payload?.status === "EXTRACTION_ERROR") {
           encounteredExtractionError = true;
+          if (!initialRun.warningMessages) initialRun.warningMessages = [];
+          initialRun.warningMessages.push(`Extraction error on "${currentKeyword}": ${response.payload.error || "DOM structure issue encountered during scan"}`);
+          initialRun.hasWarnings = true;
           broadcastProgress(initialRun, "COLLECTING", `Extraction diagnostic warning: ${response.payload.error || "DOM structure issue encountered during scan"}`);
         }
         const candidates = response && response.payload && response.payload.candidates || [];
@@ -11077,6 +11370,11 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
         broadcastProgress(initialRun, "FAILED", `Extraction error: Could not extract ad cards from page.`);
       } else {
         initialRun.status = "PARTIAL";
+        if (encounteredExtractionError) {
+          if (!initialRun.warningMessages) initialRun.warningMessages = [];
+          initialRun.warningMessages.push("One or more queries encountered an extraction error during collection; partial valid results preserved.");
+          initialRun.hasWarnings = true;
+        }
         if (initialRun.totalAdsInspected === 0) {
           initialRun.stopReason = "NO_NEW_RESULTS_OBSERVED";
         } else if (isStalled) {
@@ -11094,10 +11392,19 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
       }
     }
   } catch (err) {
-    initialRun.status = "FAILED";
-    initialRun.stopReason = "FAILED";
-    initialRun.challengeReason = err.message || "Unexpected error occurred during research.";
-    broadcastProgress(initialRun, "FAILED", `Error: ${initialRun.challengeReason}`);
+    if (existingEntitiesMap.size > 0) {
+      initialRun.status = "PARTIAL";
+      initialRun.stopReason = "PARTIAL_ERROR";
+      if (!initialRun.warningMessages) initialRun.warningMessages = [];
+      initialRun.warningMessages.push(`Research halted unexpectedly, but ${existingEntitiesMap.size} discovered leads were preserved: ${err.message}`);
+      initialRun.hasWarnings = true;
+      broadcastProgress(initialRun, "PARTIAL", `Partial results saved (${existingEntitiesMap.size} leads): ${err.message}`);
+    } else {
+      initialRun.status = "FAILED";
+      initialRun.stopReason = "FAILED";
+      initialRun.challengeReason = err.message || "Unexpected error occurred during research.";
+      broadcastProgress(initialRun, "FAILED", `Error: ${initialRun.challengeReason}`);
+    }
   } finally {
     if (currentTabId) {
       try {
@@ -11136,6 +11443,19 @@ if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage)
         const effectiveCeiling = isAutoDiscovery ? MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH : Math.min(Math.max(1, message.payload.maxResults || MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH), MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH);
         const targetLeadCount = isAutoDiscovery ? void 0 : effectiveCeiling;
         const keywords = message.payload.keywords.map((k) => (k || "").trim()).filter(Boolean);
+        const researchIntent = compileResearchIntent(
+          message.payload.mode,
+          keywords,
+          message.payload.presetId,
+          message.payload.countryCode || "US",
+          {
+            strictLocalMode: message.payload.strictLocalMode,
+            allowProbableLocal: message.payload.allowProbableLocal,
+            requiredCtaTypes: message.payload.requiredCtaTypes,
+            requiredDestinationTypes: message.payload.requiredDestinationTypes,
+            websiteRequirement: message.payload.websiteRequirement
+          }
+        );
         const initialRun = {
           runId,
           researchName: message.payload.researchName || `${message.payload.mode === "PRESET" ? message.payload.presetName || "Preset" : keywords[0]} in ${message.payload.locationName}`,
@@ -11145,6 +11465,12 @@ if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage)
           keywords,
           countryCode: message.payload.countryCode || "US",
           locationName: message.payload.locationName,
+          strictLocalMode: message.payload.strictLocalMode,
+          allowProbableLocal: message.payload.allowProbableLocal,
+          requiredCtaTypes: message.payload.requiredCtaTypes,
+          requiredDestinationTypes: message.payload.requiredDestinationTypes,
+          websiteRequirement: message.payload.websiteRequirement,
+          researchIntent,
           researchMode: isAutoDiscovery ? "AUTO_DISCOVERY" : void 0,
           maxFinalUniqueRelevantLeads: isAutoDiscovery ? MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH : void 0,
           maxResults: message.payload.maxResults ?? effectiveCeiling,

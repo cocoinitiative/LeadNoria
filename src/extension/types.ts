@@ -326,7 +326,10 @@ export type DestinationType =
 export interface AdLevelEvidence {
   libraryId: string;
   ctaText?: string;
+  normalizedCtaText?: string;
   ctaType: CtaType;
+  ctaConfidence?: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
+  ctaStatus?: string;
   destinationType: DestinationType;
   destinationUrl?: string;
   destinationDomain?: string;
@@ -353,6 +356,12 @@ export interface ScrapedAdCandidate {
   destinationConfidence?: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
   observedKeyword?: string;
   rawText?: string;
+  // Compatibility aliases
+  advertiserName?: string;
+  pageUrl?: string;
+  pageId?: string;
+  adText?: string;
+  callToAction?: string;
 }
 
 export interface ExtensionLead {
@@ -487,6 +496,13 @@ export interface ExtensionResearchRun {
   keywords: string[];
   countryCode: string;
   locationName: string;
+  // Geographic and qualification settings (Phase 2, 3, 4, 5)
+  strictLocalMode?: boolean;
+  allowProbableLocal?: boolean;
+  requiredCtaTypes?: string[];
+  requiredDestinationTypes?: string[];
+  websiteRequirement?: 'WITH_WEBSITE' | 'WITHOUT_WEBSITE' | 'BOTH' | 'ANY' | 'WITH' | 'WITHOUT';
+  researchIntent?: any;
   // Auto-Discovery fields (Phase 1)
   researchMode?: 'AUTO_DISCOVERY';
   maxFinalUniqueRelevantLeads?: number;
@@ -523,6 +539,8 @@ export interface ExtensionResearchRun {
   queryFrontier?: QueryFrontierState;
   plannedQueries?: PlannedQuery[];
   activeQueryIndex?: number;
+  warningMessages?: string[];
+  hasWarnings?: boolean;
 }
 
 export interface StartResearchPayload {
@@ -543,6 +561,7 @@ export interface StartResearchPayload {
   allowProbableLocal?: boolean;
   requiredCtaTypes?: string[];
   requiredDestinationTypes?: string[];
+  websiteRequirement?: 'WITH_WEBSITE' | 'WITHOUT_WEBSITE' | 'BOTH' | 'ANY' | 'WITH' | 'WITHOUT';
 }
 
 export interface ExtensionMessage {
@@ -649,7 +668,8 @@ export type CardValidationOutcome =
   | 'MISSING_IDENTIFIER'
   | 'AMBIGUOUS_CANDIDATE'
   | 'INVALID_CONTAINER'
-  | 'DUPLICATE_CANDIDATE';
+  | 'DUPLICATE_CANDIDATE'
+  | 'PARSING_FAILED';
 
 export interface AdExtractionDiagnostics {
   cardsExamined: number;

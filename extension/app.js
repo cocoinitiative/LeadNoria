@@ -15285,11 +15285,12 @@ function createEvidenceSignature(type, source, strength, value) {
   const normVal = (value || "").toLowerCase().trim().replace(/\s+/g, " ");
   return `${type}::${source}::${strength}::${normVal}`;
 }
-function createEntityEvidenceProfile(entityKey, advertiserName, canonicalName) {
+function createEntityEvidenceProfile(entityKey, advertiserName = "", canonicalName) {
+  const safeName = advertiserName || "";
   return {
     entityKey,
-    advertiserName,
-    canonicalName: canonicalName || advertiserName,
+    advertiserName: safeName,
+    canonicalName: canonicalName || safeName,
     uniqueEvidenceMap: /* @__PURE__ */ new Map(),
     observedEvidenceOccurrences: 0,
     distinctAdCopyHashes: /* @__PURE__ */ new Set(),
@@ -15754,7 +15755,7 @@ function evaluateStrictRelevanceV3(candidateOrProfile, intent) {
   if ("uniqueEvidenceMap" in candidateOrProfile) {
     profile = candidateOrProfile;
   } else {
-    profile = createEntityEvidenceProfile("cand", candidateOrProfile.advertiserName);
+    profile = createEntityEvidenceProfile("cand", candidateOrProfile.advertiserName || "");
     recordCandidateEvidenceInProfile(profile, candidateOrProfile, intent);
   }
   const candEvidence = {
@@ -15831,7 +15832,7 @@ function evaluateStrictRelevanceV3(candidateOrProfile, intent) {
     (e) => e.type === "ENTITY_IDENTITY" && (e.reasonCode === "SIGNAL_ENTITY_NAME_EXACT" || e.reasonCode === "SIGNAL_ENTITY_NAME_CORE")
   );
   const isAccessoryOnly = ACCESSORY_ONLY_INDICATORS.some(
-    (ind) => profile.advertiserName.toLowerCase().includes(ind) || Array.from(profile.distinctAdCopyHashes).some((copy) => copy.toLowerCase().includes(ind))
+    (ind) => (profile.advertiserName || "").toLowerCase().includes(ind) || Array.from(profile.distinctAdCopyHashes).some((copy) => (copy || "").toLowerCase().includes(ind))
   ) && !hasRootVerticalEntity;
   if (isAccessoryOnly) {
     decision = "UNCERTAIN";
@@ -16088,6 +16089,7 @@ function compileResearchIntent(modeOrConfig, keywords = [], presetId, locationCo
       requiredCtaTypes: modeOrConfig.requiredCtaTypes,
       requiredDestinationTypes: modeOrConfig.requiredDestinationTypes,
       requireWebsiteFound: modeOrConfig.requireWebsiteFound,
+      websiteRequirement: modeOrConfig.websiteRequirement,
       ...options
     };
   }
@@ -16110,7 +16112,8 @@ function compileResearchIntent(modeOrConfig, keywords = [], presetId, locationCo
         allowProbableLocal: opts?.allowProbableLocal,
         requiredCtaTypes: opts?.requiredCtaTypes,
         requiredDestinationTypes: opts?.requiredDestinationTypes,
-        requireWebsiteFound: opts?.requireWebsiteFound
+        requireWebsiteFound: opts?.requireWebsiteFound,
+        websiteRequirement: opts?.websiteRequirement
       };
     }
   }
@@ -16125,7 +16128,8 @@ function compileResearchIntent(modeOrConfig, keywords = [], presetId, locationCo
     allowProbableLocal: opts?.allowProbableLocal,
     requiredCtaTypes: opts?.requiredCtaTypes,
     requiredDestinationTypes: opts?.requiredDestinationTypes,
-    requireWebsiteFound: opts?.requireWebsiteFound
+    requireWebsiteFound: opts?.requireWebsiteFound,
+    websiteRequirement: opts?.websiteRequirement
   };
 }
 var RELEVANCE_STRATEGY_VERSION, RELEVANCE_ENGINE_VERSION, BOUNDED_TAXONOMY, NEGATIVE_CATEGORIES, ACCESSORY_ONLY_INDICATORS, STOP_WORDS, LeadRelevanceEngine;
@@ -17625,6 +17629,7 @@ var ResearchConfigView = ({
   const [strictLocal, setStrictLocal] = (0, import_react.useState)(true);
   const [requiredCta, setRequiredCta] = (0, import_react.useState)("ANY");
   const [requiredDestination, setRequiredDestination] = (0, import_react.useState)("ANY");
+  const [websiteRequirement, setWebsiteRequirement] = (0, import_react.useState)("ANY");
   const selectedPreset = RESEARCH_PRESETS.find((p) => p.preset_id === presetId) || RESEARCH_PRESETS[0];
   const handleReviewClick = () => {
     let keywords = [];
@@ -17646,7 +17651,8 @@ var ResearchConfigView = ({
       presetName,
       strictLocal,
       requiredCta: requiredCta !== "ANY" ? requiredCta : void 0,
-      requiredDestination: requiredDestination !== "ANY" ? requiredDestination : void 0
+      requiredDestination: (requiredDestination === "APP_STORE" ? "APP" : requiredDestination) !== "ANY" ? requiredDestination === "APP_STORE" ? "APP" : requiredDestination : void 0,
+      websiteRequirement: websiteRequirement !== "ANY" ? websiteRequirement : void 0
     });
   };
   return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "flex flex-col gap-4 p-4 bg-slate-900 border border-slate-800 rounded-xl", children: [
@@ -17756,7 +17762,7 @@ var ResearchConfigView = ({
           " (Foreign & unknown locations fail gate)"
         ] })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "grid grid-cols-2 gap-2 text-xs", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "grid grid-cols-3 gap-2 text-xs", children: [
         /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { children: [
           /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("label", { htmlFor: "required-cta-select", className: "text-[10px] uppercase text-slate-400 block mb-0.5", children: "Required CTA" }),
           /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
@@ -17772,9 +17778,12 @@ var ResearchConfigView = ({
                 /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "LEARN_MORE", children: "Learn More" }),
                 /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "SHOP_NOW", children: "Shop Now" }),
                 /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "SIGN_UP", children: "Sign Up" }),
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "CONTACT_US", children: "Contact Us" }),
                 /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "SEND_MESSAGE", children: "Send Message" }),
-                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "WHATSAPP_MESSAGE", children: "WhatsApp" }),
-                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "CALL_NOW", children: "Call Now" })
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "CALL_NOW", children: "Call Now" }),
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "DOWNLOAD", children: "Download" }),
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "GET_QUOTE", children: "Get Quote" }),
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "OTHER", children: "Other CTA" })
               ]
             }
           )
@@ -17795,7 +17804,26 @@ var ResearchConfigView = ({
                 /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "INSTANT_FORM", children: "Meta Instant Form" }),
                 /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "MESSAGING", children: "Messaging" }),
                 /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "CALL", children: "Phone Call" }),
-                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "APP_STORE", children: "App Store" })
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "APP", children: "Mobile App / App Store" }),
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "OTHER", children: "Other Destination" })
+              ]
+            }
+          )
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("label", { htmlFor: "required-website-select", className: "text-[10px] uppercase text-slate-400 block mb-0.5", children: "Website Requirement" }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
+            "select",
+            {
+              id: "required-website-select",
+              value: websiteRequirement,
+              onChange: (e) => setWebsiteRequirement(e.target.value),
+              disabled,
+              className: "w-full px-2 py-1 text-xs bg-slate-950 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-1 focus:ring-sky-400",
+              children: [
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "ANY", children: "Any Website Status" }),
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "WITH_WEBSITE", children: "Must Have Website" }),
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "WITHOUT_WEBSITE", children: "Without Website (Social Only)" })
               ]
             }
           )
@@ -18077,6 +18105,10 @@ var PlanReviewModal = ({
                 plan.requiredDestination && /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "flex items-center justify-between", children: [
                   /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "text-slate-400", children: "Required Destination:" }),
                   /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "font-medium text-sky-400", children: plan.requiredDestination })
+                ] }),
+                plan.websiteRequirement && /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "flex items-center justify-between", children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "text-slate-400", children: "Website Requirement:" }),
+                  /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "font-medium text-sky-400", children: plan.websiteRequirement })
                 ] })
               ] }),
               !plan.canExecuteLive && /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(
@@ -25696,8 +25728,9 @@ function evaluateLeadQualificationGates(lead, criteria) {
     }
   }
   if (criteria?.requiredDestinationTypes && criteria.requiredDestinationTypes.length > 0) {
+    const effectiveReqDests = criteria.requiredDestinationTypes.map((d) => d === "APP_STORE" ? "APP" : d);
     const observedDests = lead.observedDestinationTypes || (lead.primaryDestinationType ? [lead.primaryDestinationType] : []);
-    const matchesDest = observedDests.some((d) => criteria.requiredDestinationTypes.includes(d));
+    const matchesDest = observedDests.some((d) => effectiveReqDests.includes(d));
     if (matchesDest) {
       passedGates.push("GATE_DESTINATION");
     } else {
@@ -25705,16 +25738,46 @@ function evaluateLeadQualificationGates(lead, criteria) {
       reasons.push(`Observed destinations (${observedDests.join(", ") || "none"}) do not satisfy required destination types: ${criteria.requiredDestinationTypes.join(", ")}.`);
     }
   }
+  const reqWebMode = criteria?.websiteRequirement;
   const isWebsiteDestination = lead.primaryDestinationType === "EXTERNAL_WEBSITE" || lead.observedDestinationTypes && lead.observedDestinationTypes.includes("EXTERNAL_WEBSITE");
-  const requireWeb = criteria?.requireWebsiteFound ?? isWebsiteDestination;
-  if (requireWeb && lead.websiteState !== "found") {
-    failedGates.push("GATE_WEBSITE");
-    reasons.push("External website was required or classified as primary destination, but valid destination URL is missing.");
+  if (reqWebMode === "WITH_WEBSITE" || reqWebMode === "WITH") {
+    if (lead.websiteState !== "found" || !lead.destinationUrl && !lead.destinationDomain) {
+      failedGates.push("GATE_WEBSITE");
+      reasons.push("Configured website requirement (WITH_WEBSITE) failed: external website destination is unobserved, missing, or unverified.");
+    } else {
+      passedGates.push("GATE_WEBSITE");
+    }
+  } else if (reqWebMode === "WITHOUT_WEBSITE" || reqWebMode === "WITHOUT") {
+    if (lead.websiteState === "found" || Boolean(lead.destinationUrl || lead.destinationDomain)) {
+      failedGates.push("GATE_WEBSITE");
+      reasons.push("Configured website requirement (WITHOUT_WEBSITE) failed: business has an observed website destination.");
+    } else if (lead.websiteState === "not_found" && lead.primaryDestinationType === "NO_VISIBLE_DESTINATION") {
+      passedGates.push("GATE_WEBSITE");
+    } else {
+      failedGates.push("GATE_WEBSITE");
+      reasons.push("Configured website requirement (WITHOUT_WEBSITE) requires explicit evidence of absence; missing ad destination URL alone does not prove no website.");
+    }
+  } else {
+    const requireWeb = criteria?.requireWebsiteFound ?? isWebsiteDestination;
+    if (requireWeb && lead.websiteState !== "found") {
+      failedGates.push("GATE_WEBSITE");
+      reasons.push("External website was required or classified as primary destination, but valid destination URL is missing.");
+    } else {
+      passedGates.push("GATE_WEBSITE");
+    }
   }
   const isQualified = failedGates.length === 0;
+  let canonicalOutcome;
+  if (isQualified) {
+    canonicalOutcome = "QUALIFIED";
+  } else {
+    const isHardRejection = lead.relevanceDecision === "NOT_RELEVANT" || geo === "FOREIGN_VERIFIED" || (reqWebMode === "WITHOUT_WEBSITE" || reqWebMode === "WITHOUT") && (lead.websiteState === "found" || Boolean(lead.destinationUrl || lead.destinationDomain));
+    canonicalOutcome = isHardRejection ? "REJECTED" : "REVIEW";
+  }
   return {
     isQualified,
     status: isQualified ? "QUALIFIED" : "REVIEW_REQUIRED",
+    canonicalOutcome,
     failedGates,
     passedGates,
     reasons
@@ -25798,7 +25861,12 @@ function exportLeadsToCsv(leads, runOrOptions, options) {
     "Website Category Match",
     "Website Commercial Signals",
     "Website Evidence Summary",
-    "Website Verified At"
+    "Website Verified At",
+    "Canonical Page ID",
+    "Canonical Page Slug",
+    "Identity Confidence",
+    "Relationship Type",
+    "Aliases"
   ];
   const rows = exportLeads.map((l) => [
     sanitizeCsvField(l.name),
@@ -25834,12 +25902,17 @@ function exportLeadsToCsv(leads, runOrOptions, options) {
     sanitizeCsvField(l.destinationConfidence || "NONE"),
     sanitizeCsvField(l.destinationReasonCode || "DESTINATION_NOT_OBSERVED"),
     sanitizeCsvField(l.websiteVerification?.finalUrl || l.destinationUrl || ""),
-    sanitizeCsvField(l.websiteVerificationStatus || l.websiteVerification?.status || (l.destinationUrl ? "NOT_VERIFIED" : "NO_WEBSITE")),
+    sanitizeCsvField(l.websiteVerificationStatus || l.websiteVerification?.status || (l.destinationUrl ? "NOT_VERIFIED" : "NOT_OBSERVED")),
     sanitizeCsvField(l.websiteVerification?.identityMatch || "UNKNOWN"),
     sanitizeCsvField(l.websiteVerification?.categoryMatch || "UNKNOWN"),
     sanitizeCsvField((l.websiteVerification?.commercialSignals || []).join("; ")),
     sanitizeCsvField((l.websiteVerification?.evidence || []).map((e) => e.reason).slice(0, 3).join(" | ")),
-    sanitizeCsvField(l.websiteVerification?.verifiedAt || "")
+    sanitizeCsvField(l.websiteVerification?.verifiedAt || ""),
+    sanitizeCsvField(l.canonicalPageId || ""),
+    sanitizeCsvField(l.canonicalPageSlug || ""),
+    sanitizeCsvField(l.identityConfidence || "UNRESOLVED"),
+    sanitizeCsvField(l.relationshipType || "INDEPENDENT_BUSINESS"),
+    sanitizeCsvField((l.aliases || []).join("; "))
   ]);
   return metaHeader + [headers.join(","), ...rows.map((r) => r.join(","))].join("\r\n");
 }
@@ -26110,7 +26183,8 @@ var ExtensionApp = () => {
       locationName: config.locationName,
       strictLocal: config.strictLocal,
       requiredCta: config.requiredCta,
-      requiredDestination: config.requiredDestination
+      requiredDestination: config.requiredDestination,
+      websiteRequirement: config.websiteRequirement
     };
     setPendingPlan(planVM);
     setIsPlanReviewOpen(true);
@@ -26132,7 +26206,8 @@ var ExtensionApp = () => {
       maxFinalUniqueRelevantLeads: pendingPlan.maxCandidatesLimit,
       strictLocalMode: pendingPlan.strictLocal !== false,
       requiredCtaTypes: pendingPlan.requiredCta ? [pendingPlan.requiredCta] : void 0,
-      requiredDestinationTypes: pendingPlan.requiredDestination ? [pendingPlan.requiredDestination] : void 0
+      requiredDestinationTypes: pendingPlan.requiredDestination ? [pendingPlan.requiredDestination] : void 0,
+      websiteRequirement: pendingPlan.websiteRequirement || void 0
     };
     if (typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
       chrome.runtime.sendMessage({ type: "START_RESEARCH", payload }, (res) => {
@@ -26435,7 +26510,7 @@ var ExtensionApp = () => {
             setIsDiagnosticsOpen(true);
           },
           onClearLocalHistory: handleClearHistory,
-          version: "1.7.0",
+          version: typeof chrome !== "undefined" && chrome.runtime?.getManifest ? chrome.runtime.getManifest().version : "1.7.7",
           reliabilityMetrics,
           guardrailAlerts,
           issues: aggregatedIssues,

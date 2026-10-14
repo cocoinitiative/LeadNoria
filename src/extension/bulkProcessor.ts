@@ -246,12 +246,12 @@ export async function processBatch(
       if (intent) {
         evalResult = LeadRelevanceEngine.evaluateCandidate(cand, intent);
         v3Result = evaluateStrictRelevanceV3({
-          advertiserName: cand.pageName,
-          adText: cand.bodyCopy,
+          advertiserName: cand.pageName || cand.advertiserName || '',
+          adText: cand.bodyCopy || cand.adText || '',
           destinationUrl: cand.destinationUrl,
           destinationDomain: cand.destinationDomain,
-          facebookPageUrl: cand.facebookPageUrl,
-          ctaText: cand.ctaText,
+          facebookPageUrl: cand.facebookPageUrl || cand.pageUrl,
+          ctaText: cand.ctaText || cand.callToAction,
           matchedKeyword: cand.observedKeyword || currentKeyword
         }, intent);
 
@@ -275,7 +275,7 @@ export async function processBatch(
 
         if (v3Result.decision === 'UNCERTAIN') {
           counters.uncertainCandidates++;
-          if (!existingEntitiesMap.has(entityKey) && !seenRejectedEntityKeys.has(entityKey)) {
+          if (!existingEntitiesMap.has(entityKey)) {
             seenUncertainEntityKeys.add(entityKey);
           }
           counters.notRelevantEntities = seenRejectedEntityKeys.size;
@@ -293,17 +293,17 @@ export async function processBatch(
       }
 
       // 5. Geographic physical location evaluation
-      const cleanName = normalizeAdvertiserName(cand.pageName);
-      const pageNorm = normalizeFacebookPage(cand.facebookPageUrl, cand.facebookPageId);
+      const cleanName = normalizeAdvertiserName(cand.pageName || cand.advertiserName);
+      const pageNorm = normalizeFacebookPage(cand.facebookPageUrl || cand.pageUrl, cand.facebookPageId || cand.pageId);
       const domainNorm = normalizeDestinationDomain(cand.destinationUrl, cand.destinationDomain);
 
       const geoEval = evaluateGeographicOrigin({
         pageName: cleanName,
-        pageUrl: pageNorm.canonicalUrl || cand.facebookPageUrl,
+        pageUrl: pageNorm.canonicalUrl || cand.facebookPageUrl || cand.pageUrl,
         destinationUrl: domainNorm.cleanUrl || cand.destinationUrl,
         destinationDomain: domainNorm.canonicalDomain || cand.destinationDomain,
-        bodyCopy: cand.bodyCopy,
-        ctaText: cand.ctaText
+        bodyCopy: cand.bodyCopy || cand.adText,
+        ctaText: cand.ctaText || cand.callToAction
       }, countryCode);
 
       if (intent?.strictLocalMode) {
@@ -340,17 +340,18 @@ export async function processBatch(
       }
 
       // 5.5. CTA & Destination evaluation
+      const ctaInputText = cand.ctaText || cand.callToAction;
       const candCtaRes = cand.ctaType
-        ? { ctaType: cand.ctaType, normalizedText: cand.ctaText || '', reasonCode: 'CTA_TEXT_MATCH', reason: '' }
-        : classifyCta(cand.ctaText);
+        ? { ctaType: cand.ctaType, rawCtaText: ctaInputText, originalCtaText: ctaInputText, normalizedText: ctaInputText || '', status: 'CLASSIFIED' as const, confidence: 'HIGH' as const, evidence: 'Pre-classified CTA intent.', reasonCode: 'CTA_TEXT_MATCH', reason: '' }
+        : classifyCta(ctaInputText);
       const candDestRes = cand.destinationType
         ? { destinationType: cand.destinationType, confidence: cand.destinationConfidence || 'HIGH', reasonCode: cand.destinationReasonCode || 'VISIBLE_EXTERNAL_DESTINATION', reason: '' }
         : classifyDestination({
             destinationUrl: domainNorm.cleanUrl || cand.destinationUrl,
             destinationDomain: domainNorm.canonicalDomain || cand.destinationDomain,
-            ctaText: cand.ctaText,
+            ctaText: ctaInputText,
             ctaType: candCtaRes.ctaType,
-            bodyCopy: cand.bodyCopy,
+            bodyCopy: cand.bodyCopy || cand.adText,
             rawText: cand.rawText
           });
 
@@ -371,7 +372,8 @@ export async function processBatch(
       }
 
       if (intent?.requiredDestinationTypes && intent.requiredDestinationTypes.length > 0) {
-        if (!intent.requiredDestinationTypes.includes(candDestRes.destinationType)) {
+        const effectiveReqDests = intent.requiredDestinationTypes.map(d => (d === ('APP_STORE' as any) ? 'APP' : d));
+        if (!effectiveReqDests.includes(candDestRes.destinationType)) {
           counters.notRelevantCandidates++;
           if (!existingEntitiesMap.has(entityKey)) {
             seenRejectedEntityKeys.add(entityKey);
@@ -400,6 +402,9 @@ export async function processBatch(
       const candAdEvidenceItem: AdLevelEvidence = {
         libraryId: cand.libraryId,
         ctaText: cand.ctaText,
+        normalizedCtaText: candCtaRes.normalizedText,
+        ctaConfidence: candCtaRes.confidence,
+        ctaStatus: candCtaRes.status,
         ctaType: candCtaRes.ctaType,
         destinationType: candDestRes.destinationType,
         destinationUrl: domainNorm.cleanUrl || cand.destinationUrl,
