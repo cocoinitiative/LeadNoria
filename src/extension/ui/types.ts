@@ -182,6 +182,17 @@ export interface ResultRowViewModel {
   canonicalRecord?: any;
 
   websiteAvailability?: string;
+
+  // Phase 8-10 Scoring & Quality Signals
+  prioritizationTier?: string;
+  scoreModelVersion?: string;
+  scoreExplanation?: string;
+  contactQualityState?: string;
+  contactVerificationState?: string;
+  phoneSyntaxState?: string;
+  emailSyntaxState?: string;
+  phoneConflictState?: string;
+  emailConflictState?: string;
 }
 export type LeadResultRowViewModel = ResultRowViewModel;
 

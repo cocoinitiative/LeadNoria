@@ -40,6 +40,8 @@ import { extractCreativeSignalsFromCandidate, aggregateCreativeSignals } from '.
 import { classifyUncertainCandidate } from './uncertainQueue.ts';
 import { checkAdvertiserExpansionEligibility } from './advertiserExpander.ts';
 import { evaluateLeadQualificationGates } from './qualificationGate.ts';
+import { calculateLeadScore } from './leadPrioritizer.ts';
+import { aggregateContactObservations } from './contactQuality.ts';
 import type { UncertainEntityRecord } from './types.ts';
 
 export interface BatchProcessOptions {
@@ -222,6 +224,15 @@ export async function processBatch(
           existingEntity.status = qualGate.status;
           existingEntity.qualificationFailedGates = qualGate.failedGates;
           existingEntity.qualificationReasons = qualGate.reasons;
+
+          const priorityRes = calculateLeadScore(existingEntity, intent);
+          existingEntity.leadScore = priorityRes.score;
+          existingEntity.normalizedScore = priorityRes.normalizedScore;
+          existingEntity.prioritizationTier = priorityRes.tier;
+          existingEntity.scoreConfidence = priorityRes.confidence;
+          existingEntity.scoreBreakdown = priorityRes.breakdown;
+          existingEntity.scoreModelVersion = priorityRes.breakdown.modelVersion;
+          existingEntity.scoreExplanation = priorityRes.explanation;
 
           entityIndex.indexEntity(mergeDecision.targetKey, existingEntity);
 
@@ -411,8 +422,18 @@ export async function processBatch(
         destinationDomain: domainNorm.canonicalDomain || cand.destinationDomain,
         reasonCode: candDestRes.reasonCode,
         confidence: candDestRes.confidence,
-        observedAt: cand.startedRunning || new Date().toISOString()
+        observedAt: cand.startedRunning || new Date().toISOString(),
+        contactObservations: cand.contactObservations || [
+          ...(cand.observedPhones || []),
+          ...(cand.observedEmails || [])
+        ]
       };
+
+      const incomingContacts = cand.contactObservations || [
+        ...(cand.observedPhones || []),
+        ...(cand.observedEmails || [])
+      ];
+      const contactProfile = aggregateContactObservations(incomingContacts);
 
       const newLead: ExtensionLead = {
         id: `lead_${runId}_${entityKey}`,
@@ -479,13 +500,29 @@ export async function processBatch(
             : (v3Result?.decision ?? evalResult?.decision) === 'UNCERTAIN'
               ? 'UNCERTAIN'
               : undefined,
-        creativeSignals: extractCreativeSignalsFromCandidate(cand)
+        creativeSignals: extractCreativeSignalsFromCandidate(cand),
+        contactProfile,
+        contactQualityState: contactProfile.overallQualityState,
+        businessPhone: contactProfile.primaryPhone,
+        businessEmail: contactProfile.primaryEmail,
+        phones: contactProfile.observedPhones.map(p => p.normalizedValue || p.rawValue),
+        emails: contactProfile.observedEmails.map(e => e.normalizedValue || e.rawValue),
+        contactObservations: incomingContacts
       };
 
     const qualGate = evaluateLeadQualificationGates(newLead, intent);
     newLead.status = qualGate.status;
     newLead.qualificationFailedGates = qualGate.failedGates;
     newLead.qualificationReasons = qualGate.reasons;
+
+    const priorityRes = calculateLeadScore(newLead, intent);
+    newLead.leadScore = priorityRes.score;
+    newLead.normalizedScore = priorityRes.normalizedScore;
+    newLead.prioritizationTier = priorityRes.tier;
+    newLead.scoreConfidence = priorityRes.confidence;
+    newLead.scoreBreakdown = priorityRes.breakdown;
+    newLead.scoreModelVersion = priorityRes.breakdown.modelVersion;
+    newLead.scoreExplanation = priorityRes.explanation;
 
     // Check advertiser expansion eligibility
     const expEligibility = checkAdvertiserExpansionEligibility(

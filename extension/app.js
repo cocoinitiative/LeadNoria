@@ -18692,6 +18692,14 @@ var ResultsTableView = ({
   const [searchTerm, setSearchTerm] = (0, import_react3.useState)("");
   const [sourceFilter, setSourceFilter] = (0, import_react3.useState)("ALL");
   const [qualificationFilter, setQualificationFilter] = (0, import_react3.useState)("ALL");
+  const [targetCountryFilter, setTargetCountryFilter] = (0, import_react3.useState)("ALL");
+  const [geoClassificationFilter, setGeoClassificationFilter] = (0, import_react3.useState)("ALL");
+  const [tierFilter, setTierFilter] = (0, import_react3.useState)("ALL");
+  const [ctaTypeFilter, setCtaTypeFilter] = (0, import_react3.useState)("ALL");
+  const [destinationTypeFilter, setDestinationTypeFilter] = (0, import_react3.useState)("ALL");
+  const [conflictFilter, setConflictFilter] = (0, import_react3.useState)("ALL");
+  const [minScore, setMinScore] = (0, import_react3.useState)("");
+  const [maxScore, setMaxScore] = (0, import_react3.useState)("");
   const [freshnessFilter, setFreshnessFilter] = (0, import_react3.useState)("ALL");
   const [categoryFilter, setCategoryFilter] = (0, import_react3.useState)("ALL");
   const [requirePhone, setRequirePhone] = (0, import_react3.useState)(false);
@@ -18710,6 +18718,50 @@ var ResultsTableView = ({
     }
     return Array.from(set).sort();
   }, [results]);
+  const availableTargetCountries = (0, import_react3.useMemo)(() => {
+    const set = /* @__PURE__ */ new Set();
+    for (const r of results) {
+      if (r.targetCountryCode) set.add(r.targetCountryCode);
+    }
+    return Array.from(set).sort();
+  }, [results]);
+  const availableCtaTypes = (0, import_react3.useMemo)(() => {
+    const set = /* @__PURE__ */ new Set();
+    for (const r of results) {
+      if (r.ctaType && r.ctaType !== "UNKNOWN") set.add(r.ctaType);
+    }
+    return Array.from(set).sort();
+  }, [results]);
+  const availableDestinationTypes = (0, import_react3.useMemo)(() => {
+    const set = /* @__PURE__ */ new Set();
+    for (const r of results) {
+      if (r.destinationType && r.destinationType !== "UNKNOWN") set.add(r.destinationType);
+    }
+    return Array.from(set).sort();
+  }, [results]);
+  const hasActiveFilters = Boolean(
+    searchTerm.trim() !== "" || sourceFilter !== "ALL" || qualificationFilter !== "ALL" || targetCountryFilter !== "ALL" || geoClassificationFilter !== "ALL" || tierFilter !== "ALL" || ctaTypeFilter !== "ALL" || destinationTypeFilter !== "ALL" || conflictFilter !== "ALL" || minScore !== "" || maxScore !== "" || freshnessFilter !== "ALL" || categoryFilter !== "ALL" || requirePhone || requireEmail || requireWebsite || requirePerson
+  );
+  const handleClearFilters = () => {
+    setSearchTerm("");
+    setSourceFilter("ALL");
+    setQualificationFilter("ALL");
+    setTargetCountryFilter("ALL");
+    setGeoClassificationFilter("ALL");
+    setTierFilter("ALL");
+    setCtaTypeFilter("ALL");
+    setDestinationTypeFilter("ALL");
+    setConflictFilter("ALL");
+    setMinScore("");
+    setMaxScore("");
+    setFreshnessFilter("ALL");
+    setCategoryFilter("ALL");
+    setRequirePhone(false);
+    setRequireEmail(false);
+    setRequireWebsite(false);
+    setRequirePerson(false);
+    setPage(1);
+  };
   const filteredResults = (0, import_react3.useMemo)(() => {
     return results.filter((r) => {
       if (searchTerm.trim() !== "") {
@@ -18731,8 +18783,45 @@ var ResultsTableView = ({
         const hasSource = r.sourceBadges ? r.sourceBadges.some((b) => b.sourceType === sourceFilter) : r.primarySource === sourceFilter;
         if (!hasSource) return false;
       }
-      if (qualificationFilter !== "ALL" && r.qualificationState !== qualificationFilter) {
+      if (qualificationFilter !== "ALL") {
+        if (qualificationFilter === "QUALIFIED" && r.qualificationState !== "QUALIFIED") return false;
+        if (qualificationFilter === "REVIEW_REQUIRED" && r.qualificationState !== "REVIEW_REQUIRED" && r.qualificationState !== "UNCERTAIN") return false;
+        if (qualificationFilter === "NOT_QUALIFIED" && r.qualificationState !== "NOT_QUALIFIED") return false;
+        if (qualificationFilter === "BLOCKED" && r.qualificationState !== "BLOCKED") return false;
+        if (qualificationFilter === "UNASSESSED" && r.qualificationState !== "UNASSESSED") return false;
+      }
+      if (targetCountryFilter !== "ALL" && r.targetCountryCode !== targetCountryFilter) {
         return false;
+      }
+      if (geoClassificationFilter !== "ALL") {
+        const geo = r.geographicClassification || (r.businessCountryCode ? "LOCAL_VERIFIED" : "LOCATION_UNKNOWN");
+        if (geo !== geoClassificationFilter) return false;
+      }
+      if (tierFilter !== "ALL") {
+        const t = r.prioritizationTier || r.canonicalRecord?.prioritizationTier || "UNRANKED";
+        if (t !== tierFilter) return false;
+      }
+      const score = r.qualificationScore !== void 0 ? r.qualificationScore : r.canonicalRecord?.leadScore;
+      if (minScore !== "" && !isNaN(Number(minScore))) {
+        if (score === void 0 || score < Number(minScore)) return false;
+      }
+      if (maxScore !== "" && !isNaN(Number(maxScore))) {
+        if (score === void 0 || score > Number(maxScore)) return false;
+      }
+      if (ctaTypeFilter !== "ALL") {
+        const cta = r.ctaType || r.canonicalRecord?.primaryCtaType || "UNKNOWN";
+        if (cta !== ctaTypeFilter) return false;
+      }
+      if (destinationTypeFilter !== "ALL") {
+        const dest = r.destinationType || r.canonicalRecord?.primaryDestinationType || "UNKNOWN";
+        if (dest !== destinationTypeFilter) return false;
+      }
+      if (conflictFilter === "CONFLICT_ONLY") {
+        const hasConflict = r.phoneConflictState === "PHONE_CONFLICT" || r.emailConflictState === "EMAIL_CONFLICT" || r.canonicalRecord?.contactProfile?.phoneConflict || r.canonicalRecord?.contactProfile?.emailConflict;
+        if (!hasConflict) return false;
+      } else if (conflictFilter === "NO_CONFLICT") {
+        const hasConflict = r.phoneConflictState === "PHONE_CONFLICT" || r.emailConflictState === "EMAIL_CONFLICT" || r.canonicalRecord?.contactProfile?.phoneConflict || r.canonicalRecord?.contactProfile?.emailConflict;
+        if (hasConflict) return false;
       }
       if (freshnessFilter !== "ALL") {
         const freshState = r.dataSignals?.freshness || "UNKNOWN";
@@ -18752,6 +18841,14 @@ var ResultsTableView = ({
     searchTerm,
     sourceFilter,
     qualificationFilter,
+    targetCountryFilter,
+    geoClassificationFilter,
+    tierFilter,
+    ctaTypeFilter,
+    destinationTypeFilter,
+    conflictFilter,
+    minScore,
+    maxScore,
     freshnessFilter,
     categoryFilter,
     requirePhone,
@@ -18982,6 +19079,145 @@ var ResultsTableView = ({
               ]
             }
           ),
+          /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+            "select",
+            {
+              value: geoClassificationFilter,
+              onChange: (e) => {
+                setGeoClassificationFilter(e.target.value);
+                setPage(1);
+              },
+              className: "px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-400",
+              "aria-label": "Filter by geographic classification",
+              children: [
+                /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "ALL", children: "All Geo Classifications" }),
+                /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "LOCAL_VERIFIED", children: "\u{1F4CD} Local Verified Only" }),
+                /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "FOREIGN_VERIFIED", children: "\u{1F310} Foreign Verified" }),
+                /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "LOCAL_PROBABLE", children: "\u2753 Local Probable" }),
+                /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "LOCATION_UNKNOWN", children: "\u2754 Location Unknown" })
+              ]
+            }
+          ),
+          /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+            "select",
+            {
+              value: tierFilter,
+              onChange: (e) => {
+                setTierFilter(e.target.value);
+                setPage(1);
+              },
+              className: "px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-400",
+              "aria-label": "Filter by prioritization tier",
+              children: [
+                /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "ALL", children: "All Tiers" }),
+                /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "HIGH", children: "High Priority" }),
+                /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "MEDIUM", children: "Medium Priority" }),
+                /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "LOW", children: "Low Priority" }),
+                /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "MINIMAL", children: "Minimal Priority" })
+              ]
+            }
+          ),
+          availableTargetCountries.length > 1 && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+            "select",
+            {
+              value: targetCountryFilter,
+              onChange: (e) => {
+                setTargetCountryFilter(e.target.value);
+                setPage(1);
+              },
+              className: "px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-400",
+              "aria-label": "Filter by target country",
+              children: [
+                /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "ALL", children: "All Target Countries" }),
+                availableTargetCountries.map((c) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: c, children: c }, c))
+              ]
+            }
+          ),
+          availableCtaTypes.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+            "select",
+            {
+              value: ctaTypeFilter,
+              onChange: (e) => {
+                setCtaTypeFilter(e.target.value);
+                setPage(1);
+              },
+              className: "px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-400",
+              "aria-label": "Filter by CTA type",
+              children: [
+                /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "ALL", children: "All CTAs" }),
+                availableCtaTypes.map((c) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: c, children: toFriendlyStatus(c) }, c))
+              ]
+            }
+          ),
+          availableDestinationTypes.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+            "select",
+            {
+              value: destinationTypeFilter,
+              onChange: (e) => {
+                setDestinationTypeFilter(e.target.value);
+                setPage(1);
+              },
+              className: "px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-400",
+              "aria-label": "Filter by destination type",
+              children: [
+                /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "ALL", children: "All Destinations" }),
+                availableDestinationTypes.map((d) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: d, children: toFriendlyStatus(d) }, d))
+              ]
+            }
+          ),
+          /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+            "select",
+            {
+              value: conflictFilter,
+              onChange: (e) => {
+                setConflictFilter(e.target.value);
+                setPage(1);
+              },
+              className: "px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-400",
+              "aria-label": "Filter by contact conflict status",
+              children: [
+                /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "ALL", children: "All Contact States" }),
+                /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "NO_CONFLICT", children: "No Conflicts" }),
+                /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: "CONFLICT_ONLY", children: "\u26A0\uFE0F Conflicted Contacts Only" })
+              ]
+            }
+          ),
+          /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "flex items-center gap-1 text-[11px] text-slate-400", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { children: "Score:" }),
+            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+              "input",
+              {
+                type: "number",
+                min: "0",
+                max: "100",
+                placeholder: "Min",
+                value: minScore,
+                onChange: (e) => {
+                  setMinScore(e.target.value);
+                  setPage(1);
+                },
+                className: "w-12 px-1.5 py-0.5 bg-slate-950 border border-slate-700 rounded text-slate-200 text-xs focus:outline-none focus:ring-1 focus:ring-sky-400",
+                "aria-label": "Minimum lead score"
+              }
+            ),
+            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { children: "-" }),
+            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+              "input",
+              {
+                type: "number",
+                min: "0",
+                max: "100",
+                placeholder: "Max",
+                value: maxScore,
+                onChange: (e) => {
+                  setMaxScore(e.target.value);
+                  setPage(1);
+                },
+                className: "w-12 px-1.5 py-0.5 bg-slate-950 border border-slate-700 rounded text-slate-200 text-xs focus:outline-none focus:ring-1 focus:ring-sky-400",
+                "aria-label": "Maximum lead score"
+              }
+            )
+          ] }),
           availableCategories.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
             "select",
             {
@@ -19057,7 +19293,17 @@ var ResultsTableView = ({
               }
             ),
             "Person"
-          ] })
+          ] }),
+          hasActiveFilters && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+            "button",
+            {
+              type: "button",
+              onClick: handleClearFilters,
+              className: "px-2 py-0.5 text-[11px] font-semibold bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/80 rounded cursor-pointer transition-colors",
+              "aria-label": "Clear all applied filters",
+              children: "\u2715 Clear Filters"
+            }
+          )
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "flex items-center gap-1.5 ml-auto", children: [
           /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "text-slate-500 text-[11px]", children: "Sort:" }),
@@ -19185,15 +19431,25 @@ var ResultsTableView = ({
                 ] })
               ] }),
               /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "flex flex-wrap items-center gap-1.5 justify-end", children: [
+                r.prioritizationTier && r.prioritizationTier !== "UNRANKED" && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+                  "span",
+                  {
+                    className: `px-1.5 py-0.5 text-[9px] font-bold rounded border ${r.prioritizationTier === "HIGH" ? "bg-emerald-950/70 text-emerald-300 border-emerald-500/50" : r.prioritizationTier === "MEDIUM" ? "bg-sky-950/70 text-sky-300 border-sky-500/50" : r.prioritizationTier === "LOW" ? "bg-amber-950/70 text-amber-300 border-amber-500/50" : "bg-slate-900 text-slate-400 border-slate-700"}`,
+                    title: `Prioritization Tier: ${r.prioritizationTier}`,
+                    children: [
+                      "\u2605 ",
+                      r.prioritizationTier
+                    ]
+                  }
+                ),
                 r.qualificationScore !== void 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
                   "span",
                   {
                     className: "px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-300 bg-slate-800 border border-slate-700 rounded",
-                    title: `Lead Score: ${(r.qualificationScore * 100).toFixed(0)}% (Ranking aid only; does not determine eligibility)`,
+                    title: r.scoreExplanation || `Lead Priority Score: ${r.qualificationScore > 1 ? r.qualificationScore : (r.qualificationScore * 100).toFixed(0)}/100`,
                     children: [
                       "Score: ",
-                      (r.qualificationScore * 100).toFixed(0),
-                      "%",
+                      r.qualificationScore > 1 ? `${r.qualificationScore}/100` : `${(r.qualificationScore * 100).toFixed(0)}%`,
                       r.scoreConfidence && r.scoreConfidence !== "NONE" && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "text-slate-400 font-sans ml-1 text-[9px]", children: [
                         "(",
                         r.scoreConfidence,
@@ -19249,7 +19505,8 @@ var ResultsTableView = ({
                 r.destinationType && r.destinationType !== "UNKNOWN" && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "px-1.5 py-0.2 text-[9px] bg-slate-800 text-slate-300 rounded border border-slate-700", children: [
                   "Dest: ",
                   toFriendlyStatus(r.destinationType)
-                ] })
+                ] }),
+                (r.phoneConflictState === "PHONE_CONFLICT" || r.emailConflictState === "EMAIL_CONFLICT" || r.canonicalRecord?.contactProfile?.phoneConflict || r.canonicalRecord?.contactProfile?.emailConflict) && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "px-1.5 py-0.2 text-[9px] bg-rose-950/60 text-rose-300 border border-rose-500/40 rounded font-semibold", title: "Conflicting contact observations recorded across ads", children: "\u26A0\uFE0F Contact Conflict" })
               ] }),
               r.qualityMetrics && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "flex items-center gap-2 text-[10px] text-slate-500 ml-auto", children: [
                 /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { children: [
@@ -21313,6 +21570,15 @@ function extensionLeadToResultRowViewModel(lead) {
       freshness: "CURRENT",
       freshnessLabel: "Recently observed"
     },
+    prioritizationTier: lead.prioritizationTier || "UNRANKED",
+    scoreModelVersion: lead.scoreModelVersion || "leadnoria-scoring-v1",
+    scoreExplanation: lead.scoreExplanation,
+    contactQualityState: lead.contactQualityState || lead.contactProfile?.overallQualityState || (hasPhone || hasEmail ? "OBSERVED_VALID_SYNTAX" : "NOT_OBSERVED"),
+    contactVerificationState: lead.contactProfile?.observedPhones?.[0]?.verificationStatus || lead.contactProfile?.observedEmails?.[0]?.verificationStatus || (hasPhone || hasEmail ? "UNPROBED_PUBLIC_CLAIM" : "NOT_OBSERVED"),
+    phoneSyntaxState: lead.contactProfile?.observedPhones?.[0]?.syntaxState || (hasPhone ? "SYNTAX_VALID" : "NOT_OBSERVED"),
+    emailSyntaxState: lead.contactProfile?.observedEmails?.[0]?.syntaxState || (hasEmail ? "SYNTAX_VALID" : "NOT_OBSERVED"),
+    phoneConflictState: lead.contactProfile?.phoneConflictState || (lead.contactProfile?.phoneConflict ? "PHONE_CONFLICT" : "NO_CONFLICT"),
+    emailConflictState: lead.contactProfile?.emailConflictState || (lead.contactProfile?.emailConflict ? "EMAIL_CONFLICT" : "NO_CONFLICT"),
     canonicalRecord: lead
   };
 }
@@ -21901,7 +22167,7 @@ function extensionLeadToResultDetailViewModel(lead) {
       explanation: "Qualification reason unavailable; review required."
     });
   }
-  const scoreText = lead.leadScore !== void 0 ? `${(lead.leadScore * 100).toFixed(0)}%` : void 0;
+  const scoreText = lead.leadScore !== void 0 ? lead.leadScore > 1 ? `${lead.leadScore.toFixed(0)}%` : `${(lead.leadScore * 100).toFixed(0)}%` : void 0;
   const identityDetails = {
     canonicalBusinessName: row.displayName,
     aliases,
@@ -25786,9 +26052,8 @@ function evaluateLeadQualificationGates(lead, criteria) {
 
 // src/extension/metaAdapter.ts
 function sanitizeCsvField(val) {
-  if (val === null || val === void 0) return "";
-  let str = String(val).trim();
-  str = str.replace(/\t/g, " ").replace(/\r/g, "");
+  if (val === null || val === void 0) return '""';
+  let str = String(val);
   if (/^[=+\-@\t\r]/.test(str)) {
     str = `'${str}`;
   }
@@ -25798,7 +26063,7 @@ function sanitizeCsvField(val) {
 function exportLeadsToCsv(leads, runOrOptions, options) {
   let run;
   let opts = options;
-  if (runOrOptions && typeof runOrOptions === "object" && "qualifiedOnly" in runOrOptions) {
+  if (runOrOptions && typeof runOrOptions === "object" && ("qualifiedOnly" in runOrOptions || "reviewOnly" in runOrOptions || "rejectedOnly" in runOrOptions)) {
     opts = runOrOptions;
   } else if (runOrOptions && typeof runOrOptions === "object") {
     run = runOrOptions;
@@ -25808,6 +26073,18 @@ function exportLeadsToCsv(leads, runOrOptions, options) {
     exportLeads = leads.filter((l) => {
       const gateCriteria = run && "researchIntent" in run && run.researchIntent ? run.researchIntent : opts;
       return evaluateLeadQualificationGates(l, gateCriteria).isQualified;
+    });
+  } else if (opts?.reviewOnly) {
+    exportLeads = leads.filter((l) => {
+      const gateCriteria = run && "researchIntent" in run && run.researchIntent ? run.researchIntent : opts;
+      const res = evaluateLeadQualificationGates(l, gateCriteria);
+      return !res.isQualified && res.canonicalOutcome === "REVIEW";
+    });
+  } else if (opts?.rejectedOnly) {
+    exportLeads = leads.filter((l) => {
+      const gateCriteria = run && "researchIntent" in run && run.researchIntent ? run.researchIntent : opts;
+      const res = evaluateLeadQualificationGates(l, gateCriteria);
+      return res.canonicalOutcome === "REJECTED";
     });
   }
   let metaHeader = "";
@@ -25866,7 +26143,19 @@ function exportLeadsToCsv(leads, runOrOptions, options) {
     "Canonical Page Slug",
     "Identity Confidence",
     "Relationship Type",
-    "Aliases"
+    "Aliases",
+    "Public Observed Phone",
+    "Public Observed Email",
+    "Phone Syntax Status",
+    "Email Syntax Status",
+    "Contact Evidence Source",
+    "Contact Conflict Status",
+    "Contact Quality State",
+    "Contact Verification State",
+    "Lead Priority Score",
+    "Prioritization Tier",
+    "Score Model Version",
+    "Score Explanation"
   ];
   const rows = exportLeads.map((l) => [
     sanitizeCsvField(l.name),
@@ -25912,7 +26201,19 @@ function exportLeadsToCsv(leads, runOrOptions, options) {
     sanitizeCsvField(l.canonicalPageSlug || ""),
     sanitizeCsvField(l.identityConfidence || "UNRESOLVED"),
     sanitizeCsvField(l.relationshipType || "INDEPENDENT_BUSINESS"),
-    sanitizeCsvField((l.aliases || []).join("; "))
+    sanitizeCsvField((l.aliases || []).join("; ")),
+    sanitizeCsvField(l.businessPhone || l.phones && l.phones[0] || ""),
+    sanitizeCsvField(l.businessEmail || l.emails && l.emails[0] || ""),
+    sanitizeCsvField(l.contactProfile?.observedPhones?.[0]?.syntaxState || (l.businessPhone ? "SYNTAX_VALID" : "NOT_OBSERVED")),
+    sanitizeCsvField(l.contactProfile?.observedEmails?.[0]?.syntaxState || (l.businessEmail ? "SYNTAX_VALID" : "NOT_OBSERVED")),
+    sanitizeCsvField(l.contactProfile?.observedPhones?.[0]?.sourceSurface || l.contactProfile?.observedEmails?.[0]?.sourceSurface || (l.businessPhone || l.businessEmail ? "AD_BODY_TEXT" : "NOT_OBSERVED")),
+    sanitizeCsvField(l.contactProfile?.phoneConflictState || l.contactProfile?.emailConflictState || "NOT_APPLICABLE"),
+    sanitizeCsvField(l.contactQualityState || l.contactProfile?.overallQualityState || (l.businessPhone || l.businessEmail ? "OBSERVED_VALID_SYNTAX" : "NOT_OBSERVED")),
+    sanitizeCsvField(l.contactProfile?.observedPhones?.[0]?.verificationStatus || l.contactProfile?.observedEmails?.[0]?.verificationStatus || (l.businessPhone || l.businessEmail ? "UNPROBED_PUBLIC_CLAIM" : "NOT_OBSERVED")),
+    sanitizeCsvField(l.leadScore !== void 0 ? l.leadScore : "N/A"),
+    sanitizeCsvField(l.prioritizationTier || "UNRANKED"),
+    sanitizeCsvField(l.scoreModelVersion || "leadnoria-scoring-v1"),
+    sanitizeCsvField(l.scoreExplanation || "")
   ]);
   return metaHeader + [headers.join(","), ...rows.map((r) => r.join(","))].join("\r\n");
 }

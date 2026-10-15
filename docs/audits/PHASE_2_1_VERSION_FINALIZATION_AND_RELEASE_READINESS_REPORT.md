@@ -1,0 +1,309 @@
+# LeadNoria — Phase 2.1: Version Finalization & Release-Readiness Verification Report
+
+**Date:** 2026-10-14  
+**Audit Phase:** Phase 2.1 (Version Finalization & Release-Readiness Verification)  
+**Baseline Git Commit:** `1ad52aba237caaa4fc0e525e945d8d20ff0cce5f` (Phase 1 Complete on `origin/main`)  
+**Operating Environment:** Windows 11 / Node.js v22.14.0 / PowerShell  
+**Isolation Status:** Local Offline Environment | Zero External Network Access  
+**Finalized Proposed Version:** `1.7.7`  
+**Release Publication Status:** **STRICTLY LOCAL ONLY — NOT COMMITTED / NOT PUSHED / NOT TAGGED / NOT DEPLOYED**  
+
+---
+
+## 1. Executive Verdict
+
+### **VERDICT: PASS**
+
+Version finalization to `1.7.7` has been completed cleanly across all authoritative configuration files and extension runtime metadata using standard package manager workflows. The new isolated release candidate `dist/release-candidate/leadnoria-v1.7.7-candidate.zip` was built without overwriting historical release archives or the previous Phase 2.0 candidate. All fail-closed safety invariants, strict runtime boundaries, and lead qualification rules remain 100% intact and verified across 17 automated offline test suites (484 assertions) plus 2 release candidate validation suites (62 assertions) and clean TypeScript compilation (0 errors).
+
+| Assessment Category | Status | Evidence / Notes |
+| :--- | :--- | :--- |
+| **Git Baseline & Integrity** | **PASS** | HEAD matches baseline `1ad52aba237caaa4fc0e525e945d8d20ff0cce5f`. Changes remain strictly local and uncommitted. |
+| **Version Alignment (`1.7.7`)** | **PASS** | Authoritative version `1.7.7` synchronized across `package.json`, `package-lock.json`, `src/extension/manifest.json`, unpacked `extension/manifest.json`, and dynamic UI settings. |
+| **Historical Archive Immutability** | **PASS** | Hashes for `dist/leadnoria-v1.7.5.zip`, `dist/leadnoria-v1.7.6.zip`, and `extension.zip` verified identical before and after all operations. |
+| **Candidate Artifact Isolation** | **PASS** | Built strictly to isolated path: `dist/release-candidate/leadnoria-v1.7.7-candidate.zip`. Zero overwrites. |
+| **Candidate Contents & Hygiene** | **PASS** | Exactly 12 runtime assets; zero prohibited files (`.env`, `.git`, `.ts`, `.map`, `node_modules`, credentials). |
+| **Manifest & Permissions Audit** | **PASS** | Manifest V3; permissions: `storage`, `tabs`, `scripting`, `sidePanel`; host permissions strictly scoped to Meta Ad Library (`*://*.facebook.com/ads/library/*`). |
+| **Safety Gates (Fail-Closed)** | **PASS** | `isLiveCollectionPermitted() === false`, `isExternalWebsiteCrawlingPermitted() === false`. |
+| **Qualification Invariants** | **PASS** | Geographic targeting vs. business location separation, CTA vs. destination distinctness, strict-local rules, and score boundaries enforced. |
+| **TypeScript Strictness** | **PASS** | `npm.cmd run typecheck` clean: 0 compiler errors across entire codebase. |
+| **Automated Offline Regression** | **PASS** | 17/17 test suites passed (484 assertions), plus Phase 2.1 test suite (33 assertions) and Phase 2.0 suite (29 assertions) passed. |
+| **Reproducibility** | **PASS** | Bit-for-bit identical unpacked assets; identical ZIP member contents and CRC32s across independent builds. |
+| **Preservation of User Work** | **PASS** | All user research data files (`.data/`), observation logs (`test-logs/`), and reports preserved untouched. |
+
+---
+
+## 2. Initial & Final Git State
+
+### Initial State
+- **Branch:** `main` tracking `origin/main` [up to date].
+- **HEAD Commit:** `1ad52aba237caaa4fc0e525e945d8d20ff0cce5f` (`feat(phase1): complete hardening, offline CI, and release-readiness audit`).
+- **Remote Origin:** `https://github.com/nafiz-pranto/LeadNoria.git`.
+- **Pre-existing Working Tree Files:** User data files (`.data/research_jobs.json`, `.data/research_results.json`), observation logs (`test-logs/phase29-production-observation-log.json`), and legacy test scripts (`tests/test-phase27`–`32`, etc.).
+
+### Final State
+- **Branch:** `main` tracking `origin/main` (clean tracking, zero commits added).
+- **HEAD Commit:** Unchanged at `1ad52aba237caaa4fc0e525e945d8d20ff0cce5f`.
+- **Working Tree Hygiene:** All Phase 2.1 modifications remain strictly local, uncommitted, and unstaged. `git diff --check` executed with exit code `0` (zero whitespace or formatting errors).
+
+---
+
+## 3. Finalized Version & Version-Bearing Files Changed
+
+### Authoritative Finalized Version: `1.7.7`
+
+The version was bumped from `1.7.6` to `1.7.7` across all authoritative files:
+
+1. **`package.json`**
+   - Line 4: `"version": "1.7.7"` (updated via `npm version 1.7.7 --no-git-tag-version`).
+2. **`package-lock.json`**
+   - Lines 3 & 9: `"version": "1.7.7"` (updated automatically by npm package manager workflow).
+3. **`src/extension/manifest.json`**
+   - Line 5: `"version": "1.7.7"`.
+4. **`extension/manifest.json`**
+   - Line 5: `"version": "1.7.7"` (generated by `scripts/build-extension.mjs` reading authoritative version from `package.json`).
+5. **`src/extension/ui/App.tsx`**
+   - Line 751: Bound `SettingsView` version dynamically to `typeof chrome !== 'undefined' && chrome.runtime?.getManifest ? chrome.runtime.getManifest().version : '1.7.7'`.
+6. **`scripts/build-extension.mjs`**
+   - Line 279: Added `--package-output` flag alias to support explicit packaging path specification.
+7. **`tests/test-v173-defect-repair-and-validation.mjs`**
+   - Updated version assertions to accept `1.7.7` and handle pre-release candidate status without requiring historical file duplication.
+
+---
+
+## 4. Rationale for Version 1.7.7
+
+1. **Avoid Collision with Historical Release:**
+   `dist/leadnoria-v1.7.6.zip` is an immutable historical release archive with SHA-256 `ADB83CF1339537462A2EB61470CDAEC87531352D83AE59302B5CC0669F5E8105`. Re-releasing as `1.7.6` would violate release immutability and create archive ambiguity.
+2. **SemVer Compliance:**
+   Phase 0 and Phase 1 introduced deep internal hardening, TypeScript strictness remediation, offline CI automation, packaging isolation, and boundary enforcement without altering public API contracts or adding breaking user features. Therefore, a patch increment (`1.7.7`) per existing `1.7.x` conventions is fully justified and compliant.
+3. **Chrome Web Store Monotonic Progression:**
+   Chrome extension manifests require strictly increasing version integers per segment (`1.7.6` -> `1.7.7`), ensuring automatic and clean update paths for browser users.
+
+---
+
+## 5. Candidate Path, Byte Size, SHA-256 & Contents Summary
+
+### Artifact Details
+- **Candidate File Path:** `dist/release-candidate/leadnoria-v1.7.7-candidate.zip`
+- **Absolute Path:** `E:\project anti\leadnoria\dist\release-candidate\leadnoria-v1.7.7-candidate.zip`
+- **File Size:** `376,548 bytes` (367.7 KB)
+- **SHA-256 Hash:** `6A99927B280F25185E5FD56BFFDFF537900900223C2C187902F3FD4CE3E0590D`
+
+### Archive Contents (Exact 12 Runtime Assets)
+Decompression and inspection of `dist/release-candidate/leadnoria-v1.7.7-candidate.zip` confirmed the archive contains exactly the following 12 files (matching `extension/` bit-for-bit with zero drift):
+
+| Entry Name | Uncompressed Size (bytes) | CRC32 Checksum | Description |
+| :--- | :--- | :--- | :--- |
+| `manifest.json` | 1,006 | `5a189e2c` | Manifest V3 declaring version `1.7.7` |
+| `app.js` | 1,271,415 | `8763ea05` | Compiled UI bundle (Side panel & popup logic) |
+| `content-script.js` | 171,810 | `077ed20f` | DOM inspection & ad extraction script |
+| `service-worker.js` | 443,822 | `b9362c13` | Background service worker |
+| `styles.css` | 133,920 | `da1d7b40` | Compiled CSS (Tailwind bundle) |
+| `sidepanel.html` | 974 | `73981391` | Responsive side panel container |
+| `popup.html` | 958 | `a04de95b` | 440x600 fixed popup container |
+| `icons/icon-16.png` | 241 | `d8dfa5ed` | Extension icon (16x16) |
+| `icons/icon-32.png` | 437 | `0d4d8748` | Extension icon (32x32) |
+| `icons/icon-48.png` | 644 | `4e37d8b5` | Extension icon (48x48) |
+| `icons/icon-128.png` | 1,691 | `7a7e6f82` | Extension icon (128x128) |
+| `icons/icon-256.png` | 3,712 | `229d1816` | Extension icon (256x256) |
+
+### Prohibited Content Audit
+- Credentials, private keys, `.env` files: **0 found (CLEAN)**
+- `.git` / `.github` metadata: **0 found (CLEAN)**
+- TypeScript sources (`.ts`, `.tsx`): **0 found (CLEAN)**
+- Source maps (`.map`): **0 found (CLEAN)**
+- `node_modules` or development dependencies: **0 found (CLEAN)**
+- Local research data (`.data/`, `research_*.json`): **0 found (CLEAN)**
+- Test logs or scratch scripts: **0 found (CLEAN)**
+
+---
+
+## 6. Manifest & Permissions Audit
+
+Detailed audit of `manifest.json` inside the candidate package:
+- `manifest_version`: `3`
+- `name`: `"LeadNoria"`
+- `version`: `"1.7.7"`
+- `permissions`: `["storage", "tabs", "scripting", "sidePanel"]`
+- `host_permissions`:
+  - `https://www.facebook.com/ads/library/*`
+  - `https://web.facebook.com/ads/library/*`
+- **Wildcard Schemes:** Zero found (no `<all_urls>`, no `*://*/*`, no `https://*/*`).
+- **Dangerous Permissions:** Zero found (no `cookies`, `webRequestBlocking`, `proxy`, `debugger`, `management`).
+
+---
+
+## 7. Runtime & Product-Scope Audit
+
+1. **Meta Ad Library Exclusivity:**
+   The product scope remains exclusively Meta Ad Library lead research. No third-party network APIs, private Meta GraphQL endpoints, Google Maps, or external enrichment providers exist in the runtime bundles.
+2. **Code Execution Safety:**
+   - Content Security Policy: default Manifest V3 (`script-src 'self'; object-src 'self'`).
+   - Dynamic code execution: Zero `eval()` or `new Function()` execution.
+   - Remote code loading: Zero external scripts loaded from HTTP/HTTPS.
+3. **No Web Crawling:**
+   No external website probing or crawling mechanisms are active.
+
+---
+
+## 8. Safety-Gate Verification Results
+
+All collection safety gates in `src/config/collectionGate.ts` remain permanently fail-closed:
+
+- `isLiveCollectionPermitted()` evaluates strictly to `false`.
+- `isExternalWebsiteCrawlingPermitted()` evaluates strictly to `false`.
+- `assertLiveCollectionPermitted()` unconditionally throws an error:
+  `"Live automated collection is disabled: required platform and product permissions are not established."`
+- `assertExternalWebsiteCrawlingPermitted()` unconditionally throws an error:
+  `"External website crawling is prohibited: LeadNoria is strictly confined to Meta Ad Library."`
+
+Production collection authorization remains **NOT ESTABLISHED**.
+
+---
+
+## 9. Qualification-Integrity Verification Results
+
+Regression tests verified that all lead qualification invariants remain strictly enforced:
+
+1. **Targeting vs. Business Location Distinctness:**
+   Ad audience targeting country (`targetCountryCode`) is strictly distinct from advertiser physical business location (`businessCountryCode`). Ad targeting is never used as proof of business location.
+2. **CTA vs. Destination Distinctness:**
+   CTA classification (`SHOP_NOW`, `LEARN_MORE`, etc.) remains independent from resolved destination (`EXTERNAL_WEBSITE`, `MESSENGER`, `WHATSAPP`).
+3. **Missing URL Classification:**
+   A missing destination URL is classified as `UNKNOWN` / `DESTINATION_NOT_OBSERVED` and does not infer that the business lacks a website.
+4. **Strict-Local Qualification Gate:**
+   - Admits `LOCAL_VERIFIED`.
+   - Strictly rejects `FOREIGN_VERIFIED`.
+   - Excludes `LOCAL_PROBABLE` and `LOCATION_UNKNOWN` from qualification in strict-local mode.
+5. **Score Boundedness:**
+   Numerical scores (0–100) are bounded and cannot override disqualifications or negative qualification decisions.
+6. **Unassessed Evidence Protection:**
+   Missing or unassessed evidence fails closed and never silently qualifies a candidate.
+
+---
+
+## 10. Exact Test Commands & Actual Results
+
+### Command 1: TypeScript Compiler Strictness Check
+- **Command:** `npm.cmd run typecheck`
+- **Exit Code:** `0`
+- **Output:** Clean, 0 diagnostics, 0 compiler errors.
+
+### Command 2: Git Diff Cleanliness Check
+- **Command:** `git diff --check`
+- **Exit Code:** `0`
+- **Output:** Clean, 0 whitespace or formatting errors.
+
+### Command 3: Master Offline Regression Runner
+- **Command:** `node scripts/verify-offline.mjs`
+- **Exit Code:** `0`
+- **Suites Executed:** 17
+- **Suites Passed:** 17
+- **Suites Failed:** 0
+- **Total Assertions:** 484
+- **Execution Time:** 225.85 seconds
+- **Breakdown of Executed Suites:**
+  1. Phase 0.1 Safety Lock: `PASSED` (2.31s)
+  2. Relevance Calibration Engine: `PASSED` (0.62s)
+  3. Entity Resolution & Deduplication: `PASSED` (0.49s)
+  4. Evidence Waterfall & Adversarial Copy: `PASSED` (0.58s)
+  5. Geographic Accuracy & Hierarchy: `PASSED` (0.53s)
+  6. Global Country Profiles: `PASSED` (0.60s)
+  7. Strict Local Mode Contract: `PASSED` (0.53s)
+  8. CTA, Destination & Export Integrity: `PASSED` (0.51s)
+  9. Storage Persistence & Recovery Integrity: `PASSED` (0.61s)
+  10. Qualification Gate & Scoring: `PASSED` (0.59s)
+  11. UI Workflow Qualification: `PASSED` (0.48s)
+  12. Unified Lead Intelligence UI: `PASSED` (0.48s)
+  13. Packaging Safety & Archive Isolation: `PASSED` (1.28s)
+  14. Dependency Hygiene & Runtime Boundary: `PASSED` (0.53s)
+  15. CI Safety Invariants & Boundary Enforcement: `PASSED` (0.69s)
+  16. Phase 1.0D TypeScript & CI Integrity: `PASSED` (101.59s)
+  17. Phase 1.0E Final Integration & Readiness: `PASSED` (0.88s)
+
+### Command 4: Phase 2.1 Release Candidate Verification Suite
+- **Command:** `node node_modules/tsx/dist/cli.mjs tests/test-phase21-version-and-release-candidate.mjs`
+- **Exit Code:** `0`
+- **Assertions Passed:** 33 / 33
+- **Assertions Failed:** 0
+- **Key Tests:** Candidate isolation, zero drift, 12-file runtime asset count, version 1.7.7 synchronization, Manifest V3 host scoping, safety gates, qualification invariants, and historical archive protection.
+
+### Command 5: Defect Repair & Deep Behavioral Verification Suite
+- **Command:** `node node_modules/tsx/dist/cli.mjs tests/test-v173-defect-repair-and-validation.mjs`
+- **Exit Code:** `0`
+- **Assertions Passed:** 25 / 25
+- **Assertions Failed:** 0
+
+### Command 6: Phase 2.0 Candidate Verification Suite
+- **Command:** `node node_modules/tsx/dist/cli.mjs tests/test-phase20-release-candidate.mjs`
+- **Exit Code:** `0`
+- **Assertions Passed:** 29 / 29
+- **Assertions Failed:** 0
+
+---
+
+## 11. Reproducibility Results
+
+An independent candidate build was executed to a separate output path:
+- Candidate: `dist/release-candidate/leadnoria-v1.7.7-candidate.zip`
+- Repro Build: `dist/local/leadnoria-v1.7.7-repro.zip`
+
+### Comparison Findings
+1. **Uncompressed Contents:**
+   All 12 files unpacked from both archives match bit-for-bit with identical lengths and identical contents.
+2. **Member CRC32 Checksums:**
+   Every single file entry across both archives shares an identical CRC32 checksum (e.g. `app.js` CRC: `8763ea05`, `service-worker.js` CRC: `b9362c13`, `content-script.js` CRC: `077ed20f`, `styles.css` CRC: `da1d7b40`).
+3. **Outer Container Hash:**
+   The outer ZIP container SHA-256 differs solely due to local MS-DOS creation timestamps embedded in file record headers by `archiver`.
+
+---
+
+## 12. Historical Archive Hashes (Before & After)
+
+The 3 historical release archives were verified before and after all Phase 2.1 operations:
+
+| Archive Path | Expected Baseline SHA-256 | Pre-Run Verified SHA-256 | Post-Run Verified SHA-256 | Status |
+| :--- | :--- | :--- | :--- | :--- |
+| `dist/leadnoria-v1.7.5.zip` | `08F981627E14461157C515F2D3AE9C70577D430F8CEF407C577DB809BE49CC85` | `08F981627E14461157C515F2D3AE9C70577D430F8CEF407C577DB809BE49CC85` | `08F981627E14461157C515F2D3AE9C70577D430F8CEF407C577DB809BE49CC85` | **IMMUTABLE (MATCH)** |
+| `dist/leadnoria-v1.7.6.zip` | `ADB83CF1339537462A2EB61470CDAEC87531352D83AE59302B5CC0669F5E8105` | `ADB83CF1339537462A2EB61470CDAEC87531352D83AE59302B5CC0669F5E8105` | `ADB83CF1339537462A2EB61470CDAEC87531352D83AE59302B5CC0669F5E8105` | **IMMUTABLE (MATCH)** |
+| `extension.zip` | `08F981627E14461157C515F2D3AE9C70577D430F8CEF407C577DB809BE49CC85` | `08F981627E14461157C515F2D3AE9C70577D430F8CEF407C577DB809BE49CC85` | `08F981627E14461157C515F2D3AE9C70577D430F8CEF407C577DB809BE49CC85` | **IMMUTABLE (MATCH)** |
+
+Zero historical archives were modified, overwritten, or deleted.
+
+---
+
+## 13. Preservation of Unrelated User Files
+
+All protected research data, logs, and audit files were monitored and preserved:
+- `.data/research_jobs.json` — Preserved
+- `.data/research_results.json` — Preserved
+- `test-logs/phase29-production-observation-log.json` — Preserved
+- `tests/test-phase18-final-audit.mjs` — Preserved
+- `tests/test-phase27` through `test-phase32` — Preserved
+- All files in `reports/` and `validation-evidence/` — Preserved
+- Previous release candidate `dist/release-candidate/leadnoria-v1.7.6-candidate.zip` — Preserved
+
+No destructive Git commands (`git reset`, `git clean`, etc.) were executed.
+
+---
+
+## 14. Outstanding Findings & Known Limitations
+
+1. **ZIP Container Timestamps:**
+   Standard ZIP creation by `archiver` embeds file modification times into entry headers, causing the outer archive SHA-256 to reflect the build timestamp while the uncompressed payload remains 100% bit-for-bit reproducible.
+2. **Production Collection Disabled:**
+   `isLiveCollectionPermitted()` and `isExternalWebsiteCrawlingPermitted()` are permanently fail-closed. Real live collection on Meta Ad Library cannot occur without separate production authorization and terms compliance.
+
+---
+
+## 15. Explicit Release-Readiness Recommendation
+
+### **TECHNICAL READINESS STATEMENT**
+The release candidate artifact located at:
+`dist/release-candidate/leadnoria-v1.7.7-candidate.zip`  
+(SHA-256: `6A99927B280F25185E5FD56BFFDFF537900900223C2C187902F3FD4CE3E0590D`)
+
+**IS FULLY AND TECHNICALLY READY** for a separately authorized release decision.
+
+Version `1.7.7` has been finalized consistently across all metadata, manifests, lockfiles, and UI code. All tests passed cleanly. In accordance with user authorization boundaries, no Git commits, pushes, tags, releases, or deployments have been executed.

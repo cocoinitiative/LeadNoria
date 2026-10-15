@@ -301,6 +301,31 @@ export interface KeywordFrontierState {
   checkpointTimestamp: string;
 }
 
+export interface CheckpointRecord {
+  runId: string;
+  batchIndex: number;
+  monotonicRevision?: number;
+  timestamp: string;
+  schemaVersion?: number;
+  activeKeywordIndex: number;
+  activeQueryIndex?: number;
+  currentKeyword: string;
+  completedKeywords?: string[];
+  rawAdsCount: number;
+  normalizedCandidatesCount: number;
+  uniqueEntitiesCount: number;
+  relevantEntitiesCount: number;
+  uncertainEntitiesCount: number;
+  notRelevantEntitiesCount: number;
+  duplicatesRemovedCount: number;
+  finalUniqueRelevantLeads: number;
+  seenLibraryIdsCount: number;
+  seenEntityKeysCount: number;
+  status?: JobStatus;
+  stopReason?: string;
+  isRecoverable?: boolean;
+}
+
 export type CtaType =
   | 'SHOP_NOW'
   | 'LEARN_MORE'
@@ -323,6 +348,43 @@ export type DestinationType =
   | 'UNKNOWN'
   | 'NO_VISIBLE_DESTINATION';
 
+export type {
+  ContactFieldType,
+  ContactSourceSurface,
+  ContactSyntaxState,
+  ContactVerificationStatus,
+  ContactConflictState,
+  ContactQualityState,
+  ContactObservation,
+  ContactEntityProfile
+} from './contactQuality.ts';
+import type {
+  ContactObservation,
+  ContactEntityProfile,
+  ContactQualityState
+} from './contactQuality.ts';
+
+export type {
+  PrioritizationTier,
+  ComponentScoreContribution,
+  LeadScoreBreakdown,
+  LeadPrioritizationResult
+} from './leadPrioritizer.ts';
+export { SCORING_MODEL_VERSION } from './leadPrioritizer.ts';
+import type {
+  PrioritizationTier,
+  LeadScoreBreakdown
+} from './leadPrioritizer.ts';
+export interface LeadExportOptions {
+  qualifiedOnly?: boolean;
+  reviewOnly?: boolean;
+  rejectedOnly?: boolean;
+  strictLocalMode?: boolean;
+  requiredCtaTypes?: CtaType[];
+  requiredDestinationTypes?: DestinationType[];
+  pretty?: boolean;
+}
+
 export interface AdLevelEvidence {
   libraryId: string;
   ctaText?: string;
@@ -336,6 +398,7 @@ export interface AdLevelEvidence {
   reasonCode: string;
   confidence: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
   observedAt?: string;
+  contactObservations?: ContactObservation[];
 }
 
 export interface ScrapedAdCandidate {
@@ -356,6 +419,9 @@ export interface ScrapedAdCandidate {
   destinationConfidence?: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
   observedKeyword?: string;
   rawText?: string;
+  contactObservations?: ContactObservation[];
+  observedPhones?: ContactObservation[];
+  observedEmails?: ContactObservation[];
   // Compatibility aliases
   advertiserName?: string;
   pageUrl?: string;
@@ -368,6 +434,7 @@ export interface ExtensionLead {
   id: string;
   name: string;
   canonicalName: string;
+  canonicalKey?: string;
   facebookPageName: string;
   facebookPageUrl?: string;
   facebookPageState: 'found' | 'not_found' | 'unknown';
@@ -439,11 +506,25 @@ export interface ExtensionLead {
   // Prompt 6: Website Deep Verification
   websiteVerificationStatus?: WebsiteVerificationStatus;
   websiteVerification?: WebsiteVerificationRecord;
+  // Phase 7: Contact Data Quality & Evidence Management
+  businessPhone?: string;
+  businessEmail?: string;
+  phones?: string[];
+  emails?: string[];
+  contactProfile?: ContactEntityProfile;
+  contactQualityState?: ContactQualityState;
+  contactObservations?: ContactObservation[];
   // View model and legacy convenience aliases
   leadId?: string;
   advertiserName?: string;
+  // Phase 8: Lead Scoring & Prioritization
   leadScore?: number;
+  normalizedScore?: number;
+  prioritizationTier?: PrioritizationTier;
   scoreConfidence?: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
+  scoreBreakdown?: LeadScoreBreakdown;
+  scoreModelVersion?: string;
+  scoreExplanation?: string;
   ctaTypes?: CtaType[];
   destinationTypes?: DestinationType[];
   ctaType?: CtaType;
@@ -583,7 +664,8 @@ export interface ExtensionMessage {
     | 'VERIFY_WEBSITE'
     | 'GET_WEBSITE_VERIFICATION'
     | 'EVALUATE_BUSINESS_QUALIFICATION'
-    | 'ASSEMBLE_CANONICAL_LEAD';
+    | 'ASSEMBLE_CANONICAL_LEAD'
+    | 'RECOVER_RUN';
   payload?: any;
 }
 

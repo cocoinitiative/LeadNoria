@@ -137,6 +137,15 @@ export function extensionLeadToResultRowViewModel(lead: ExtensionLead): ResultRo
       freshness: 'CURRENT',
       freshnessLabel: 'Recently observed'
     },
+    prioritizationTier: lead.prioritizationTier || 'UNRANKED',
+    scoreModelVersion: lead.scoreModelVersion || 'leadnoria-scoring-v1',
+    scoreExplanation: lead.scoreExplanation,
+    contactQualityState: lead.contactQualityState || lead.contactProfile?.overallQualityState || (hasPhone || hasEmail ? 'OBSERVED_VALID_SYNTAX' : 'NOT_OBSERVED'),
+    contactVerificationState: lead.contactProfile?.observedPhones?.[0]?.verificationStatus || lead.contactProfile?.observedEmails?.[0]?.verificationStatus || (hasPhone || hasEmail ? 'UNPROBED_PUBLIC_CLAIM' : 'NOT_OBSERVED'),
+    phoneSyntaxState: lead.contactProfile?.observedPhones?.[0]?.syntaxState || (hasPhone ? 'SYNTAX_VALID' : 'NOT_OBSERVED'),
+    emailSyntaxState: lead.contactProfile?.observedEmails?.[0]?.syntaxState || (hasEmail ? 'SYNTAX_VALID' : 'NOT_OBSERVED'),
+    phoneConflictState: lead.contactProfile?.phoneConflictState || (lead.contactProfile?.phoneConflict ? 'PHONE_CONFLICT' : 'NO_CONFLICT'),
+    emailConflictState: lead.contactProfile?.emailConflictState || (lead.contactProfile?.emailConflict ? 'EMAIL_CONFLICT' : 'NO_CONFLICT'),
     canonicalRecord: lead
   };
 }
@@ -849,7 +858,9 @@ export function extensionLeadToResultDetailViewModel(lead: ExtensionLead): Resul
     });
   }
 
-  const scoreText = lead.leadScore !== undefined ? `${(lead.leadScore * 100).toFixed(0)}%` : undefined;
+  const scoreText = lead.leadScore !== undefined
+    ? (lead.leadScore > 1 ? `${lead.leadScore.toFixed(0)}%` : `${(lead.leadScore * 100).toFixed(0)}%`)
+    : undefined;
 
   const identityDetails = {
     canonicalBusinessName: row.displayName,

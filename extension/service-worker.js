@@ -2840,6 +2840,342 @@ var init_relevanceEngine = __esm({
   }
 });
 
+// src/extension/leadPrioritizer.ts
+var SCORING_MODEL_VERSION = "leadnoria-scoring-v1";
+function calculateLeadScore(lead, criteria) {
+  const missingComponents = [];
+  const penalties = [];
+  const warnings = [];
+  let geoScore = 0;
+  let geoStatus = "MISSING";
+  let geoReason = "";
+  const geoEvidence = [];
+  const geoClassification = lead.geographicClassification || "LOCATION_UNKNOWN";
+  const targetCountry = criteria?.targetCountryCode || lead.targetCountryCode || lead.locationCode;
+  const businessCountry = lead.businessCountryCode;
+  if (Array.isArray(lead.businessLocationEvidence)) {
+    geoEvidence.push(...lead.businessLocationEvidence);
+  }
+  if (geoClassification === "LOCAL_VERIFIED") {
+    if (businessCountry && targetCountry && businessCountry.toUpperCase() !== targetCountry.toUpperCase()) {
+      geoScore = 0;
+      geoStatus = "PENALIZED";
+      geoReason = `Verified business location (${businessCountry}) does not match target country (${targetCountry}).`;
+      penalties.push(`GEOGRAPHIC_MISMATCH: ${geoReason}`);
+    } else {
+      geoScore = 25;
+      geoStatus = "ASSESSED";
+      geoReason = `Business location verified in target market (${businessCountry || targetCountry || "local"}).`;
+      if (geoEvidence.length === 0) {
+        geoEvidence.push("Deterministic local business evidence established.");
+      }
+    }
+  } else if (geoClassification === "LOCAL_PROBABLE") {
+    geoScore = 12;
+    geoStatus = "WARNING";
+    geoReason = "Business location is probable but lacks deterministic proof. Requires manual verification.";
+    warnings.push("GEOGRAPHIC_PROBABLE_REVIEW: Probable location requires review under strict local policy.");
+  } else if (geoClassification === "FOREIGN_VERIFIED") {
+    geoScore = 0;
+    geoStatus = "PENALIZED";
+    geoReason = `Business verified as foreign entity (${businessCountry || "foreign"}) operating outside target market. Strict 0 points.`;
+    penalties.push(`FOREIGN_VERIFIED_OUT_OF_MARKET: ${geoReason}`);
+  } else {
+    geoScore = 0;
+    geoStatus = "MISSING";
+    geoReason = "Physical business location is unobserved or unknown. No geographic points awarded.";
+    missingComponents.push("Geographic location evidence (LOCATION_UNKNOWN)");
+  }
+  const geographyComponent = {
+    name: "Geographic Eligibility",
+    key: "geography",
+    score: geoScore,
+    maxScore: 25,
+    weight: 25,
+    status: geoStatus,
+    reason: geoReason,
+    evidence: geoEvidence
+  };
+  let relScore = 0;
+  let relStatus = "MISSING";
+  let relReason = "";
+  const relEvidence = [];
+  const relDecision = lead.relevanceDecision || "UNASSESSED";
+  const relConfidence = lead.relevanceConfidence;
+  if (Array.isArray(lead.relevanceMatchedTerms)) {
+    relEvidence.push(...lead.relevanceMatchedTerms);
+  }
+  if (relDecision === "RELEVANT") {
+    if (relConfidence === "HIGH") {
+      relScore = 25;
+    } else if (relConfidence === "MEDIUM") {
+      relScore = 20;
+    } else {
+      relScore = 15;
+    }
+    relStatus = "ASSESSED";
+    relReason = `Candidate classified as RELEVANT with ${relConfidence} confidence.`;
+  } else if (relDecision === "UNCERTAIN") {
+    relScore = 8;
+    relStatus = "WARNING";
+    relReason = "Niche semantic relevance is ambiguous or borderline. Evidence is inconclusive.";
+    warnings.push("RELEVANCE_UNCERTAIN_REVIEW: Candidate requires manual relevance review.");
+  } else if (relDecision === "NOT_RELEVANT") {
+    relScore = 0;
+    relStatus = "PENALIZED";
+    relReason = "Candidate classified as NOT_RELEVANT to target niche. Strict 0 points.";
+    penalties.push("NOT_RELEVANT_TO_NICHE: Candidate failed niche semantic relevance.");
+  } else {
+    relScore = 0;
+    relStatus = "MISSING";
+    relReason = "Niche relevance is unassessed. No relevance points awarded.";
+    missingComponents.push("Niche semantic relevance assessment (UNASSESSED)");
+  }
+  const relevanceComponent = {
+    name: "Niche Semantic Relevance",
+    key: "relevance",
+    score: relScore,
+    maxScore: 25,
+    weight: 25,
+    status: relStatus,
+    reason: relReason,
+    evidence: relEvidence
+  };
+  const adIds = Array.isArray(lead.adLibraryIds) ? Array.from(new Set(lead.adLibraryIds.filter((id) => typeof id === "string" && /^[0-9]{5,25}$/.test(id)))) : [];
+  let adPoints = 0;
+  if (adIds.length >= 3) {
+    adPoints = 7;
+  } else if (adIds.length === 2) {
+    adPoints = 6;
+  } else if (adIds.length === 1) {
+    adPoints = 4;
+  }
+  const hasActiveAds = lead.activeAdCount && lead.activeAdCount > 0 || Array.isArray(lead.activeAdLibraryIds) && lead.activeAdLibraryIds.length > 0;
+  const activePoints = hasActiveAds ? 4 : 0;
+  const hasCopy = Boolean(lead.sampleCopy && lead.sampleCopy.trim().length > 15);
+  const copyPoints = hasCopy ? 4 : 0;
+  const adEvidenceTotal = adPoints + activePoints + copyPoints;
+  const adEvidenceScore = Math.min(15, adEvidenceTotal);
+  let adStatus = "ASSESSED";
+  let adReason = `Observed ${adIds.length} verified ad(s) (${hasActiveAds ? "active" : "inactive"}), creative copy ${hasCopy ? "present" : "absent"}.`;
+  if (adIds.length === 0) {
+    adStatus = "MISSING";
+    adReason = "Zero verified Meta Ad Library identifiers observed. No ad evidence points.";
+    missingComponents.push("Verified Meta Ad Library identifiers");
+  }
+  const adEvidenceComponent = {
+    name: "Ad Evidence Quality",
+    key: "adEvidence",
+    score: adEvidenceScore,
+    maxScore: 15,
+    weight: 15,
+    status: adStatus,
+    reason: adReason,
+    evidence: adIds.slice(0, 3).map((id) => `Ad Library ID: ${id}`)
+  };
+  let ctaDestScore = 0;
+  let ctaDestStatus = "ASSESSED";
+  let ctaDestReason = "";
+  const ctaDestEvidence = [];
+  const reqCtas = criteria?.requiredCtaTypes || [];
+  const reqDests = criteria?.requiredDestinationTypes || [];
+  const obsCtas = lead.observedCtaTypes || (lead.primaryCtaType ? [lead.primaryCtaType] : []);
+  const obsDests = lead.observedDestinationTypes || (lead.primaryDestinationType ? [lead.primaryDestinationType] : []);
+  if (lead.primaryCtaType) ctaDestEvidence.push(`Primary CTA: ${lead.primaryCtaType}`);
+  if (lead.primaryDestinationType) ctaDestEvidence.push(`Primary Destination: ${lead.primaryDestinationType}`);
+  if (reqCtas.length > 0 || reqDests.length > 0) {
+    const effectiveReqDests = reqDests.map((d) => d === "APP_STORE" ? "APP" : d);
+    const ctaMatches = reqCtas.length === 0 || obsCtas.some((c) => reqCtas.includes(c));
+    const destMatches = reqDests.length === 0 || obsDests.some((d) => effectiveReqDests.includes(d));
+    if (ctaMatches && destMatches) {
+      ctaDestScore = 15;
+      ctaDestStatus = "ASSESSED";
+      ctaDestReason = `Observed CTA (${obsCtas.join(", ") || "none"}) and destination (${obsDests.join(", ") || "none"}) satisfy research requirements.`;
+    } else if (ctaMatches || destMatches) {
+      ctaDestScore = 8;
+      ctaDestStatus = "WARNING";
+      ctaDestReason = `Partially matches research requirements (CTA match: ${ctaMatches}, Destination match: ${destMatches}).`;
+      warnings.push(`PARTIAL_REQUIREMENT_MATCH: ${ctaDestReason}`);
+    } else {
+      ctaDestScore = 0;
+      ctaDestStatus = "PENALIZED";
+      ctaDestReason = `Observed CTA and destination do not satisfy configured requirements (Required CTAs: ${reqCtas.join(", ")}, Destinations: ${reqDests.join(", ")}).`;
+      penalties.push(`CTA_DESTINATION_MISMATCH: ${ctaDestReason}`);
+    }
+  } else {
+    const isCommercialCta = ["CALL_NOW", "BOOK_TRAVEL", "SEND_MESSAGE", "SHOP_NOW", "ORDER_NOW", "GET_QUOTE", "CONTACT_US", "SIGN_UP"].includes(lead.primaryCtaType);
+    const ctaPoints = isCommercialCta ? 8 : lead.primaryCtaType && lead.primaryCtaType !== "UNKNOWN" ? 5 : 0;
+    const isValidDest = ["EXTERNAL_WEBSITE", "MESSAGING", "INSTANT_FORM", "APP"].includes(lead.primaryDestinationType);
+    const destPoints = isValidDest ? 7 : lead.primaryDestinationType && lead.primaryDestinationType !== "NO_VISIBLE_DESTINATION" && lead.primaryDestinationType !== "UNKNOWN" ? 4 : 0;
+    ctaDestScore = ctaPoints + destPoints;
+    if (ctaDestScore === 0) {
+      ctaDestStatus = "MISSING";
+      ctaDestReason = "Neither actionable CTA nor visible commercial destination observed.";
+      missingComponents.push("Actionable CTA / commercial destination");
+    } else {
+      ctaDestStatus = "ASSESSED";
+      ctaDestReason = `Observed CTA: ${lead.primaryCtaType || "UNKNOWN"} (${ctaPoints} pts), Destination: ${lead.primaryDestinationType || "UNKNOWN"} (${destPoints} pts).`;
+    }
+  }
+  const ctaDestinationComponent = {
+    name: "CTA / Destination Relevance",
+    key: "ctaDestination",
+    score: ctaDestScore,
+    maxScore: 15,
+    weight: 15,
+    status: ctaDestStatus,
+    reason: ctaDestReason,
+    evidence: ctaDestEvidence
+  };
+  let contactScore = 0;
+  let phonePts = 0;
+  let emailPts = 0;
+  let contactConflictDeduction = 0;
+  const contactEvidence = [];
+  const profile = lead.contactProfile;
+  const hasPhone = Boolean(lead.businessPhone || lead.phones && lead.phones.length > 0 || profile && profile.primaryPhone);
+  const hasEmail = Boolean(lead.businessEmail || lead.emails && lead.emails.length > 0 || profile && profile.primaryEmail);
+  const phoneObs = profile?.observedPhones?.[0];
+  if (phoneObs?.syntaxState === "SYNTAX_VALID" || !phoneObs && hasPhone) {
+    phonePts = 5;
+    contactEvidence.push(`Public phone observed with valid syntax (${phoneObs?.normalizedValue || lead.businessPhone || "observed"}).`);
+  } else if (phoneObs?.syntaxState === "AMBIGUOUS") {
+    phonePts = 2;
+    contactEvidence.push("Public phone observed with ambiguous national formatting (no international dial code).");
+  }
+  const emailObs = profile?.observedEmails?.[0];
+  if (emailObs?.syntaxState === "SYNTAX_VALID" || !emailObs && hasEmail) {
+    emailPts = 5;
+    contactEvidence.push(`Public email observed with valid syntax (${emailObs?.normalizedValue || lead.businessEmail || "observed"}).`);
+  } else if (emailObs?.syntaxState === "AMBIGUOUS") {
+    emailPts = 2;
+    contactEvidence.push("Public email observed with ambiguous format.");
+  }
+  const hasConflict = profile?.phoneConflict || profile?.emailConflict || profile?.phoneConflictState === "CONFLICT_DETECTED" || profile?.emailConflictState === "CONFLICT_DETECTED";
+  if (hasConflict) {
+    contactConflictDeduction = 4;
+    warnings.push("CONTACT_CONFLICT_DETECTED: Conflicting phone numbers or email addresses observed across ads for this advertiser.");
+  }
+  contactScore = Math.max(0, phonePts + emailPts - contactConflictDeduction);
+  let contactStatus = "ASSESSED";
+  let contactReason = `Contact syntax evaluation (+${phonePts} phone, +${emailPts} email${hasConflict ? ", -4 conflict deduction" : ""}). Format quality only; reachability is unverified.`;
+  if (phonePts === 0 && emailPts === 0) {
+    contactStatus = "MISSING";
+    contactReason = "No public business phone or email observed in permitted ad copy.";
+    missingComponents.push("Public business contact information");
+  } else if (hasConflict) {
+    contactStatus = "WARNING";
+  }
+  const contactQualityComponent = {
+    name: "Contact Data Quality",
+    key: "contactQuality",
+    score: contactScore,
+    maxScore: 10,
+    weight: 10,
+    status: contactStatus,
+    reason: contactReason,
+    evidence: contactEvidence
+  };
+  let identityScore = 0;
+  const identityEvidence = [];
+  const hasPageId = Boolean(lead.canonicalPageId || lead.facebookPageUrl);
+  const pagePts = hasPageId ? 5 : 0;
+  if (hasPageId) {
+    identityEvidence.push(`Canonical Facebook Page resolved (${lead.canonicalPageId || lead.canonicalPageSlug || "URL"}).`);
+  }
+  const hasCleanDomain = Boolean(
+    lead.destinationDomain && !["facebook.com", "instagram.com", "whatsapp.com", "m.me"].includes(lead.destinationDomain.toLowerCase())
+  );
+  const domainPts = hasCleanDomain ? 5 : 0;
+  if (hasCleanDomain) {
+    identityEvidence.push(`Clean destination domain resolved (${lead.destinationDomain}).`);
+  }
+  identityScore = pagePts + domainPts;
+  let identityStatus = "ASSESSED";
+  let identityReason = `Identity established via Page identity (+${pagePts} pts) and destination domain (+${domainPts} pts).`;
+  if (identityScore === 0) {
+    identityStatus = "MISSING";
+    identityReason = "Neither verified Facebook Page ID nor clean destination domain observed.";
+    missingComponents.push("Corroborating Facebook Page ID or destination domain");
+  }
+  const identityConsistencyComponent = {
+    name: "Identity & Evidence Consistency",
+    key: "identityConsistency",
+    score: identityScore,
+    maxScore: 10,
+    weight: 10,
+    status: identityStatus,
+    reason: identityReason,
+    evidence: identityEvidence
+  };
+  const rawSum = geoScore + relScore + adEvidenceScore + ctaDestScore + contactScore + identityScore;
+  const overallScore = Math.max(0, Math.min(100, Math.round(rawSum)));
+  const normalizedScore = +(overallScore / 100).toFixed(2);
+  let tier;
+  if (overallScore >= 75) {
+    tier = "HIGH";
+  } else if (overallScore >= 50) {
+    tier = "MEDIUM";
+  } else if (overallScore >= 25) {
+    tier = "LOW";
+  } else {
+    tier = "MINIMAL";
+  }
+  let confidence;
+  if (geoClassification === "LOCAL_VERIFIED" && relDecision === "RELEVANT" && relConfidence === "HIGH") {
+    confidence = "HIGH";
+  } else if ((geoClassification === "LOCAL_VERIFIED" || geoClassification === "LOCAL_PROBABLE") && relDecision === "RELEVANT") {
+    confidence = "MEDIUM";
+  } else if (geoClassification === "LOCATION_UNKNOWN" || relDecision === "UNCERTAIN") {
+    confidence = "LOW";
+  } else {
+    confidence = "NONE";
+  }
+  const explanationParts = [
+    `Lead priority score: ${overallScore}/100 (${tier} priority tier, ${confidence} score confidence).`
+  ];
+  if (penalties.length > 0) {
+    explanationParts.push(`Penalties applied: ${penalties.join("; ")}.`);
+  }
+  if (warnings.length > 0) {
+    explanationParts.push(`Warnings: ${warnings.join("; ")}.`);
+  }
+  if (missingComponents.length > 0) {
+    explanationParts.push(`Missing components: ${missingComponents.join("; ")}.`);
+  }
+  const explanation = explanationParts.join(" ");
+  const qualificationDisclaimer = "Scoring is a deterministic prioritization aid and does not constitute lead qualification or verified reachability.";
+  const breakdown = {
+    overallScore,
+    normalizedScore,
+    prioritizationTier: tier,
+    scoreConfidence: confidence,
+    modelVersion: SCORING_MODEL_VERSION,
+    components: {
+      geography: geographyComponent,
+      relevance: relevanceComponent,
+      adEvidence: adEvidenceComponent,
+      ctaDestination: ctaDestinationComponent,
+      contactQuality: contactQualityComponent,
+      identityConsistency: identityConsistencyComponent
+    },
+    missingComponents,
+    penalties,
+    warnings,
+    explanation,
+    qualificationDisclaimer,
+    calculatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  return {
+    score: overallScore,
+    normalizedScore,
+    tier,
+    confidence,
+    breakdown,
+    explanation
+  };
+}
+
 // src/extension/types.ts
 var MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH = 5e3;
 
@@ -4518,6 +4854,104 @@ function evaluateGeographicOrigin(inputs, targetCountryCode = "BD") {
   };
 }
 
+// src/extension/contactQuality.ts
+function aggregateContactObservations(observations) {
+  const profile = {
+    observedPhones: [],
+    observedEmails: [],
+    phoneConflict: false,
+    emailConflict: false,
+    phoneConflictState: "NOT_APPLICABLE",
+    emailConflictState: "NOT_APPLICABLE",
+    overallQualityState: "NOT_OBSERVED",
+    diagnostics: []
+  };
+  if (!observations || observations.length === 0) {
+    return profile;
+  }
+  const phoneObs = observations.filter((o) => o.type === "PHONE");
+  const emailObs = observations.filter((o) => o.type === "EMAIL");
+  profile.observedPhones = phoneObs;
+  profile.observedEmails = emailObs;
+  if (phoneObs.length > 0) {
+    const validPhones = phoneObs.filter((p) => p.syntaxState === "SYNTAX_VALID" || p.syntaxState === "AMBIGUOUS");
+    const distinctPhoneKeys = /* @__PURE__ */ new Set();
+    for (const p of validPhones) {
+      const key = p.e164Format || p.normalizedValue || p.rawValue.replace(/[^0-9]/g, "");
+      if (key) distinctPhoneKeys.add(key);
+    }
+    if (distinctPhoneKeys.size > 1) {
+      profile.phoneConflict = true;
+      profile.phoneConflictState = "CONFLICT_DETECTED";
+      profile.diagnostics.push(`Observed ${distinctPhoneKeys.size} conflicting phone numbers across ads: ${Array.from(distinctPhoneKeys).join(", ")}`);
+    } else if (distinctPhoneKeys.size === 1) {
+      profile.phoneConflict = false;
+      profile.phoneConflictState = phoneObs.length > 1 ? "MULTIPLE_CONSISTENT" : "NO_CONFLICT";
+    } else {
+      profile.phoneConflict = false;
+      profile.phoneConflictState = "NOT_APPLICABLE";
+    }
+    const sortedPhones = [...validPhones].sort((a, b) => {
+      const surfaceRank = (s) => s === "TEL_LINK" ? 3 : s === "WHATSAPP_LINK" ? 2 : 1;
+      return surfaceRank(b.sourceSurface) - surfaceRank(a.sourceSurface);
+    });
+    if (sortedPhones.length > 0) {
+      profile.primaryPhone = sortedPhones[0].normalizedValue || sortedPhones[0].rawValue;
+    }
+  }
+  if (emailObs.length > 0) {
+    const validEmails = emailObs.filter((e) => e.syntaxState === "SYNTAX_VALID");
+    const distinctEmailKeys = /* @__PURE__ */ new Set();
+    for (const e of validEmails) {
+      const key = (e.normalizedValue || e.rawValue).toLowerCase();
+      if (key) distinctEmailKeys.add(key);
+    }
+    if (distinctEmailKeys.size > 1) {
+      profile.emailConflict = true;
+      profile.emailConflictState = "CONFLICT_DETECTED";
+      profile.diagnostics.push(`Observed ${distinctEmailKeys.size} conflicting email addresses across ads: ${Array.from(distinctEmailKeys).join(", ")}`);
+    } else if (distinctEmailKeys.size === 1) {
+      profile.emailConflict = false;
+      profile.emailConflictState = emailObs.length > 1 ? "MULTIPLE_CONSISTENT" : "NO_CONFLICT";
+    } else {
+      profile.emailConflict = false;
+      profile.emailConflictState = "NOT_APPLICABLE";
+    }
+    const sortedEmails = [...validEmails].sort((a, b) => {
+      const surfaceRank = (s) => s === "MAILTO_LINK" ? 2 : 1;
+      return surfaceRank(b.sourceSurface) - surfaceRank(a.sourceSurface);
+    });
+    if (sortedEmails.length > 0) {
+      profile.primaryEmail = sortedEmails[0].normalizedValue || sortedEmails[0].rawValue;
+    }
+  }
+  if (profile.phoneConflict || profile.emailConflict) {
+    profile.overallQualityState = "CONFLICT_DETECTED";
+  } else if (profile.primaryPhone || profile.primaryEmail) {
+    profile.overallQualityState = "OBSERVED_VALID_SYNTAX";
+  } else if (phoneObs.some((p) => p.syntaxState === "AMBIGUOUS") || emailObs.some((e) => e.syntaxState === "AMBIGUOUS")) {
+    profile.overallQualityState = "OBSERVED_AMBIGUOUS";
+  } else if (phoneObs.some((p) => p.syntaxState === "SYNTAX_INVALID") || emailObs.some((e) => e.syntaxState === "SYNTAX_INVALID")) {
+    profile.overallQualityState = "OBSERVED_INVALID";
+  } else {
+    profile.overallQualityState = "NOT_OBSERVED";
+  }
+  return profile;
+}
+function mergeContactObservations(existingProfile, incoming) {
+  const existingObs = existingProfile ? [...existingProfile.observedPhones, ...existingProfile.observedEmails] : [];
+  const combined = [...existingObs];
+  const seenSignatures = new Set(existingObs.map((o) => `${o.type}_${o.sourceSurface}_${(o.normalizedValue || o.rawValue).toLowerCase()}`));
+  for (const obs of incoming) {
+    const sig = `${obs.type}_${obs.sourceSurface}_${(obs.normalizedValue || obs.rawValue).toLowerCase()}`;
+    if (!seenSignatures.has(sig)) {
+      seenSignatures.add(sig);
+      combined.push(obs);
+    }
+  }
+  return aggregateContactObservations(combined);
+}
+
 // src/extension/metaAdapter.ts
 function sanitizeAdLibraryIds(ids, options) {
   if (!Array.isArray(ids)) return [];
@@ -5099,6 +5533,19 @@ function mergeCandidateIntoEntity(target, cand, decision, sourceQuery, targetCou
   target.primaryDestinationType = aggSummary.primaryDestinationType;
   target.destinationReasonCode = aggSummary.destinationReasonCode;
   target.destinationConfidence = aggSummary.destinationConfidence;
+  const incomingContacts = cand.contactObservations || [
+    ...cand.observedPhones || [],
+    ...cand.observedEmails || []
+  ];
+  if (incomingContacts.length > 0) {
+    target.contactProfile = mergeContactObservations(target.contactProfile, incomingContacts);
+    target.contactQualityState = target.contactProfile.overallQualityState;
+    target.businessPhone = target.contactProfile.primaryPhone;
+    target.businessEmail = target.contactProfile.primaryEmail;
+    target.phones = target.contactProfile.observedPhones.map((p) => p.normalizedValue || p.rawValue);
+    target.emails = target.contactProfile.observedEmails.map((e) => e.normalizedValue || e.rawValue);
+    target.contactObservations = [...target.contactProfile.observedPhones, ...target.contactProfile.observedEmails];
+  }
   if (!target.mergeHistory) target.mergeHistory = [];
   const isDuplicateMerge = target.mergeHistory.some(
     (m) => m.sourceLibraryId === cand.libraryId && m.sourceQuery === sourceQuery
@@ -5136,6 +5583,14 @@ function mergeCandidateIntoEntity(target, cand, decision, sourceQuery, targetCou
       target.businessLocationReasonCode = updatedGeo.reasonCode;
     }
   }
+  const priorityRes = calculateLeadScore(target);
+  target.leadScore = priorityRes.score;
+  target.normalizedScore = priorityRes.normalizedScore;
+  target.prioritizationTier = priorityRes.tier;
+  target.scoreConfidence = priorityRes.confidence;
+  target.scoreBreakdown = priorityRes.breakdown;
+  target.scoreModelVersion = priorityRes.breakdown.modelVersion;
+  target.scoreExplanation = priorityRes.explanation;
 }
 
 // src/extension/bulkStore.ts
@@ -5216,11 +5671,13 @@ function normalizeStoredLead(raw) {
   const pageNorm = normalizeFacebookPage(raw.facebookPageUrl, raw.canonicalPageId || raw.facebookPageId);
   const canonicalPageId = raw.canonicalPageId || pageNorm.pageId || void 0;
   const canonicalPageSlug = raw.canonicalPageSlug || pageNorm.pageSlug || void 0;
+  const canonicalKey = raw.canonicalKey || (canonicalPageId ? `fb_${canonicalPageId}` : canonicalPageSlug ? `fbslug_${canonicalPageSlug}` : canonicalName ? `name_${canonicalName.toLowerCase().replace(/[^a-z0-9]/g, "_")}` : `name_${cleanName.toLowerCase().replace(/[^a-z0-9]/g, "_")}`);
   const aliases = Array.isArray(raw.aliases) ? Array.from(new Set(raw.aliases.filter((a) => typeof a === "string" && a.trim().length > 0))) : [];
   return {
     ...raw,
     name: cleanName,
     canonicalName,
+    canonicalKey,
     canonicalPageId,
     canonicalPageSlug,
     aliases,
@@ -5251,7 +5708,51 @@ function normalizeStoredLead(raw) {
     status: qualResult.status,
     qualificationFailedGates: qualResult.failedGates,
     qualificationReasons: qualResult.reasons,
+    leadScore: typeof raw.leadScore === "number" ? raw.leadScore : void 0,
+    normalizedScore: typeof raw.normalizedScore === "number" ? raw.normalizedScore : typeof raw.leadScore === "number" ? +(raw.leadScore / 100).toFixed(2) : void 0,
+    prioritizationTier: raw.prioritizationTier || void 0,
+    scoreConfidence: raw.scoreConfidence || void 0,
+    scoreBreakdown: raw.scoreBreakdown && typeof raw.scoreBreakdown === "object" ? raw.scoreBreakdown : void 0,
+    scoreModelVersion: raw.scoreModelVersion || void 0,
+    scoreExplanation: raw.scoreExplanation || void 0,
     schemaVersion: 2
+  };
+}
+function validateCheckpoint(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  if (!raw.runId || typeof raw.runId !== "string") return null;
+  const batchIndex = typeof raw.batchIndex === "number" ? raw.batchIndex : parseInt(raw.batchIndex, 10);
+  if (isNaN(batchIndex) || batchIndex < 0) return null;
+  const schemaVersion = typeof raw.schemaVersion === "number" ? raw.schemaVersion : 1;
+  if (schemaVersion > 2) {
+    return null;
+  }
+  const activeKeywordIndex = typeof raw.activeKeywordIndex === "number" ? raw.activeKeywordIndex : 0;
+  const activeQueryIndex = typeof raw.activeQueryIndex === "number" ? raw.activeQueryIndex : activeKeywordIndex;
+  const monotonicRevision = typeof raw.monotonicRevision === "number" ? raw.monotonicRevision : batchIndex;
+  return {
+    runId: raw.runId,
+    batchIndex,
+    monotonicRevision,
+    timestamp: typeof raw.timestamp === "string" ? raw.timestamp : (/* @__PURE__ */ new Date()).toISOString(),
+    schemaVersion,
+    activeKeywordIndex,
+    activeQueryIndex,
+    currentKeyword: typeof raw.currentKeyword === "string" ? raw.currentKeyword : "",
+    completedKeywords: Array.isArray(raw.completedKeywords) ? raw.completedKeywords : [],
+    rawAdsCount: typeof raw.rawAdsCount === "number" && raw.rawAdsCount >= 0 ? raw.rawAdsCount : 0,
+    normalizedCandidatesCount: typeof raw.normalizedCandidatesCount === "number" && raw.normalizedCandidatesCount >= 0 ? raw.normalizedCandidatesCount : 0,
+    uniqueEntitiesCount: typeof raw.uniqueEntitiesCount === "number" && raw.uniqueEntitiesCount >= 0 ? raw.uniqueEntitiesCount : 0,
+    relevantEntitiesCount: typeof raw.relevantEntitiesCount === "number" && raw.relevantEntitiesCount >= 0 ? raw.relevantEntitiesCount : 0,
+    uncertainEntitiesCount: typeof raw.uncertainEntitiesCount === "number" && raw.uncertainEntitiesCount >= 0 ? raw.uncertainEntitiesCount : 0,
+    notRelevantEntitiesCount: typeof raw.notRelevantEntitiesCount === "number" && raw.notRelevantEntitiesCount >= 0 ? raw.notRelevantEntitiesCount : 0,
+    duplicatesRemovedCount: typeof raw.duplicatesRemovedCount === "number" && raw.duplicatesRemovedCount >= 0 ? raw.duplicatesRemovedCount : 0,
+    finalUniqueRelevantLeads: typeof raw.finalUniqueRelevantLeads === "number" && raw.finalUniqueRelevantLeads >= 0 ? raw.finalUniqueRelevantLeads : 0,
+    seenLibraryIdsCount: typeof raw.seenLibraryIdsCount === "number" && raw.seenLibraryIdsCount >= 0 ? raw.seenLibraryIdsCount : 0,
+    seenEntityKeysCount: typeof raw.seenEntityKeysCount === "number" && raw.seenEntityKeysCount >= 0 ? raw.seenEntityKeysCount : 0,
+    status: raw.status,
+    stopReason: raw.stopReason,
+    isRecoverable: raw.isRecoverable !== false
   };
 }
 var MemoryStoreFallback = class {
@@ -5302,7 +5803,14 @@ var MemoryStoreFallback = class {
     }
     if (payload.advertiserExpansions) {
       const list = this.advertiserExpansions.get(runId) || [];
-      list.push(...payload.advertiserExpansions);
+      for (const exp of payload.advertiserExpansions) {
+        const existingIdx = list.findIndex((e) => e.sourceEntityId === exp.sourceEntityId);
+        if (existingIdx >= 0) {
+          list[existingIdx] = exp;
+        } else {
+          list.push(exp);
+        }
+      }
       this.advertiserExpansions.set(runId, list);
     }
     if (payload.evidence) {
@@ -5355,13 +5863,16 @@ var MemoryStoreFallback = class {
     return new Set(this.dedupEntities.get(runId) || []);
   }
   async getLatestCheckpoint(runId) {
-    let latestIndex = -1;
+    let latestRev = -1;
     let latestCp = null;
     for (const [key, cp] of this.checkpoints.entries()) {
       if (key.startsWith(`${runId}_`)) {
-        if (cp.batchIndex > latestIndex) {
-          latestIndex = cp.batchIndex;
-          latestCp = cp;
+        const validated = validateCheckpoint(cp);
+        if (!validated) continue;
+        const rev = validated.monotonicRevision ?? validated.batchIndex;
+        if (rev > latestRev) {
+          latestRev = rev;
+          latestCp = validated;
         }
       }
     }
@@ -5501,6 +6012,28 @@ async function saveRunRecord(run) {
     });
   } catch {
     return memoryFallback.saveRun(run);
+  }
+}
+async function getRunRecord(runId) {
+  if (!hasIndexedDB()) {
+    return memoryFallback.getRun(runId);
+  }
+  try {
+    const db = await openDB();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction("runs", "readonly");
+      const req = tx.objectStore("runs").get(runId);
+      req.onsuccess = () => {
+        db.close();
+        resolve(req.result || null);
+      };
+      req.onerror = () => {
+        db.close();
+        reject(req.error);
+      };
+    });
+  } catch {
+    return memoryFallback.getRun(runId);
   }
 }
 async function saveBatch(runId, payload) {
@@ -5669,6 +6202,237 @@ async function getSeenEntityKeys(runId) {
   } catch {
     return memoryFallback.getSeenEntityKeys(runId);
   }
+}
+async function getLatestCheckpoint(runId) {
+  if (!hasIndexedDB()) {
+    return memoryFallback.getLatestCheckpoint(runId);
+  }
+  try {
+    const db = await openDB();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction("checkpoints", "readonly");
+      const store = tx.objectStore("checkpoints");
+      const index = store.index("by_run");
+      const request = index.getAll(runId);
+      request.onsuccess = () => {
+        db.close();
+        const items = request.result || [];
+        if (items.length === 0) return resolve(null);
+        const valid = items.map((cp) => validateCheckpoint(cp)).filter((cp) => cp !== null);
+        if (valid.length === 0) return resolve(null);
+        valid.sort((a, b) => (b.monotonicRevision ?? b.batchIndex) - (a.monotonicRevision ?? a.batchIndex));
+        resolve(valid[0]);
+      };
+      request.onerror = () => {
+        db.close();
+        reject(request.error);
+      };
+    });
+  } catch {
+    return memoryFallback.getLatestCheckpoint(runId);
+  }
+}
+async function getStorageStats(runId) {
+  if (!hasIndexedDB()) {
+    return memoryFallback.getStorageStats(runId);
+  }
+  try {
+    const db = await openDB();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(["ads", "entities", "checkpoints"], "readonly");
+      const adStore = tx.objectStore("ads").index("by_run");
+      const entStore = tx.objectStore("entities").index("by_run");
+      const cpStore = tx.objectStore("checkpoints").index("by_run");
+      const reqAds = adStore.count(runId);
+      const reqEnts = entStore.getAll(runId);
+      const reqCps = cpStore.count(runId);
+      tx.oncomplete = () => {
+        db.close();
+        const adsCount = reqAds.result || 0;
+        const ents = reqEnts.result || [];
+        const relevantCount = ents.filter((e) => e.relevanceDecision === "RELEVANT" && e.evaluationStatus !== "UNCERTAIN" && e.evaluationStatus !== "REJECTED").length;
+        const cpsCount = reqCps.result || 0;
+        const estimatedBytes = adsCount * 300 + ents.length * 500 + cpsCount * 200;
+        resolve({
+          runId,
+          totalAds: adsCount,
+          totalEntities: ents.length,
+          totalRelevantLeads: relevantCount,
+          totalCheckpoints: cpsCount,
+          estimatedBytes
+        });
+      };
+      tx.onerror = () => {
+        db.close();
+        reject(tx.error);
+      };
+    });
+  } catch {
+    return memoryFallback.getStorageStats(runId);
+  }
+}
+async function recoverInterruptedRun(runId) {
+  const stats = await getStorageStats(runId);
+  const cp = await getLatestCheckpoint(runId);
+  const discrepancies = [];
+  if (!cp && (stats.totalAds > 0 || stats.totalEntities > 0)) {
+    discrepancies.push("Persisted records exist without valid checkpoint");
+  }
+  if (cp) {
+    if (stats.totalAds < cp.rawAdsCount) {
+      discrepancies.push(`Persisted ads (${stats.totalAds}) less than checkpoint recorded ads (${cp.rawAdsCount})`);
+    }
+    if (stats.totalEntities < cp.uniqueEntitiesCount) {
+      discrepancies.push(`Persisted entities (${stats.totalEntities}) less than checkpoint recorded entities (${cp.uniqueEntitiesCount})`);
+    }
+  }
+  const run = await getRunRecord(runId);
+  let recoveryAction = "REVIEW_REQUIRED";
+  let isRecoverable = false;
+  if (run?.status === "CANCELLED" || cp?.status === "CANCELLED") {
+    recoveryAction = "CANCELLED_PRESERVED";
+    isRecoverable = false;
+  } else if (run?.status === "COMPLETED" || cp?.status === "COMPLETED") {
+    recoveryAction = "ALREADY_COMPLETED";
+    isRecoverable = false;
+  } else if (stats.totalAds === 0 && stats.totalEntities === 0 && !cp) {
+    recoveryAction = "EMPTY_RUN";
+    isRecoverable = false;
+  } else if (cp && discrepancies.length === 0) {
+    recoveryAction = "RESUME_AVAILABLE";
+    isRecoverable = true;
+  } else if (cp && discrepancies.length > 0) {
+    recoveryAction = "REVIEW_REQUIRED";
+    isRecoverable = true;
+  } else {
+    recoveryAction = "CORRUPTED_CHECKPOINT";
+    isRecoverable = stats.totalEntities > 0;
+  }
+  return {
+    runId,
+    hasCheckpoint: !!cp,
+    checkpointBatchIndex: cp?.batchIndex,
+    checkpointRevision: cp?.monotonicRevision ?? cp?.batchIndex,
+    totalPersistedAds: stats.totalAds,
+    totalPersistedEntities: stats.totalEntities,
+    totalRelevantLeads: stats.totalRelevantLeads,
+    isConsistent: discrepancies.length === 0,
+    isRecoverable,
+    recoveryAction,
+    discrepancies,
+    reconciledCounters: {
+      rawAds: stats.totalAds,
+      uniqueEntities: stats.totalEntities,
+      relevantEntities: stats.totalRelevantLeads
+    }
+  };
+}
+async function reconcileAndRecoverRun(runId, explicitReason) {
+  const diagnostics = await recoverInterruptedRun(runId);
+  let existingRun = await getRunRecord(runId);
+  const relevantLeads = await getAllRelevantLeads(runId);
+  const latestCp = await getLatestCheckpoint(runId);
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  if (!existingRun) {
+    existingRun = {
+      runId,
+      researchName: `Recovered Run ${runId}`,
+      mode: "CUSTOM",
+      keywords: latestCp?.completedKeywords && latestCp.completedKeywords.length > 0 ? latestCp.completedKeywords : [latestCp?.currentKeyword || "recovered"],
+      countryCode: "US",
+      locationName: "Recovered Location",
+      status: "PARTIAL",
+      leads: relevantLeads.slice(0, 50),
+      counters: {
+        rawAds: diagnostics.totalPersistedAds,
+        normalizedCandidates: diagnostics.totalPersistedAds,
+        relevantCandidates: diagnostics.totalRelevantLeads,
+        uncertainCandidates: 0,
+        notRelevantCandidates: 0,
+        duplicatesRemoved: Math.max(0, diagnostics.totalPersistedAds - diagnostics.totalPersistedEntities),
+        finalUniqueLeads: diagnostics.totalRelevantLeads,
+        finalUniqueRelevantLeads: diagnostics.totalRelevantLeads,
+        uniqueEntitiesObserved: diagnostics.totalPersistedEntities,
+        relevantEntities: diagnostics.totalRelevantLeads
+      },
+      logs: [
+        {
+          timestamp: (/* @__PURE__ */ new Date()).toLocaleTimeString(),
+          message: "Run synthesized from durable persistent checkpoints and records.",
+          stage: "RECOVERY"
+        }
+      ],
+      startedAt: latestCp?.timestamp || now,
+      completedAt: now,
+      lastUpdatedAt: now,
+      schemaVersion: 2,
+      totalAdsInspected: diagnostics.totalPersistedAds
+    };
+  }
+  if (existingRun.status === "CANCELLED" || latestCp?.status === "CANCELLED" || explicitReason === "USER_CANCELLED") {
+    existingRun.status = "CANCELLED";
+    existingRun.stopReason = "USER_CANCELLED";
+    existingRun.completedAt = existingRun.completedAt || now;
+    existingRun.lastUpdatedAt = now;
+    existingRun.leads = relevantLeads.slice(0, 50);
+    existingRun.totalAdsInspected = diagnostics.totalPersistedAds;
+    existingRun.counters = {
+      ...existingRun.counters || {
+        rawAds: 0,
+        normalizedCandidates: 0,
+        relevantCandidates: 0,
+        uncertainCandidates: 0,
+        notRelevantCandidates: 0,
+        duplicatesRemoved: 0,
+        finalUniqueLeads: 0
+      },
+      rawAds: diagnostics.totalPersistedAds,
+      finalUniqueLeads: diagnostics.totalRelevantLeads,
+      finalUniqueRelevantLeads: diagnostics.totalRelevantLeads,
+      uniqueEntitiesObserved: diagnostics.totalPersistedEntities,
+      relevantEntities: diagnostics.totalRelevantLeads
+    };
+    await saveRunRecord(existingRun);
+    return { success: true, run: existingRun, diagnostics };
+  }
+  const targetQuota = existingRun.targetLeadCount || existingRun.maxResults || 5e3;
+  if (diagnostics.totalRelevantLeads >= targetQuota) {
+    existingRun.status = "COMPLETED";
+    existingRun.stopReason = "TARGET_REACHED";
+  } else {
+    existingRun.status = "PARTIAL";
+    existingRun.stopReason = explicitReason || (diagnostics.isConsistent ? "SOURCE_EXHAUSTED" : "BROWSER_INTERRUPTED");
+  }
+  existingRun.completedAt = existingRun.completedAt || now;
+  existingRun.lastUpdatedAt = now;
+  existingRun.leads = relevantLeads.slice(0, 50);
+  existingRun.totalAdsInspected = diagnostics.totalPersistedAds;
+  existingRun.counters = {
+    ...existingRun.counters || {
+      rawAds: 0,
+      normalizedCandidates: 0,
+      relevantCandidates: 0,
+      uncertainCandidates: 0,
+      notRelevantCandidates: 0,
+      duplicatesRemoved: 0,
+      finalUniqueLeads: 0
+    },
+    rawAds: diagnostics.totalPersistedAds,
+    finalUniqueLeads: diagnostics.totalRelevantLeads,
+    finalUniqueRelevantLeads: diagnostics.totalRelevantLeads,
+    uniqueEntitiesObserved: diagnostics.totalPersistedEntities,
+    relevantEntities: diagnostics.totalRelevantLeads
+  };
+  if (!existingRun.logs) {
+    existingRun.logs = [];
+  }
+  existingRun.logs.push({
+    timestamp: (/* @__PURE__ */ new Date()).toLocaleTimeString(),
+    message: `Run recovered and reconciled. Preserved ${diagnostics.totalRelevantLeads} leads from ${diagnostics.totalPersistedAds} ads.`,
+    stage: "RECOVERY"
+  });
+  await saveRunRecord(existingRun);
+  return { success: true, run: existingRun, diagnostics };
 }
 
 // src/extension/bulkProcessor.ts
@@ -6293,6 +7057,14 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
         existingEntity.status = qualGate2.status;
         existingEntity.qualificationFailedGates = qualGate2.failedGates;
         existingEntity.qualificationReasons = qualGate2.reasons;
+        const priorityRes2 = calculateLeadScore(existingEntity, intent);
+        existingEntity.leadScore = priorityRes2.score;
+        existingEntity.normalizedScore = priorityRes2.normalizedScore;
+        existingEntity.prioritizationTier = priorityRes2.tier;
+        existingEntity.scoreConfidence = priorityRes2.confidence;
+        existingEntity.scoreBreakdown = priorityRes2.breakdown;
+        existingEntity.scoreModelVersion = priorityRes2.breakdown.modelVersion;
+        existingEntity.scoreExplanation = priorityRes2.explanation;
         entityIndex.indexEntity(mergeDecision.targetKey, existingEntity);
         if (!updatedEntities.some((e) => e.id === existingEntity.id)) {
           updatedEntities.push(existingEntity);
@@ -6448,8 +7220,17 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
       destinationDomain: domainNorm.canonicalDomain || cand.destinationDomain,
       reasonCode: candDestRes.reasonCode,
       confidence: candDestRes.confidence,
-      observedAt: cand.startedRunning || (/* @__PURE__ */ new Date()).toISOString()
+      observedAt: cand.startedRunning || (/* @__PURE__ */ new Date()).toISOString(),
+      contactObservations: cand.contactObservations || [
+        ...cand.observedPhones || [],
+        ...cand.observedEmails || []
+      ]
     };
+    const incomingContacts = cand.contactObservations || [
+      ...cand.observedPhones || [],
+      ...cand.observedEmails || []
+    ];
+    const contactProfile = aggregateContactObservations(incomingContacts);
     const newLead = {
       id: `lead_${runId}_${entityKey}`,
       name: cleanName,
@@ -6510,12 +7291,27 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
       uniqueEvidenceSignals: v3Result?.uniqueEvidenceSignals,
       observedEvidenceOccurrences: v3Result?.observedEvidenceOccurrences,
       evaluationStatus: (v3Result?.decision ?? evalResult?.decision) === "RELEVANT" ? "RELEVANT" : (v3Result?.decision ?? evalResult?.decision) === "NOT_RELEVANT" ? "REJECTED" : (v3Result?.decision ?? evalResult?.decision) === "UNCERTAIN" ? "UNCERTAIN" : void 0,
-      creativeSignals: extractCreativeSignalsFromCandidate(cand)
+      creativeSignals: extractCreativeSignalsFromCandidate(cand),
+      contactProfile,
+      contactQualityState: contactProfile.overallQualityState,
+      businessPhone: contactProfile.primaryPhone,
+      businessEmail: contactProfile.primaryEmail,
+      phones: contactProfile.observedPhones.map((p) => p.normalizedValue || p.rawValue),
+      emails: contactProfile.observedEmails.map((e) => e.normalizedValue || e.rawValue),
+      contactObservations: incomingContacts
     };
     const qualGate = evaluateLeadQualificationGates(newLead, intent);
     newLead.status = qualGate.status;
     newLead.qualificationFailedGates = qualGate.failedGates;
     newLead.qualificationReasons = qualGate.reasons;
+    const priorityRes = calculateLeadScore(newLead, intent);
+    newLead.leadScore = priorityRes.score;
+    newLead.normalizedScore = priorityRes.normalizedScore;
+    newLead.prioritizationTier = priorityRes.tier;
+    newLead.scoreConfidence = priorityRes.confidence;
+    newLead.scoreBreakdown = priorityRes.breakdown;
+    newLead.scoreModelVersion = priorityRes.breakdown.modelVersion;
+    newLead.scoreExplanation = priorityRes.explanation;
     const expEligibility = checkAdvertiserExpansionEligibility(
       newLead,
       options.alreadyExpandedEntityIds || /* @__PURE__ */ new Set(),
@@ -10793,20 +11589,30 @@ async function checkStaleJobs() {
   const data = await chrome.storage.local.get(["activeResearchRun"]);
   const run = data.activeResearchRun;
   if (run && ["STARTING", "NAVIGATING", "COLLECTING", "NORMALIZING"].includes(run.status)) {
-    const lastUpdate = new Date(run.lastUpdatedAt).getTime();
-    const now = Date.now();
-    if (now - lastUpdate > STALE_JOB_THRESHOLD_MS) {
-      console.warn("[service-worker] Detected stale job:", run.runId);
+    console.warn("[service-worker] Detected in-flight job on service worker restart:", run.runId);
+    const persisted = await getRunRecord(run.runId);
+    if (persisted?.status === "CANCELLED" || run.status === "CANCELLED") {
+      run.status = "CANCELLED";
+      run.stopReason = "USER_CANCELLED";
+    } else {
+      const rec = await reconcileAndRecoverRun(run.runId, "BROWSER_INTERRUPTED");
       run.status = "RECOVERY_REQUIRED";
       run.stopReason = "BROWSER_INTERRUPTED";
-      run.logs.push({
-        timestamp: (/* @__PURE__ */ new Date()).toLocaleTimeString(),
-        message: "Research session was interrupted due to browser inactivity or background worker restart. Recovery required.",
-        stage: "SYSTEM"
-      });
-      await saveActiveRun(run);
-      await appendToHistory(run);
+      run.leads = rec.run.leads;
+      run.counters = rec.run.counters;
+      run.totalAdsInspected = rec.run.totalAdsInspected;
     }
+    run.lastUpdatedAt = (/* @__PURE__ */ new Date()).toISOString();
+    if (!run.logs) {
+      run.logs = [];
+    }
+    run.logs.push({
+      timestamp: (/* @__PURE__ */ new Date()).toLocaleTimeString(),
+      message: "Background service worker restarted while research was in flight. State safely reconciled and preserved.",
+      stage: "SYSTEM"
+    });
+    await saveActiveRun(run);
+    await appendToHistory(run);
   }
 }
 async function appendToHistory(run) {
@@ -10821,6 +11627,11 @@ async function appendToHistory(run) {
   }
 }
 function broadcastProgress(run, stage, logMessage) {
+  if (cancelledRuns.has(run.runId) && run.status !== "CANCELLED") {
+    run.status = "CANCELLED";
+    run.stopReason = "USER_CANCELLED";
+    stage = "CANCELLED";
+  }
   const timestamp = (/* @__PURE__ */ new Date()).toLocaleTimeString();
   run.logs.push({ timestamp, message: logMessage, stage });
   if (run.logs.length > 50) {
@@ -11026,8 +11837,12 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
   const existingEntitiesMap = /* @__PURE__ */ new Map();
   const existingLeads = await getAllStoredLeads(runId);
   for (const lead of existingLeads) {
-    const canonicalKey = lead.canonicalName ? lead.canonicalName.toLowerCase() : lead.name.toLowerCase();
-    existingEntitiesMap.set(canonicalKey, lead);
+    const primaryKey = lead.canonicalKey || (lead.canonicalPageId ? `fb_${lead.canonicalPageId}` : lead.canonicalPageSlug ? `fbslug_${lead.canonicalPageSlug}` : lead.canonicalName ? `name_${lead.canonicalName.toLowerCase().replace(/[^a-z0-9]/g, "_")}` : `name_${lead.name.toLowerCase().replace(/[^a-z0-9]/g, "_")}`);
+    existingEntitiesMap.set(primaryKey, lead);
+    if (lead.canonicalName) existingEntitiesMap.set(lead.canonicalName.toLowerCase(), lead);
+    if (lead.name) existingEntitiesMap.set(lead.name.toLowerCase(), lead);
+    if (lead.canonicalPageId) existingEntitiesMap.set(`fb_${lead.canonicalPageId}`, lead);
+    if (lead.canonicalPageSlug) existingEntitiesMap.set(`fbslug_${lead.canonicalPageSlug}`, lead);
   }
   await saveActiveRun(initialRun);
   const plannedQueries = initialRun.plannedQueries || planResearchQueries({
@@ -11249,9 +12064,13 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
             checkpoint: {
               runId,
               batchIndex,
+              monotonicRevision: batchIndex,
               timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+              schemaVersion: 2,
               activeKeywordIndex: qi,
+              activeQueryIndex: qi,
               currentKeyword,
+              completedKeywords: [...completedKeywords],
               rawAdsCount: batchResult.counters.rawAds,
               normalizedCandidatesCount: batchResult.counters.normalizedCandidates,
               uniqueEntitiesCount: batchResult.counters.uniqueEntitiesObserved || 0,
@@ -11261,7 +12080,10 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
               duplicatesRemovedCount: batchResult.counters.duplicatesRemoved,
               finalUniqueRelevantLeads: batchResult.counters.finalUniqueRelevantLeads || batchResult.counters.finalUniqueLeads,
               seenLibraryIdsCount: seenAdLibraryIds.size,
-              seenEntityKeysCount: seenEntityKeys.size
+              seenEntityKeysCount: seenEntityKeys.size,
+              status: cancelledRuns.has(runId) ? "CANCELLED" : initialRun.status,
+              stopReason: cancelledRuns.has(runId) ? "USER_CANCELLED" : initialRun.stopReason,
+              isRecoverable: true
             }
           });
           const allLeadsList = Array.from(existingEntitiesMap.values());
@@ -11392,7 +12214,11 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
       }
     }
   } catch (err) {
-    if (existingEntitiesMap.size > 0) {
+    if (cancelledRuns.has(runId) || initialRun.status === "CANCELLED") {
+      initialRun.status = "CANCELLED";
+      initialRun.stopReason = "USER_CANCELLED";
+      broadcastProgress(initialRun, "CANCELLED", `Research was explicitly cancelled by user.`);
+    } else if (existingEntitiesMap.size > 0) {
       initialRun.status = "PARTIAL";
       initialRun.stopReason = "PARTIAL_ERROR";
       if (!initialRun.warningMessages) initialRun.warningMessages = [];
@@ -11411,6 +12237,10 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
         await chrome.tabs.remove(currentTabId);
       } catch {
       }
+    }
+    if (cancelledRuns.has(runId) || initialRun.status === "CANCELLED") {
+      initialRun.status = "CANCELLED";
+      initialRun.stopReason = "USER_CANCELLED";
     }
     initialRun.completedAt = (/* @__PURE__ */ new Date()).toISOString();
     await saveRunRecord(initialRun);
@@ -11524,17 +12354,49 @@ if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage)
       if (runId) {
         cancelledRuns.add(runId);
       }
-      chrome.storage.local.get(["activeResearchRun"], (data) => {
+      chrome.storage.local.get(["activeResearchRun"], async (data) => {
         if (data && data.activeResearchRun) {
           const run = data.activeResearchRun;
-          run.status = "CANCELLED";
-          run.stopReason = "USER_CANCELLED";
-          saveActiveRun(run).catch(() => {
-          });
+          if (!runId || run.runId === runId) {
+            run.status = "CANCELLED";
+            run.stopReason = "USER_CANCELLED";
+            run.completedAt = run.completedAt || (/* @__PURE__ */ new Date()).toISOString();
+            run.lastUpdatedAt = (/* @__PURE__ */ new Date()).toISOString();
+            run.logs.push({
+              timestamp: (/* @__PURE__ */ new Date()).toLocaleTimeString(),
+              message: "Research was explicitly cancelled by user.",
+              stage: "CANCELLED"
+            });
+            await saveActiveRun(run).catch(() => {
+            });
+            await saveRunRecord(run).catch(() => {
+            });
+            await appendToHistory(run).catch(() => {
+            });
+          }
         }
       });
       sendResponse({ success: true, message: "Cancellation signal sent." });
       return false;
+    }
+    if (message.type === "RECOVER_RUN") {
+      const targetRunId = message.payload?.runId;
+      if (!targetRunId) {
+        sendResponse({ success: false, error: "runId required for recovery" });
+        return false;
+      }
+      reconcileAndRecoverRun(targetRunId).then(async (result) => {
+        await saveActiveRun(result.run);
+        await appendToHistory(result.run);
+        sendResponse({
+          success: true,
+          run: result.run,
+          diagnostics: result.diagnostics
+        });
+      }).catch((err) => {
+        sendResponse({ success: false, error: err.message });
+      });
+      return true;
     }
     if (message.type === "PAUSE_RESEARCH") {
       const runId = message.payload?.runId;
@@ -11675,6 +12537,12 @@ if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onInstalle
 }
 checkStaleJobs().catch((err) => console.error("[service-worker] checkStaleJobs error:", err));
 export {
+  broadcastProgress,
+  cancelledRuns,
+  checkStaleJobs,
+  executeResearchPipeline,
   isAdLibraryUrlMatch,
+  pausedRuns,
+  saveActiveRun,
   waitForTabLoad
 };

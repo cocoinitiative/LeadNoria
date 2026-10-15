@@ -249,9 +249,20 @@ node node_modules/typescript/bin/tsc --noEmit
 
 ---
 
+## Safety Invariants & Fail-Closed Platform Boundaries
+
+LeadNoria is strictly bounded to authorized Meta Ad Library research workflows:
+- **Meta Ad Library Exclusivity**: Operates solely on public signals visible in `facebook.com/ads/library`.
+- **Zero Third-Party APIs**: No external APIs, paid enrichment services, Google Maps/Search, or alternate data sources.
+- **Fail-Closed Live Collection & Crawling Gates**: Permanent programmatic enforcement via `isLiveCollectionPermitted() === false` and `isExternalWebsiteCrawlingPermitted() === false`.
+- **Zero Evasion / Spoofing**: No fingerprint spoofing, proxy rotation, CAPTCHA bypass, or unauthorized automated collection.
+- **Offline-First Verification**: Complete suite of offline regression test suites executed deterministically without external network requests.
+
+---
+
 ## Required Permissions
 
-The extension declares the minimum necessary permissions:
+The extension declares the minimum necessary Manifest V3 permissions:
 
 | Permission | Purpose |
 |---|---|
@@ -264,7 +275,7 @@ The extension declares the minimum necessary permissions:
 - `https://www.facebook.com/ads/library/*`
 - `https://web.facebook.com/ads/library/*`
 
-**Optional host permissions** (`https://*/*`) are requested only when the user initiates website verification for a specific target domain.
+Zero broad host permissions (`<all_urls>`, `*://*/*`, `https://*/*`) are declared or requested.
 
 ---
 

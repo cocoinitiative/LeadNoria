@@ -12,13 +12,24 @@ import type {
   AdExtractionDiagnostics,
   ExtractionResultStatus,
   AdExtractionResult,
-  AdLevelEvidence
+  AdLevelEvidence,
+  LeadExportOptions
 } from './types.ts';
 import { LeadRelevanceEngine } from './relevanceEngine.ts';
 import type { ResearchIntent } from './relevanceEngine.ts';
 import { evaluateGeographicOrigin } from './geographicClassifier.ts';
 import { classifyCta, classifyDestination, aggregateAdEvidence } from './destinationClassifier.ts';
 import { evaluateLeadQualificationGates } from './qualificationGate.ts';
+import { calculateLeadScore } from './leadPrioritizer.ts';
+import {
+  extractContactsFromAdCard,
+  aggregateContactObservations,
+  mergeContactObservations
+} from './contactQuality.ts';
+import type {
+  ContactObservation,
+  ContactEntityProfile
+} from './contactQuality.ts';
 import {
   EntityResolutionIndex,
   evaluateEntityMerge,
@@ -576,6 +587,12 @@ export function extractFieldsFromCard(
     bodyCopy = cardFullText.substring(0, 200).replace(/\n+/g, ' ');
   }
 
+  // Extract public contact data (phones, emails) from card DOM and links (Phase 7)
+  const contactData = extractContactsFromAdCard(cardRoot, libraryId);
+  const observedPhones = contactData.phones;
+  const observedEmails = contactData.emails;
+  const contactObservations = [...observedPhones, ...observedEmails];
+
   return {
     libraryId,
     pageName,
@@ -589,7 +606,10 @@ export function extractFieldsFromCard(
     bodyCopy: bodyCopy.substring(0, 300),
     ctaText,
     observedKeyword,
-    rawText: cardFullText.substring(0, 200)
+    rawText: cardFullText.substring(0, 200),
+    observedPhones,
+    observedEmails,
+    contactObservations
   };
 }
 
@@ -1118,7 +1138,11 @@ export function aggregateCandidatesToLeads(
         destinationDomain: cand.destinationDomain,
         reasonCode: destRes.reasonCode,
         confidence: destRes.confidence,
-        observedAt: cand.startedRunning || new Date().toISOString()
+        observedAt: cand.startedRunning || new Date().toISOString(),
+        contactObservations: cand.contactObservations || [
+          ...(cand.observedPhones || []),
+          ...(cand.observedEmails || [])
+        ]
       };
     });
 
@@ -1267,6 +1291,21 @@ export function aggregateCandidatesToLeads(
         existing.businessLocationReasonCode = geoEval.reasonCode;
       }
 
+      // Update contact observations (Phase 7)
+      const candsContacts = cands.flatMap(c => c.contactObservations || [
+        ...(c.observedPhones || []),
+        ...(c.observedEmails || [])
+      ]);
+      if (candsContacts.length > 0) {
+        existing.contactProfile = mergeContactObservations(existing.contactProfile, candsContacts);
+        existing.contactQualityState = existing.contactProfile.overallQualityState;
+        existing.businessPhone = existing.contactProfile.primaryPhone;
+        existing.businessEmail = existing.contactProfile.primaryEmail;
+        existing.phones = existing.contactProfile.observedPhones.map(p => p.normalizedValue || p.rawValue);
+        existing.emails = existing.contactProfile.observedEmails.map(e => e.normalizedValue || e.rawValue);
+        existing.contactObservations = [...existing.contactProfile.observedPhones, ...existing.contactProfile.observedEmails];
+      }
+
       if (evalResult) {
         existing.relevanceScore = Math.max(existing.relevanceScore || 0, evalResult.score);
         existing.relevanceDecision = evalResult.decision;
@@ -1283,6 +1322,15 @@ export function aggregateCandidatesToLeads(
       existing.status = qualGate.status;
       existing.qualificationFailedGates = qualGate.failedGates;
       existing.qualificationReasons = qualGate.reasons;
+
+      const priorityRes = calculateLeadScore(existing, actualIntent);
+      existing.leadScore = priorityRes.score;
+      existing.normalizedScore = priorityRes.normalizedScore;
+      existing.prioritizationTier = priorityRes.tier;
+      existing.scoreConfidence = priorityRes.confidence;
+      existing.scoreBreakdown = priorityRes.breakdown;
+      existing.scoreModelVersion = priorityRes.breakdown.modelVersion;
+      existing.scoreExplanation = priorityRes.explanation;
     } else {
       if (leadMap.size >= effectiveCeiling) {
         // System ceiling reached for unique relevant leads
@@ -1365,10 +1413,33 @@ export function aggregateCandidatesToLeads(
         presetVersion: evalResult?.presetVersion
       };
 
+      // Aggregate contact observations for new lead (Phase 7)
+      const newCandsContacts = cands.flatMap(c => c.contactObservations || [
+        ...(c.observedPhones || []),
+        ...(c.observedEmails || [])
+      ]);
+      const newContactProfile = aggregateContactObservations(newCandsContacts);
+      lead.contactProfile = newContactProfile;
+      lead.contactQualityState = newContactProfile.overallQualityState;
+      lead.businessPhone = newContactProfile.primaryPhone;
+      lead.businessEmail = newContactProfile.primaryEmail;
+      lead.phones = newContactProfile.observedPhones.map(p => p.normalizedValue || p.rawValue);
+      lead.emails = newContactProfile.observedEmails.map(e => e.normalizedValue || e.rawValue);
+      lead.contactObservations = newCandsContacts;
+
       const qualGate = evaluateLeadQualificationGates(lead, actualIntent);
       lead.status = qualGate.status;
       lead.qualificationFailedGates = qualGate.failedGates;
       lead.qualificationReasons = qualGate.reasons;
+
+      const priorityRes = calculateLeadScore(lead, actualIntent);
+      lead.leadScore = priorityRes.score;
+      lead.normalizedScore = priorityRes.normalizedScore;
+      lead.prioritizationTier = priorityRes.tier;
+      lead.scoreConfidence = priorityRes.confidence;
+      lead.scoreBreakdown = priorityRes.breakdown;
+      lead.scoreModelVersion = priorityRes.breakdown.modelVersion;
+      lead.scoreExplanation = priorityRes.explanation;
 
       leadMap.set(key, lead);
     }
@@ -1401,18 +1472,15 @@ export function aggregateCandidatesToLeads(
  * (=, +, -, @, \t, \r)
  */
 export function sanitizeCsvField(val: unknown): string {
-  if (val === null || val === undefined) return '';
-  let str = String(val).trim();
+  if (val === null || val === undefined) return '""';
+  let str = String(val);
 
-  // Neutralize tabs and carriage returns
-  str = str.replace(/\t/g, ' ').replace(/\r/g, '');
-
-  // Protect against spreadsheet formula injection
+  // Protect against spreadsheet formula injection (=, +, -, @, \t, \r)
   if (/^[=+\-@\t\r]/.test(str)) {
     str = `'${str}`;
   }
 
-  // Escape double quotes
+  // Escape double quotes per RFC 4180
   str = str.replace(/"/g, '""');
   return `"${str}"`;
 }
@@ -1422,14 +1490,14 @@ export function sanitizeCsvField(val: unknown): string {
  */
 export function exportLeadsToCsv(
   leads: ExtensionLead[],
-  runOrOptions?: ExtensionResearchRun | { qualifiedOnly?: boolean },
-  options?: { qualifiedOnly?: boolean }
+  runOrOptions?: ExtensionResearchRun | LeadExportOptions,
+  options?: LeadExportOptions
 ): string {
   let run: ExtensionResearchRun | undefined;
-  let opts: { qualifiedOnly?: boolean } | undefined = options;
+  let opts: LeadExportOptions | undefined = options;
 
-  if (runOrOptions && typeof runOrOptions === 'object' && 'qualifiedOnly' in runOrOptions) {
-    opts = runOrOptions as { qualifiedOnly?: boolean };
+  if (runOrOptions && typeof runOrOptions === 'object' && ('qualifiedOnly' in runOrOptions || 'reviewOnly' in runOrOptions || 'rejectedOnly' in runOrOptions)) {
+    opts = runOrOptions as LeadExportOptions;
   } else if (runOrOptions && typeof runOrOptions === 'object') {
     run = runOrOptions as ExtensionResearchRun;
   }
@@ -1439,6 +1507,18 @@ export function exportLeadsToCsv(
     exportLeads = leads.filter(l => {
       const gateCriteria = (run && 'researchIntent' in run && (run as any).researchIntent) ? (run as any).researchIntent : opts;
       return evaluateLeadQualificationGates(l, gateCriteria).isQualified;
+    });
+  } else if (opts?.reviewOnly) {
+    exportLeads = leads.filter(l => {
+      const gateCriteria = (run && 'researchIntent' in run && (run as any).researchIntent) ? (run as any).researchIntent : opts;
+      const res = evaluateLeadQualificationGates(l, gateCriteria);
+      return !res.isQualified && res.canonicalOutcome === 'REVIEW';
+    });
+  } else if (opts?.rejectedOnly) {
+    exportLeads = leads.filter(l => {
+      const gateCriteria = (run && 'researchIntent' in run && (run as any).researchIntent) ? (run as any).researchIntent : opts;
+      const res = evaluateLeadQualificationGates(l, gateCriteria);
+      return res.canonicalOutcome === 'REJECTED';
     });
   }
 
@@ -1497,7 +1577,19 @@ export function exportLeadsToCsv(
     'Canonical Page Slug',
     'Identity Confidence',
     'Relationship Type',
-    'Aliases'
+    'Aliases',
+    'Public Observed Phone',
+    'Public Observed Email',
+    'Phone Syntax Status',
+    'Email Syntax Status',
+    'Contact Evidence Source',
+    'Contact Conflict Status',
+    'Contact Quality State',
+    'Contact Verification State',
+    'Lead Priority Score',
+    'Prioritization Tier',
+    'Score Model Version',
+    'Score Explanation'
   ];
 
   const rows = exportLeads.map(l => [
@@ -1544,8 +1636,79 @@ export function exportLeadsToCsv(
     sanitizeCsvField(l.canonicalPageSlug || ''),
     sanitizeCsvField(l.identityConfidence || 'UNRESOLVED'),
     sanitizeCsvField(l.relationshipType || 'INDEPENDENT_BUSINESS'),
-    sanitizeCsvField((l.aliases || []).join('; '))
+    sanitizeCsvField((l.aliases || []).join('; ')),
+    sanitizeCsvField(l.businessPhone || (l.phones && l.phones[0]) || ''),
+    sanitizeCsvField(l.businessEmail || (l.emails && l.emails[0]) || ''),
+    sanitizeCsvField(l.contactProfile?.observedPhones?.[0]?.syntaxState || (l.businessPhone ? 'SYNTAX_VALID' : 'NOT_OBSERVED')),
+    sanitizeCsvField(l.contactProfile?.observedEmails?.[0]?.syntaxState || (l.businessEmail ? 'SYNTAX_VALID' : 'NOT_OBSERVED')),
+    sanitizeCsvField(l.contactProfile?.observedPhones?.[0]?.sourceSurface || l.contactProfile?.observedEmails?.[0]?.sourceSurface || (l.businessPhone || l.businessEmail ? 'AD_BODY_TEXT' : 'NOT_OBSERVED')),
+    sanitizeCsvField(l.contactProfile?.phoneConflictState || l.contactProfile?.emailConflictState || 'NOT_APPLICABLE'),
+    sanitizeCsvField(l.contactQualityState || l.contactProfile?.overallQualityState || (l.businessPhone || l.businessEmail ? 'OBSERVED_VALID_SYNTAX' : 'NOT_OBSERVED')),
+    sanitizeCsvField(l.contactProfile?.observedPhones?.[0]?.verificationStatus || l.contactProfile?.observedEmails?.[0]?.verificationStatus || (l.businessPhone || l.businessEmail ? 'UNPROBED_PUBLIC_CLAIM' : 'NOT_OBSERVED')),
+    sanitizeCsvField(l.leadScore !== undefined ? l.leadScore : 'N/A'),
+    sanitizeCsvField(l.prioritizationTier || 'UNRANKED'),
+    sanitizeCsvField(l.scoreModelVersion || 'leadnoria-scoring-v1'),
+    sanitizeCsvField(l.scoreExplanation || '')
   ]);
 
   return metaHeader + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
+}
+
+/**
+ * Generates deterministic, valid JSON containing complete structured lead records,
+ * supporting qualified-only, review-only, and rejected-only filters, full evidence,
+ * and formula injection immunity.
+ */
+export function exportLeadsToJson(
+  leads: ExtensionLead[],
+  runOrOptions?: ExtensionResearchRun | LeadExportOptions,
+  options?: LeadExportOptions
+): string {
+  let run: ExtensionResearchRun | undefined;
+  let opts: LeadExportOptions | undefined = options;
+
+  if (runOrOptions && typeof runOrOptions === 'object' && ('qualifiedOnly' in runOrOptions || 'reviewOnly' in runOrOptions || 'rejectedOnly' in runOrOptions || 'pretty' in runOrOptions)) {
+    opts = runOrOptions as LeadExportOptions;
+  } else if (runOrOptions && typeof runOrOptions === 'object' && ('runId' in runOrOptions || 'keywords' in runOrOptions)) {
+    run = runOrOptions as ExtensionResearchRun;
+  }
+
+  let exportLeads = leads;
+  if (opts?.qualifiedOnly) {
+    exportLeads = leads.filter(l => {
+      const gateCriteria = (run && 'researchIntent' in run && (run as any).researchIntent) ? (run as any).researchIntent : opts;
+      return evaluateLeadQualificationGates(l, gateCriteria).isQualified;
+    });
+  } else if (opts?.reviewOnly) {
+    exportLeads = leads.filter(l => {
+      const gateCriteria = (run && 'researchIntent' in run && (run as any).researchIntent) ? (run as any).researchIntent : opts;
+      const res = evaluateLeadQualificationGates(l, gateCriteria);
+      return !res.isQualified && res.canonicalOutcome === 'REVIEW';
+    });
+  } else if (opts?.rejectedOnly) {
+    exportLeads = leads.filter(l => {
+      const gateCriteria = (run && 'researchIntent' in run && (run as any).researchIntent) ? (run as any).researchIntent : opts;
+      const res = evaluateLeadQualificationGates(l, gateCriteria);
+      return res.canonicalOutcome === 'REJECTED';
+    });
+  }
+
+  const exportPayload = {
+    product: 'LeadNoria',
+    source: 'Meta Ad Library',
+    version: run?.engineVersion || '1.7.7',
+    exportedAt: new Date().toISOString(),
+    ...(run ? {
+      runId: run.runId,
+      researchName: run.researchName,
+      mode: run.mode,
+      locationName: run.locationName,
+      targetCountryCode: (run as any).researchIntent?.targetCountryCode || run.countryCode
+    } : {}),
+    totalLeads: exportLeads.length,
+    leads: exportLeads
+  };
+
+  const pretty = opts?.pretty !== false;
+  return pretty ? JSON.stringify(exportPayload, null, 2) : JSON.stringify(exportPayload);
 }

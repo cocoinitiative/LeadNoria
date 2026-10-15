@@ -19,12 +19,15 @@ import { compileResearchIntent, RELEVANCE_STRATEGY_VERSION, RELEVANCE_ENGINE_VER
 import {
   initBulkStore,
   saveRunRecord,
+  getRunRecord,
   saveBatch,
   getAllRelevantLeads,
   getAllStoredLeads,
   getSeenAdIds,
   getSeenEntityKeys,
-  getLatestCheckpoint
+  getLatestCheckpoint,
+  recoverInterruptedRun,
+  reconcileAndRecoverRun
 } from './bulkStore.ts';
 import { processBatch } from './bulkProcessor.ts';
 import {
@@ -58,13 +61,13 @@ const SCHEMA_VERSION = 1;
 const STALE_JOB_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
 
 // In-memory cancellation & pause flags (keyed by runId)
-const cancelledRuns = new Set<string>();
-const pausedRuns = new Set<string>();
+export const cancelledRuns = new Set<string>();
+export const pausedRuns = new Set<string>();
 
 /**
  * Persists active run state to chrome.storage.local
  */
-async function saveActiveRun(run: ExtensionResearchRun): Promise<void> {
+export async function saveActiveRun(run: ExtensionResearchRun): Promise<void> {
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
     run.lastUpdatedAt = new Date().toISOString();
     run.schemaVersion = SCHEMA_VERSION;
@@ -76,30 +79,43 @@ async function saveActiveRun(run: ExtensionResearchRun): Promise<void> {
 }
 
 /**
- * Detects and marks stale jobs as RECOVERY_REQUIRED
+ * Detects and reconciles in-flight or interrupted jobs on service worker startup
  */
-async function checkStaleJobs(): Promise<void> {
+export async function checkStaleJobs(): Promise<void> {
   if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) return;
 
   const data = await chrome.storage.local.get(['activeResearchRun']);
   const run = data.activeResearchRun as ExtensionResearchRun | undefined;
 
   if (run && ['STARTING', 'NAVIGATING', 'COLLECTING', 'NORMALIZING'].includes(run.status)) {
-    const lastUpdate = new Date(run.lastUpdatedAt).getTime();
-    const now = Date.now();
+    console.warn('[service-worker] Detected in-flight job on service worker restart:', run.runId);
 
-    if (now - lastUpdate > STALE_JOB_THRESHOLD_MS) {
-      console.warn('[service-worker] Detected stale job:', run.runId);
+    // Check if run was cancelled in bulkStore
+    const persisted = await getRunRecord(run.runId);
+    if (persisted?.status === 'CANCELLED' || run.status === 'CANCELLED') {
+      run.status = 'CANCELLED';
+      run.stopReason = 'USER_CANCELLED';
+    } else {
+      // Reconcile and transition to RECOVERY_REQUIRED so user is never locked out
+      const rec = await reconcileAndRecoverRun(run.runId, 'BROWSER_INTERRUPTED');
       run.status = 'RECOVERY_REQUIRED';
       run.stopReason = 'BROWSER_INTERRUPTED';
-      run.logs.push({
-        timestamp: new Date().toLocaleTimeString(),
-        message: 'Research session was interrupted due to browser inactivity or background worker restart. Recovery required.',
-        stage: 'SYSTEM'
-      });
-      await saveActiveRun(run);
-      await appendToHistory(run);
+      run.leads = rec.run.leads;
+      run.counters = rec.run.counters;
+      run.totalAdsInspected = rec.run.totalAdsInspected;
     }
+
+    run.lastUpdatedAt = new Date().toISOString();
+    if (!run.logs) {
+      run.logs = [];
+    }
+    run.logs.push({
+      timestamp: new Date().toLocaleTimeString(),
+      message: 'Background service worker restarted while research was in flight. State safely reconciled and preserved.',
+      stage: 'SYSTEM'
+    });
+    await saveActiveRun(run);
+    await appendToHistory(run);
   }
 }
 
@@ -124,7 +140,12 @@ async function appendToHistory(run: ExtensionResearchRun): Promise<void> {
 /**
  * Emits progress event to any active extension views (sidepanel/popup)
  */
-function broadcastProgress(run: ExtensionResearchRun, stage: string, logMessage: string): void {
+export function broadcastProgress(run: ExtensionResearchRun, stage: string, logMessage: string): void {
+  if (cancelledRuns.has(run.runId) && run.status !== 'CANCELLED') {
+    run.status = 'CANCELLED';
+    run.stopReason = 'USER_CANCELLED';
+    stage = 'CANCELLED';
+  }
   const timestamp = new Date().toLocaleTimeString();
   run.logs.push({ timestamp, message: logMessage, stage });
   // Keep logs bounded
@@ -237,7 +258,7 @@ const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 /**
  * Main research execution pipeline in Chrome Extension
  */
-async function executeResearchPipeline(
+export async function executeResearchPipeline(
   payload: StartResearchPayload,
   providedRunId?: string,
   providedRun?: ExtensionResearchRun
@@ -371,8 +392,12 @@ async function executeResearchPipeline(
   // If resuming, populate existing entities with all stored leads
   const existingLeads = await getAllStoredLeads(runId);
   for (const lead of existingLeads) {
-    const canonicalKey = lead.canonicalName ? lead.canonicalName.toLowerCase() : lead.name.toLowerCase();
-    existingEntitiesMap.set(canonicalKey, lead);
+    const primaryKey = lead.canonicalKey || (lead.canonicalPageId ? `fb_${lead.canonicalPageId}` : (lead.canonicalPageSlug ? `fbslug_${lead.canonicalPageSlug}` : (lead.canonicalName ? `name_${lead.canonicalName.toLowerCase().replace(/[^a-z0-9]/g, '_')}` : `name_${lead.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`)));
+    existingEntitiesMap.set(primaryKey, lead);
+    if (lead.canonicalName) existingEntitiesMap.set(lead.canonicalName.toLowerCase(), lead);
+    if (lead.name) existingEntitiesMap.set(lead.name.toLowerCase(), lead);
+    if (lead.canonicalPageId) existingEntitiesMap.set(`fb_${lead.canonicalPageId}`, lead);
+    if (lead.canonicalPageSlug) existingEntitiesMap.set(`fbslug_${lead.canonicalPageSlug}`, lead);
   }
 
   await saveActiveRun(initialRun);
@@ -636,9 +661,13 @@ async function executeResearchPipeline(
             checkpoint: {
               runId,
               batchIndex,
+              monotonicRevision: batchIndex,
               timestamp: new Date().toISOString(),
+              schemaVersion: 2,
               activeKeywordIndex: qi,
+              activeQueryIndex: qi,
               currentKeyword,
+              completedKeywords: [...completedKeywords],
               rawAdsCount: batchResult.counters.rawAds,
               normalizedCandidatesCount: batchResult.counters.normalizedCandidates,
               uniqueEntitiesCount: batchResult.counters.uniqueEntitiesObserved || 0,
@@ -648,7 +677,10 @@ async function executeResearchPipeline(
               duplicatesRemovedCount: batchResult.counters.duplicatesRemoved,
               finalUniqueRelevantLeads: batchResult.counters.finalUniqueRelevantLeads || batchResult.counters.finalUniqueLeads,
               seenLibraryIdsCount: seenAdLibraryIds.size,
-              seenEntityKeysCount: seenEntityKeys.size
+              seenEntityKeysCount: seenEntityKeys.size,
+              status: cancelledRuns.has(runId) ? 'CANCELLED' : initialRun.status,
+              stopReason: cancelledRuns.has(runId) ? 'USER_CANCELLED' : initialRun.stopReason,
+              isRecoverable: true
             }
           });
 
@@ -798,7 +830,11 @@ async function executeResearchPipeline(
     }
 
   } catch (err: any) {
-    if (existingEntitiesMap.size > 0) {
+    if (cancelledRuns.has(runId) || initialRun.status === 'CANCELLED') {
+      initialRun.status = 'CANCELLED';
+      initialRun.stopReason = 'USER_CANCELLED';
+      broadcastProgress(initialRun, 'CANCELLED', `Research was explicitly cancelled by user.`);
+    } else if (existingEntitiesMap.size > 0) {
       initialRun.status = 'PARTIAL';
       initialRun.stopReason = 'PARTIAL_ERROR';
       if (!initialRun.warningMessages) initialRun.warningMessages = [];
@@ -817,6 +853,11 @@ async function executeResearchPipeline(
       try {
         await chrome.tabs.remove(currentTabId);
       } catch {}
+    }
+
+    if (cancelledRuns.has(runId) || initialRun.status === 'CANCELLED') {
+      initialRun.status = 'CANCELLED';
+      initialRun.stopReason = 'USER_CANCELLED';
     }
 
     initialRun.completedAt = new Date().toISOString();
@@ -947,16 +988,49 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
       if (runId) {
         cancelledRuns.add(runId);
       }
-      chrome.storage.local.get(['activeResearchRun'], (data: Record<string, any>) => {
+      chrome.storage.local.get(['activeResearchRun'], async (data: Record<string, any>) => {
         if (data && data.activeResearchRun) {
           const run = data.activeResearchRun as ExtensionResearchRun;
-          run.status = 'CANCELLED';
-          run.stopReason = 'USER_CANCELLED';
-          saveActiveRun(run).catch(() => {});
+          if (!runId || run.runId === runId) {
+            run.status = 'CANCELLED';
+            run.stopReason = 'USER_CANCELLED';
+            run.completedAt = run.completedAt || new Date().toISOString();
+            run.lastUpdatedAt = new Date().toISOString();
+            run.logs.push({
+              timestamp: new Date().toLocaleTimeString(),
+              message: 'Research was explicitly cancelled by user.',
+              stage: 'CANCELLED'
+            });
+            await saveActiveRun(run).catch(() => {});
+            await saveRunRecord(run).catch(() => {});
+            await appendToHistory(run).catch(() => {});
+          }
         }
       });
       sendResponse({ success: true, message: 'Cancellation signal sent.' });
       return false;
+    }
+
+    if (message.type === 'RECOVER_RUN') {
+      const targetRunId = message.payload?.runId;
+      if (!targetRunId) {
+        sendResponse({ success: false, error: 'runId required for recovery' });
+        return false;
+      }
+      reconcileAndRecoverRun(targetRunId)
+        .then(async (result) => {
+          await saveActiveRun(result.run);
+          await appendToHistory(result.run);
+          sendResponse({
+            success: true,
+            run: result.run,
+            diagnostics: result.diagnostics
+          });
+        })
+        .catch(err => {
+          sendResponse({ success: false, error: err.message });
+        });
+      return true;
     }
 
     if (message.type === 'PAUSE_RESEARCH') {

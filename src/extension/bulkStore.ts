@@ -21,7 +21,8 @@ import type {
   AdvertiserExpansionProvenance,
   AdLevelEvidence,
   GeographicClassification,
-  RelevanceDecision
+  RelevanceDecision,
+  CheckpointRecord
 } from './types.ts';
 import { classifyCta, classifyDestination, aggregateAdEvidence } from './destinationClassifier.ts';
 import { evaluateLeadQualificationGates } from './qualificationGate.ts';
@@ -133,6 +134,7 @@ export function normalizeStoredLead(raw: any): ExtensionLead {
   const pageNorm = normalizeFacebookPage(raw.facebookPageUrl, raw.canonicalPageId || raw.facebookPageId);
   const canonicalPageId = raw.canonicalPageId || pageNorm.pageId || undefined;
   const canonicalPageSlug = raw.canonicalPageSlug || pageNorm.pageSlug || undefined;
+  const canonicalKey = raw.canonicalKey || (canonicalPageId ? `fb_${canonicalPageId}` : (canonicalPageSlug ? `fbslug_${canonicalPageSlug}` : (canonicalName ? `name_${canonicalName.toLowerCase().replace(/[^a-z0-9]/g, '_')}` : `name_${cleanName.toLowerCase().replace(/[^a-z0-9]/g, '_')}`)));
   const aliases = Array.isArray(raw.aliases)
     ? Array.from(new Set(raw.aliases.filter((a: any): a is string => typeof a === 'string' && a.trim().length > 0)))
     : [];
@@ -141,6 +143,7 @@ export function normalizeStoredLead(raw: any): ExtensionLead {
     ...raw,
     name: cleanName,
     canonicalName,
+    canonicalKey,
     canonicalPageId,
     canonicalPageSlug,
     aliases,
@@ -171,7 +174,61 @@ export function normalizeStoredLead(raw: any): ExtensionLead {
     status: qualResult.status,
     qualificationFailedGates: qualResult.failedGates,
     qualificationReasons: qualResult.reasons,
+    leadScore: typeof raw.leadScore === 'number' ? raw.leadScore : undefined,
+    normalizedScore: typeof raw.normalizedScore === 'number' ? raw.normalizedScore : (typeof raw.leadScore === 'number' ? +(raw.leadScore / 100).toFixed(2) : undefined),
+    prioritizationTier: raw.prioritizationTier || undefined,
+    scoreConfidence: raw.scoreConfidence || undefined,
+    scoreBreakdown: raw.scoreBreakdown && typeof raw.scoreBreakdown === 'object' ? raw.scoreBreakdown : undefined,
+    scoreModelVersion: raw.scoreModelVersion || undefined,
+    scoreExplanation: raw.scoreExplanation || undefined,
     schemaVersion: 2
+  };
+}
+
+/**
+ * Validates and normalizes a checkpoint record according to Phase 6 schema rules.
+ * Handles corrupt data, missing fields, and legacy v1 checkpoints.
+ */
+export function validateCheckpoint(raw: any): CheckpointRecord | null {
+  if (!raw || typeof raw !== 'object') return null;
+  if (!raw.runId || typeof raw.runId !== 'string') return null;
+  const batchIndex = typeof raw.batchIndex === 'number' ? raw.batchIndex : parseInt(raw.batchIndex, 10);
+  if (isNaN(batchIndex) || batchIndex < 0) return null;
+
+  // Schema version validation: default to 1 for legacy checkpoints, 2 for current
+  const schemaVersion = typeof raw.schemaVersion === 'number' ? raw.schemaVersion : 1;
+  if (schemaVersion > 2) {
+    // Unsupported future schema version
+    return null;
+  }
+
+  const activeKeywordIndex = typeof raw.activeKeywordIndex === 'number' ? raw.activeKeywordIndex : 0;
+  const activeQueryIndex = typeof raw.activeQueryIndex === 'number' ? raw.activeQueryIndex : activeKeywordIndex;
+  const monotonicRevision = typeof raw.monotonicRevision === 'number' ? raw.monotonicRevision : batchIndex;
+
+  return {
+    runId: raw.runId,
+    batchIndex,
+    monotonicRevision,
+    timestamp: typeof raw.timestamp === 'string' ? raw.timestamp : new Date().toISOString(),
+    schemaVersion,
+    activeKeywordIndex,
+    activeQueryIndex,
+    currentKeyword: typeof raw.currentKeyword === 'string' ? raw.currentKeyword : '',
+    completedKeywords: Array.isArray(raw.completedKeywords) ? raw.completedKeywords : [],
+    rawAdsCount: typeof raw.rawAdsCount === 'number' && raw.rawAdsCount >= 0 ? raw.rawAdsCount : 0,
+    normalizedCandidatesCount: typeof raw.normalizedCandidatesCount === 'number' && raw.normalizedCandidatesCount >= 0 ? raw.normalizedCandidatesCount : 0,
+    uniqueEntitiesCount: typeof raw.uniqueEntitiesCount === 'number' && raw.uniqueEntitiesCount >= 0 ? raw.uniqueEntitiesCount : 0,
+    relevantEntitiesCount: typeof raw.relevantEntitiesCount === 'number' && raw.relevantEntitiesCount >= 0 ? raw.relevantEntitiesCount : 0,
+    uncertainEntitiesCount: typeof raw.uncertainEntitiesCount === 'number' && raw.uncertainEntitiesCount >= 0 ? raw.uncertainEntitiesCount : 0,
+    notRelevantEntitiesCount: typeof raw.notRelevantEntitiesCount === 'number' && raw.notRelevantEntitiesCount >= 0 ? raw.notRelevantEntitiesCount : 0,
+    duplicatesRemovedCount: typeof raw.duplicatesRemovedCount === 'number' && raw.duplicatesRemovedCount >= 0 ? raw.duplicatesRemovedCount : 0,
+    finalUniqueRelevantLeads: typeof raw.finalUniqueRelevantLeads === 'number' && raw.finalUniqueRelevantLeads >= 0 ? raw.finalUniqueRelevantLeads : 0,
+    seenLibraryIdsCount: typeof raw.seenLibraryIdsCount === 'number' && raw.seenLibraryIdsCount >= 0 ? raw.seenLibraryIdsCount : 0,
+    seenEntityKeysCount: typeof raw.seenEntityKeysCount === 'number' && raw.seenEntityKeysCount >= 0 ? raw.seenEntityKeysCount : 0,
+    status: raw.status,
+    stopReason: raw.stopReason,
+    isRecoverable: raw.isRecoverable !== false
   };
 }
 
@@ -182,23 +239,7 @@ export interface BulkBatchPayload {
   evidence?: Array<{ canonicalKey: string; evidence: any }>;
   uncertainEntities?: UncertainEntityRecord[];
   advertiserExpansions?: AdvertiserExpansionProvenance[];
-  checkpoint: {
-    runId: string;
-    batchIndex: number;
-    timestamp: string;
-    activeKeywordIndex: number;
-    currentKeyword: string;
-    rawAdsCount: number;
-    normalizedCandidatesCount: number;
-    uniqueEntitiesCount: number;
-    relevantEntitiesCount: number;
-    uncertainEntitiesCount: number;
-    notRelevantEntitiesCount: number;
-    duplicatesRemovedCount: number;
-    finalUniqueRelevantLeads: number;
-    seenLibraryIdsCount: number;
-    seenEntityKeysCount: number;
-  };
+  checkpoint: CheckpointRecord;
 }
 
 export interface StorageStats {
@@ -257,7 +298,14 @@ class MemoryStoreFallback {
 
     if (payload.advertiserExpansions) {
       const list = this.advertiserExpansions.get(runId) || [];
-      list.push(...payload.advertiserExpansions);
+      for (const exp of payload.advertiserExpansions) {
+        const existingIdx = list.findIndex(e => e.sourceEntityId === exp.sourceEntityId);
+        if (existingIdx >= 0) {
+          list[existingIdx] = exp;
+        } else {
+          list.push(exp);
+        }
+      }
       this.advertiserExpansions.set(runId, list);
     }
 
@@ -319,14 +367,17 @@ class MemoryStoreFallback {
     return new Set(this.dedupEntities.get(runId) || []);
   }
 
-  async getLatestCheckpoint(runId: string): Promise<any | null> {
-    let latestIndex = -1;
-    let latestCp: any = null;
+  async getLatestCheckpoint(runId: string): Promise<CheckpointRecord | null> {
+    let latestRev = -1;
+    let latestCp: CheckpointRecord | null = null;
     for (const [key, cp] of this.checkpoints.entries()) {
       if (key.startsWith(`${runId}_`)) {
-        if (cp.batchIndex > latestIndex) {
-          latestIndex = cp.batchIndex;
-          latestCp = cp;
+        const validated = validateCheckpoint(cp);
+        if (!validated) continue;
+        const rev = validated.monotonicRevision ?? validated.batchIndex;
+        if (rev > latestRev) {
+          latestRev = rev;
+          latestCp = validated;
         }
       }
     }
@@ -857,14 +908,14 @@ export async function getSeenEntityKeys(runId: string): Promise<Set<string>> {
 /**
  * Retrieves latest checkpoint for a run
  */
-export async function getLatestCheckpoint(runId: string): Promise<any | null> {
+export async function getLatestCheckpoint(runId: string): Promise<CheckpointRecord | null> {
   if (!hasIndexedDB()) {
     return memoryFallback.getLatestCheckpoint(runId);
   }
 
   try {
     const db = await openDB();
-    return await new Promise<any | null>((resolve, reject) => {
+    return await new Promise<CheckpointRecord | null>((resolve, reject) => {
       const tx = db.transaction('checkpoints', 'readonly');
       const store = tx.objectStore('checkpoints');
       const index = store.index('by_run');
@@ -874,8 +925,12 @@ export async function getLatestCheckpoint(runId: string): Promise<any | null> {
         db.close();
         const items = (request.result || []) as any[];
         if (items.length === 0) return resolve(null);
-        items.sort((a, b) => b.batchIndex - a.batchIndex);
-        resolve(items[0]);
+        const valid = items
+          .map(cp => validateCheckpoint(cp))
+          .filter((cp): cp is CheckpointRecord => cp !== null);
+        if (valid.length === 0) return resolve(null);
+        valid.sort((a, b) => (b.monotonicRevision ?? b.batchIndex) - (a.monotonicRevision ?? a.batchIndex));
+        resolve(valid[0]);
       };
 
       request.onerror = () => {
@@ -985,11 +1040,19 @@ export interface RecoveryDiagnostics {
   runId: string;
   hasCheckpoint: boolean;
   checkpointBatchIndex?: number;
+  checkpointRevision?: number;
   totalPersistedAds: number;
   totalPersistedEntities: number;
   totalRelevantLeads: number;
   isConsistent: boolean;
+  isRecoverable: boolean;
+  recoveryAction: 'RESUME_AVAILABLE' | 'ALREADY_COMPLETED' | 'CANCELLED_PRESERVED' | 'CORRUPTED_CHECKPOINT' | 'EMPTY_RUN' | 'REVIEW_REQUIRED';
   discrepancies: string[];
+  reconciledCounters: {
+    rawAds: number;
+    uniqueEntities: number;
+    relevantEntities: number;
+  };
 }
 
 /**
@@ -1013,15 +1076,175 @@ export async function recoverInterruptedRun(runId: string): Promise<RecoveryDiag
     }
   }
 
+  const run = await getRunRecord(runId);
+  let recoveryAction: RecoveryDiagnostics['recoveryAction'] = 'REVIEW_REQUIRED';
+  let isRecoverable = false;
+
+  if (run?.status === 'CANCELLED' || cp?.status === 'CANCELLED') {
+    recoveryAction = 'CANCELLED_PRESERVED';
+    isRecoverable = false;
+  } else if (run?.status === 'COMPLETED' || cp?.status === 'COMPLETED') {
+    recoveryAction = 'ALREADY_COMPLETED';
+    isRecoverable = false;
+  } else if (stats.totalAds === 0 && stats.totalEntities === 0 && !cp) {
+    recoveryAction = 'EMPTY_RUN';
+    isRecoverable = false;
+  } else if (cp && discrepancies.length === 0) {
+    recoveryAction = 'RESUME_AVAILABLE';
+    isRecoverable = true;
+  } else if (cp && discrepancies.length > 0) {
+    recoveryAction = 'REVIEW_REQUIRED';
+    isRecoverable = true; // partial recovery with reconciliation
+  } else {
+    recoveryAction = 'CORRUPTED_CHECKPOINT';
+    isRecoverable = stats.totalEntities > 0;
+  }
+
   return {
     runId,
     hasCheckpoint: !!cp,
     checkpointBatchIndex: cp?.batchIndex,
+    checkpointRevision: cp?.monotonicRevision ?? cp?.batchIndex,
     totalPersistedAds: stats.totalAds,
     totalPersistedEntities: stats.totalEntities,
     totalRelevantLeads: stats.totalRelevantLeads,
     isConsistent: discrepancies.length === 0,
-    discrepancies
+    isRecoverable,
+    recoveryAction,
+    discrepancies,
+    reconciledCounters: {
+      rawAds: stats.totalAds,
+      uniqueEntities: stats.totalEntities,
+      relevantEntities: stats.totalRelevantLeads
+    }
   };
 }
 
+/**
+ * Safely recovers and reconciles an interrupted run in persistent storage:
+ * - Restores persisted records without repeating network actions
+ * - Preserves user cancellation intent
+ * - Reconciles counters to match actual committed records
+ * - Marks status safely as COMPLETED or PARTIAL (or CANCELLED)
+ * - Strictly idempotent across repeated invocations
+ */
+export async function reconcileAndRecoverRun(
+  runId: string,
+  explicitReason?: string
+): Promise<{ success: boolean; run: ExtensionResearchRun; diagnostics: RecoveryDiagnostics }> {
+  const diagnostics = await recoverInterruptedRun(runId);
+  let existingRun = await getRunRecord(runId);
+
+  const relevantLeads = await getAllRelevantLeads(runId);
+  const latestCp = await getLatestCheckpoint(runId);
+  const now = new Date().toISOString();
+
+  if (!existingRun) {
+    existingRun = {
+      runId,
+      researchName: `Recovered Run ${runId}`,
+      mode: 'CUSTOM',
+      keywords: latestCp?.completedKeywords && latestCp.completedKeywords.length > 0 ? latestCp.completedKeywords : [latestCp?.currentKeyword || 'recovered'],
+      countryCode: 'US',
+      locationName: 'Recovered Location',
+      status: 'PARTIAL',
+      leads: relevantLeads.slice(0, 50),
+      counters: {
+        rawAds: diagnostics.totalPersistedAds,
+        normalizedCandidates: diagnostics.totalPersistedAds,
+        relevantCandidates: diagnostics.totalRelevantLeads,
+        uncertainCandidates: 0,
+        notRelevantCandidates: 0,
+        duplicatesRemoved: Math.max(0, diagnostics.totalPersistedAds - diagnostics.totalPersistedEntities),
+        finalUniqueLeads: diagnostics.totalRelevantLeads,
+        finalUniqueRelevantLeads: diagnostics.totalRelevantLeads,
+        uniqueEntitiesObserved: diagnostics.totalPersistedEntities,
+        relevantEntities: diagnostics.totalRelevantLeads
+      },
+      logs: [
+        {
+          timestamp: new Date().toLocaleTimeString(),
+          message: 'Run synthesized from durable persistent checkpoints and records.',
+          stage: 'RECOVERY'
+        }
+      ],
+      startedAt: latestCp?.timestamp || now,
+      completedAt: now,
+      lastUpdatedAt: now,
+      schemaVersion: 2,
+      totalAdsInspected: diagnostics.totalPersistedAds
+    };
+  }
+
+  // Preserve user cancellation
+  if (existingRun.status === 'CANCELLED' || latestCp?.status === 'CANCELLED' || explicitReason === 'USER_CANCELLED') {
+    existingRun.status = 'CANCELLED';
+    existingRun.stopReason = 'USER_CANCELLED';
+    existingRun.completedAt = existingRun.completedAt || now;
+    existingRun.lastUpdatedAt = now;
+    existingRun.leads = relevantLeads.slice(0, 50);
+    existingRun.totalAdsInspected = diagnostics.totalPersistedAds;
+    existingRun.counters = {
+      ...(existingRun.counters || {
+        rawAds: 0,
+        normalizedCandidates: 0,
+        relevantCandidates: 0,
+        uncertainCandidates: 0,
+        notRelevantCandidates: 0,
+        duplicatesRemoved: 0,
+        finalUniqueLeads: 0
+      }),
+      rawAds: diagnostics.totalPersistedAds,
+      finalUniqueLeads: diagnostics.totalRelevantLeads,
+      finalUniqueRelevantLeads: diagnostics.totalRelevantLeads,
+      uniqueEntitiesObserved: diagnostics.totalPersistedEntities,
+      relevantEntities: diagnostics.totalRelevantLeads
+    };
+    await saveRunRecord(existingRun);
+    return { success: true, run: existingRun, diagnostics };
+  }
+
+  // Reconcile status based on progress
+  const targetQuota = existingRun.targetLeadCount || existingRun.maxResults || 5000;
+  if (diagnostics.totalRelevantLeads >= targetQuota) {
+    existingRun.status = 'COMPLETED';
+    existingRun.stopReason = 'TARGET_REACHED';
+  } else {
+    existingRun.status = 'PARTIAL';
+    existingRun.stopReason = explicitReason || (diagnostics.isConsistent ? 'SOURCE_EXHAUSTED' : 'BROWSER_INTERRUPTED');
+  }
+
+  existingRun.completedAt = existingRun.completedAt || now;
+  existingRun.lastUpdatedAt = now;
+  existingRun.leads = relevantLeads.slice(0, 50);
+  existingRun.totalAdsInspected = diagnostics.totalPersistedAds;
+  existingRun.counters = {
+    ...(existingRun.counters || {
+      rawAds: 0,
+      normalizedCandidates: 0,
+      relevantCandidates: 0,
+      uncertainCandidates: 0,
+      notRelevantCandidates: 0,
+      duplicatesRemoved: 0,
+      finalUniqueLeads: 0
+    }),
+    rawAds: diagnostics.totalPersistedAds,
+    finalUniqueLeads: diagnostics.totalRelevantLeads,
+    finalUniqueRelevantLeads: diagnostics.totalRelevantLeads,
+    uniqueEntitiesObserved: diagnostics.totalPersistedEntities,
+    relevantEntities: diagnostics.totalRelevantLeads
+  };
+
+  if (!existingRun.logs) {
+    existingRun.logs = [];
+  }
+
+  existingRun.logs.push({
+    timestamp: new Date().toLocaleTimeString(),
+    message: `Run recovered and reconciled. Preserved ${diagnostics.totalRelevantLeads} leads from ${diagnostics.totalPersistedAds} ads.`,
+    stage: 'RECOVERY'
+  });
+
+  await saveRunRecord(existingRun);
+  return { success: true, run: existingRun, diagnostics };
+}

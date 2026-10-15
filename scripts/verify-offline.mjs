@@ -53,7 +53,17 @@ const TEST_SUITES = [
   { name: 'Phase 3 Niche Relevance & Qualification Remediation', file: 'tests/test-phase03-niche-qualification-remediation.mjs' },
   { name: 'Phase 4 Advertiser Identity & Deduplication', file: 'tests/test-phase04-identity-deduplication.mjs' },
   { name: 'Phase 5 Discovery Coverage & Extraction Reliability', file: 'tests/test-phase05-discovery-extraction.mjs' },
-  { name: 'Master Audit End-to-End Verification', file: 'tests/test-master-audit-e2e.mjs' }
+  { name: 'Master Audit End-to-End Verification', file: 'tests/test-master-audit-e2e.mjs' },
+  { name: 'Phase 6 Storage, Checkpoint & Recovery', file: 'tests/test-phase06-storage-checkpoint-recovery.mjs' },
+  { name: 'Phase 7 Contact Data Quality & Evidence', file: 'tests/test-phase07-contact-data-quality.mjs' },
+  { name: 'Phase 8 Lead Scoring & Prioritization', file: 'tests/test-phase08-lead-scoring-prioritization.mjs' },
+  { name: 'Phase 9 CSV/JSON Export & Data Integrity', file: 'tests/test-phase09-export-data-integrity.mjs' },
+  { name: 'Phase 10 UI, Filters & Research Workflow', file: 'tests/test-phase10-ui-filters-research-workflow.mjs' },
+  { name: 'Phase 11 Performance & Scalability', file: 'tests/test-phase11-performance-scalability.mjs' },
+  { name: 'Phase 12 Automated Testing & Ground-Truth Validation', file: 'tests/test-phase12-ground-truth-validation.mjs' },
+  { name: 'Phase 13 Documentation, Build & Dependency Audit', file: 'tests/test-phase13-documentation-build-dependency-audit.mjs' },
+  { name: 'Phase 14 Final Release Gate & New Artifact', file: 'tests/test-phase14-final-release-gate.mjs' },
+  { name: 'Master E2E Business Classification (Scenarios A-O)', file: 'tests/test-e2e-country-website-cta-classification.mjs' }
 ];
 
 function sha256(filePath) {

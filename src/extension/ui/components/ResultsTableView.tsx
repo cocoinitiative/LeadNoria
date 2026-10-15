@@ -50,6 +50,14 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [sourceFilter, setSourceFilter] = useState<string>('ALL');
   const [qualificationFilter, setQualificationFilter] = useState<string>('ALL');
+  const [targetCountryFilter, setTargetCountryFilter] = useState<string>('ALL');
+  const [geoClassificationFilter, setGeoClassificationFilter] = useState<string>('ALL');
+  const [tierFilter, setTierFilter] = useState<string>('ALL');
+  const [ctaTypeFilter, setCtaTypeFilter] = useState<string>('ALL');
+  const [destinationTypeFilter, setDestinationTypeFilter] = useState<string>('ALL');
+  const [conflictFilter, setConflictFilter] = useState<string>('ALL');
+  const [minScore, setMinScore] = useState<string>('');
+  const [maxScore, setMaxScore] = useState<string>('');
   const [freshnessFilter, setFreshnessFilter] = useState<string>('ALL');
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
   const [requirePhone, setRequirePhone] = useState(false);
@@ -67,7 +75,7 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
     message: string;
   } | null>(null);
 
-  // Derive unique categories for filter dropdown
+  // Derive unique options for filter dropdowns
   const availableCategories = useMemo(() => {
     const set = new Set<string>();
     for (const r of results) {
@@ -75,6 +83,71 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
     }
     return Array.from(set).sort();
   }, [results]);
+
+  const availableTargetCountries = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of results) {
+      if (r.targetCountryCode) set.add(r.targetCountryCode);
+    }
+    return Array.from(set).sort();
+  }, [results]);
+
+  const availableCtaTypes = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of results) {
+      if (r.ctaType && r.ctaType !== 'UNKNOWN') set.add(r.ctaType);
+    }
+    return Array.from(set).sort();
+  }, [results]);
+
+  const availableDestinationTypes = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of results) {
+      if (r.destinationType && r.destinationType !== 'UNKNOWN') set.add(r.destinationType);
+    }
+    return Array.from(set).sort();
+  }, [results]);
+
+  const hasActiveFilters = Boolean(
+    searchTerm.trim() !== '' ||
+    sourceFilter !== 'ALL' ||
+    qualificationFilter !== 'ALL' ||
+    targetCountryFilter !== 'ALL' ||
+    geoClassificationFilter !== 'ALL' ||
+    tierFilter !== 'ALL' ||
+    ctaTypeFilter !== 'ALL' ||
+    destinationTypeFilter !== 'ALL' ||
+    conflictFilter !== 'ALL' ||
+    minScore !== '' ||
+    maxScore !== '' ||
+    freshnessFilter !== 'ALL' ||
+    categoryFilter !== 'ALL' ||
+    requirePhone ||
+    requireEmail ||
+    requireWebsite ||
+    requirePerson
+  );
+
+  const handleClearFilters = () => {
+    setSearchTerm('');
+    setSourceFilter('ALL');
+    setQualificationFilter('ALL');
+    setTargetCountryFilter('ALL');
+    setGeoClassificationFilter('ALL');
+    setTierFilter('ALL');
+    setCtaTypeFilter('ALL');
+    setDestinationTypeFilter('ALL');
+    setConflictFilter('ALL');
+    setMinScore('');
+    setMaxScore('');
+    setFreshnessFilter('ALL');
+    setCategoryFilter('ALL');
+    setRequirePhone(false);
+    setRequireEmail(false);
+    setRequireWebsite(false);
+    setRequirePerson(false);
+    setPage(1);
+  };
 
   // Filter & Search Logic
   const filteredResults = useMemo(() => {
@@ -106,8 +179,65 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
       }
 
       // Qualification filter
-      if (qualificationFilter !== 'ALL' && r.qualificationState !== qualificationFilter) {
+      if (qualificationFilter !== 'ALL') {
+        if (qualificationFilter === 'QUALIFIED' && r.qualificationState !== 'QUALIFIED') return false;
+        if (qualificationFilter === 'REVIEW_REQUIRED' && r.qualificationState !== 'REVIEW_REQUIRED' && r.qualificationState !== 'UNCERTAIN') return false;
+        if (qualificationFilter === 'NOT_QUALIFIED' && r.qualificationState !== 'NOT_QUALIFIED') return false;
+        if (qualificationFilter === 'BLOCKED' && r.qualificationState !== 'BLOCKED') return false;
+        if (qualificationFilter === 'UNASSESSED' && r.qualificationState !== 'UNASSESSED') return false;
+      }
+
+      // Target country filter
+      if (targetCountryFilter !== 'ALL' && r.targetCountryCode !== targetCountryFilter) {
         return false;
+      }
+
+      // Geographic classification filter
+      if (geoClassificationFilter !== 'ALL') {
+        const geo = r.geographicClassification || (r.businessCountryCode ? 'LOCAL_VERIFIED' : 'LOCATION_UNKNOWN');
+        if (geo !== geoClassificationFilter) return false;
+      }
+
+      // Prioritization Tier filter
+      if (tierFilter !== 'ALL') {
+        const t = r.prioritizationTier || r.canonicalRecord?.prioritizationTier || 'UNRANKED';
+        if (t !== tierFilter) return false;
+      }
+
+      // Score range filter
+      const score = r.qualificationScore !== undefined ? r.qualificationScore : r.canonicalRecord?.leadScore;
+      if (minScore !== '' && !isNaN(Number(minScore))) {
+        if (score === undefined || score < Number(minScore)) return false;
+      }
+      if (maxScore !== '' && !isNaN(Number(maxScore))) {
+        if (score === undefined || score > Number(maxScore)) return false;
+      }
+
+      // CTA type filter
+      if (ctaTypeFilter !== 'ALL') {
+        const cta = r.ctaType || r.canonicalRecord?.primaryCtaType || 'UNKNOWN';
+        if (cta !== ctaTypeFilter) return false;
+      }
+
+      // Destination type filter
+      if (destinationTypeFilter !== 'ALL') {
+        const dest = r.destinationType || r.canonicalRecord?.primaryDestinationType || 'UNKNOWN';
+        if (dest !== destinationTypeFilter) return false;
+      }
+
+      // Contact conflict filter
+      if (conflictFilter === 'CONFLICT_ONLY') {
+        const hasConflict = r.phoneConflictState === 'PHONE_CONFLICT' ||
+          r.emailConflictState === 'EMAIL_CONFLICT' ||
+          r.canonicalRecord?.contactProfile?.phoneConflict ||
+          r.canonicalRecord?.contactProfile?.emailConflict;
+        if (!hasConflict) return false;
+      } else if (conflictFilter === 'NO_CONFLICT') {
+        const hasConflict = r.phoneConflictState === 'PHONE_CONFLICT' ||
+          r.emailConflictState === 'EMAIL_CONFLICT' ||
+          r.canonicalRecord?.contactProfile?.phoneConflict ||
+          r.canonicalRecord?.contactProfile?.emailConflict;
+        if (hasConflict) return false;
       }
 
       // Freshness filter
@@ -134,6 +264,14 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
     searchTerm,
     sourceFilter,
     qualificationFilter,
+    targetCountryFilter,
+    geoClassificationFilter,
+    tierFilter,
+    ctaTypeFilter,
+    destinationTypeFilter,
+    conflictFilter,
+    minScore,
+    maxScore,
     freshnessFilter,
     categoryFilter,
     requirePhone,
@@ -364,6 +502,117 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
               <option value="UNKNOWN">Not enough info</option>
             </select>
 
+            {/* Geographic Classification Filter */}
+            <select
+              value={geoClassificationFilter}
+              onChange={e => { setGeoClassificationFilter(e.target.value); setPage(1); }}
+              className="px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-400"
+              aria-label="Filter by geographic classification"
+            >
+              <option value="ALL">All Geo Classifications</option>
+              <option value="LOCAL_VERIFIED">📍 Local Verified Only</option>
+              <option value="FOREIGN_VERIFIED">🌐 Foreign Verified</option>
+              <option value="LOCAL_PROBABLE">❓ Local Probable</option>
+              <option value="LOCATION_UNKNOWN">❔ Location Unknown</option>
+            </select>
+
+            {/* Prioritization Tier Filter */}
+            <select
+              value={tierFilter}
+              onChange={e => { setTierFilter(e.target.value); setPage(1); }}
+              className="px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-400"
+              aria-label="Filter by prioritization tier"
+            >
+              <option value="ALL">All Tiers</option>
+              <option value="HIGH">High Priority</option>
+              <option value="MEDIUM">Medium Priority</option>
+              <option value="LOW">Low Priority</option>
+              <option value="MINIMAL">Minimal Priority</option>
+            </select>
+
+            {/* Target Country Filter */}
+            {availableTargetCountries.length > 1 && (
+              <select
+                value={targetCountryFilter}
+                onChange={e => { setTargetCountryFilter(e.target.value); setPage(1); }}
+                className="px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-400"
+                aria-label="Filter by target country"
+              >
+                <option value="ALL">All Target Countries</option>
+                {availableTargetCountries.map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            )}
+
+            {/* CTA Type Filter */}
+            {availableCtaTypes.length > 0 && (
+              <select
+                value={ctaTypeFilter}
+                onChange={e => { setCtaTypeFilter(e.target.value); setPage(1); }}
+                className="px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-400"
+                aria-label="Filter by CTA type"
+              >
+                <option value="ALL">All CTAs</option>
+                {availableCtaTypes.map(c => (
+                  <option key={c} value={c}>{toFriendlyStatus(c)}</option>
+                ))}
+              </select>
+            )}
+
+            {/* Destination Type Filter */}
+            {availableDestinationTypes.length > 0 && (
+              <select
+                value={destinationTypeFilter}
+                onChange={e => { setDestinationTypeFilter(e.target.value); setPage(1); }}
+                className="px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-400"
+                aria-label="Filter by destination type"
+              >
+                <option value="ALL">All Destinations</option>
+                {availableDestinationTypes.map(d => (
+                  <option key={d} value={d}>{toFriendlyStatus(d)}</option>
+                ))}
+              </select>
+            )}
+
+            {/* Contact Conflict Filter */}
+            <select
+              value={conflictFilter}
+              onChange={e => { setConflictFilter(e.target.value); setPage(1); }}
+              className="px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-400"
+              aria-label="Filter by contact conflict status"
+            >
+              <option value="ALL">All Contact States</option>
+              <option value="NO_CONFLICT">No Conflicts</option>
+              <option value="CONFLICT_ONLY">⚠️ Conflicted Contacts Only</option>
+            </select>
+
+            {/* Score Range Inputs */}
+            <div className="flex items-center gap-1 text-[11px] text-slate-400">
+              <span>Score:</span>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                placeholder="Min"
+                value={minScore}
+                onChange={e => { setMinScore(e.target.value); setPage(1); }}
+                className="w-12 px-1.5 py-0.5 bg-slate-950 border border-slate-700 rounded text-slate-200 text-xs focus:outline-none focus:ring-1 focus:ring-sky-400"
+                aria-label="Minimum lead score"
+              />
+              <span>-</span>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                placeholder="Max"
+                value={maxScore}
+                onChange={e => { setMaxScore(e.target.value); setPage(1); }}
+                className="w-12 px-1.5 py-0.5 bg-slate-950 border border-slate-700 rounded text-slate-200 text-xs focus:outline-none focus:ring-1 focus:ring-sky-400"
+                aria-label="Maximum lead score"
+              />
+            </div>
+
             {/* Category Filter */}
             {availableCategories.length > 0 && (
               <select
@@ -416,6 +665,18 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
               />
               Person
             </label>
+
+            {/* Clear Filters Button */}
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={handleClearFilters}
+                className="px-2 py-0.5 text-[11px] font-semibold bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/80 rounded cursor-pointer transition-colors"
+                aria-label="Clear all applied filters"
+              >
+                ✕ Clear Filters
+              </button>
+            )}
           </div>
 
           {/* Sort Selection */}
@@ -581,12 +842,28 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
 
                 {/* Status Badges */}
                 <div className="flex flex-wrap items-center gap-1.5 justify-end">
+                  {r.prioritizationTier && r.prioritizationTier !== 'UNRANKED' && (
+                    <span
+                      className={`px-1.5 py-0.5 text-[9px] font-bold rounded border ${
+                        r.prioritizationTier === 'HIGH'
+                          ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/50'
+                          : r.prioritizationTier === 'MEDIUM'
+                          ? 'bg-sky-950/70 text-sky-300 border-sky-500/50'
+                          : r.prioritizationTier === 'LOW'
+                          ? 'bg-amber-950/70 text-amber-300 border-amber-500/50'
+                          : 'bg-slate-900 text-slate-400 border-slate-700'
+                      }`}
+                      title={`Prioritization Tier: ${r.prioritizationTier}`}
+                    >
+                      ★ {r.prioritizationTier}
+                    </span>
+                  )}
                   {r.qualificationScore !== undefined && (
                     <span
                       className="px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-300 bg-slate-800 border border-slate-700 rounded"
-                      title={`Lead Score: ${(r.qualificationScore * 100).toFixed(0)}% (Ranking aid only; does not determine eligibility)`}
+                      title={r.scoreExplanation || `Lead Priority Score: ${r.qualificationScore > 1 ? r.qualificationScore : (r.qualificationScore * 100).toFixed(0)}/100`}
                     >
-                      Score: {(r.qualificationScore * 100).toFixed(0)}%
+                      Score: {r.qualificationScore > 1 ? `${r.qualificationScore}/100` : `${(r.qualificationScore * 100).toFixed(0)}%`}
                       {r.scoreConfidence && r.scoreConfidence !== 'NONE' && (
                         <span className="text-slate-400 font-sans ml-1 text-[9px]">({r.scoreConfidence})</span>
                       )}
@@ -669,6 +946,13 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
                   {r.destinationType && r.destinationType !== 'UNKNOWN' && (
                     <span className="px-1.5 py-0.2 text-[9px] bg-slate-800 text-slate-300 rounded border border-slate-700">
                       Dest: {toFriendlyStatus(r.destinationType)}
+                    </span>
+                  )}
+
+                  {/* Contact Conflict Warning */}
+                  {(r.phoneConflictState === 'PHONE_CONFLICT' || r.emailConflictState === 'EMAIL_CONFLICT' || r.canonicalRecord?.contactProfile?.phoneConflict || r.canonicalRecord?.contactProfile?.emailConflict) && (
+                    <span className="px-1.5 py-0.2 text-[9px] bg-rose-950/60 text-rose-300 border border-rose-500/40 rounded font-semibold" title="Conflicting contact observations recorded across ads">
+                      ⚠️ Contact Conflict
                     </span>
                   )}
                 </div>

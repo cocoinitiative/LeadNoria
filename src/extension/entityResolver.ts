@@ -24,6 +24,8 @@ import type {
 import { sanitizeAdLibraryIds } from './metaAdapter.ts';
 import { evaluateGeographicOrigin } from './geographicClassifier.ts';
 import { classifyCta, classifyDestination, aggregateAdEvidence } from './destinationClassifier.ts';
+import { mergeContactObservations } from './contactQuality.ts';
+import { calculateLeadScore } from './leadPrioritizer.ts';
 
 // Generic shorteners, shared hosting, and multi-tenant marketplace platforms
 // Domains in this set MUST NEVER act as sole identity anchors for entity merging
@@ -899,6 +901,21 @@ export function mergeCandidateIntoEntity(
   target.destinationReasonCode = aggSummary.destinationReasonCode;
   target.destinationConfidence = aggSummary.destinationConfidence;
 
+  // 7.6. Preserve and merge contact observations (Phase 7)
+  const incomingContacts = cand.contactObservations || [
+    ...(cand.observedPhones || []),
+    ...(cand.observedEmails || [])
+  ];
+  if (incomingContacts.length > 0) {
+    target.contactProfile = mergeContactObservations(target.contactProfile, incomingContacts);
+    target.contactQualityState = target.contactProfile.overallQualityState;
+    target.businessPhone = target.contactProfile.primaryPhone;
+    target.businessEmail = target.contactProfile.primaryEmail;
+    target.phones = target.contactProfile.observedPhones.map(p => p.normalizedValue || p.rawValue);
+    target.emails = target.contactProfile.observedEmails.map(e => e.normalizedValue || e.rawValue);
+    target.contactObservations = [...target.contactProfile.observedPhones, ...target.contactProfile.observedEmails];
+  }
+
   // 8. Record structured merge audit entry (idempotent - no duplicate records)
   if (!target.mergeHistory) target.mergeHistory = [];
   const isDuplicateMerge = target.mergeHistory.some(
@@ -946,4 +963,14 @@ export function mergeCandidateIntoEntity(
       target.businessLocationReasonCode = updatedGeo.reasonCode;
     }
   }
+
+  // 10. Recalculate deterministic lead score and prioritization breakdown (Phase 8)
+  const priorityRes = calculateLeadScore(target);
+  target.leadScore = priorityRes.score;
+  target.normalizedScore = priorityRes.normalizedScore;
+  target.prioritizationTier = priorityRes.tier;
+  target.scoreConfidence = priorityRes.confidence;
+  target.scoreBreakdown = priorityRes.breakdown;
+  target.scoreModelVersion = priorityRes.breakdown.modelVersion;
+  target.scoreExplanation = priorityRes.explanation;
 }
