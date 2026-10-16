@@ -194,7 +194,7 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
 
       // Geographic classification filter
       if (geoClassificationFilter !== 'ALL') {
-        const geo = r.geographicClassification || (r.businessCountryCode ? 'LOCAL_VERIFIED' : 'LOCATION_UNKNOWN');
+        const geo = r.geographicClassification || (r.businessCountryCode ? (r.businessCountryCode === r.targetCountryCode ? 'LOCAL_PROBABLE' : 'FOREIGN_VERIFIED') : 'LOCATION_UNKNOWN');
         if (geo !== geoClassificationFilter) return false;
       }
 
@@ -254,7 +254,7 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
       // Signal filters
       if (requirePhone && !r.contactSummary.hasPhone) return false;
       if (requireEmail && !r.contactSummary.hasEmail) return false;
-      if (requireWebsite && !r.dataSignals?.websiteVerified) return false;
+      if (requireWebsite && !r.dataSignals?.websiteVerified && !r.websiteUrl && r.websiteState !== 'found' && r.websiteState !== 'VERIFIED_BUSINESS_WEBSITE') return false;
       if (requirePerson && !r.dataSignals?.publicPersonAvailable) return false;
 
       return true;

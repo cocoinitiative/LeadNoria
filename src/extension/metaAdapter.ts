@@ -1592,64 +1592,90 @@ export function exportLeadsToCsv(
     'Score Explanation'
   ];
 
-  const rows = exportLeads.map(l => [
-    sanitizeCsvField(l.name),
-    sanitizeCsvField(l.facebookPageName),
-    sanitizeCsvField(l.facebookPageUrl || ''),
-    sanitizeCsvField(l.facebookPageState),
-    sanitizeCsvField(l.destinationDomain || ''),
-    sanitizeCsvField(l.destinationUrl || ''),
-    sanitizeCsvField(l.websiteState),
-    sanitizeCsvField(l.activeAdCount),
-    sanitizeCsvField((l.matchedKeywords || []).join('; ')),
-    sanitizeCsvField(l.locationCode || ''),
-    sanitizeCsvField(l.locationName || ''),
-    sanitizeCsvField(l.targetCountryCode || l.locationCode || ''),
-    sanitizeCsvField(l.businessCountryCode || ''),
-    sanitizeCsvField(l.geographicClassification || (l.businessCountryCode ? 'LOCAL_VERIFIED' : 'LOCATION_UNKNOWN')),
-    sanitizeCsvField(l.businessLocationConfidence || 'NONE'),
-    sanitizeCsvField((l.businessLocationEvidence || []).join(' | ')),
-    sanitizeCsvField((l.adLibraryIds || []).join('; ')),
-    sanitizeCsvField(l.adLibraryUrl || ''),
-    sanitizeCsvField(l.relevanceDecision || 'UNASSESSED'),
-    sanitizeCsvField(l.relevanceScore !== undefined ? `${(l.relevanceScore * 100).toFixed(0)}%` : (l.relevanceDecision === 'RELEVANT' ? '100%' : 'N/A')),
-    sanitizeCsvField(l.relevanceConfidence || (l.relevanceDecision ? 'HIGH' : 'NONE')),
-    sanitizeCsvField(l.relevanceMatchedTerms ? l.relevanceMatchedTerms.join('; ') : ''),
-    sanitizeCsvField(l.relevanceReasons ? l.relevanceReasons.slice(0, 2).join(' | ') : ''),
-    sanitizeCsvField(l.engineVersion || 'strict-v2'),
-    sanitizeCsvField(l.status),
-    sanitizeCsvField(l.discoveredAt),
-    sanitizeCsvField(l.sampleCopy || ''),
-    sanitizeCsvField(l.sampleCta || ''),
-    sanitizeCsvField(l.primaryCtaType || 'UNKNOWN'),
-    sanitizeCsvField(l.primaryDestinationType || 'UNKNOWN'),
-    sanitizeCsvField(l.destinationConfidence || 'NONE'),
-    sanitizeCsvField(l.destinationReasonCode || 'DESTINATION_NOT_OBSERVED'),
-    sanitizeCsvField(l.websiteVerification?.finalUrl || l.destinationUrl || ''),
-    sanitizeCsvField(l.websiteVerificationStatus || (l.websiteVerification?.status) || (l.destinationUrl ? 'NOT_VERIFIED' : 'NOT_OBSERVED')),
-    sanitizeCsvField(l.websiteVerification?.identityMatch || 'UNKNOWN'),
-    sanitizeCsvField(l.websiteVerification?.categoryMatch || 'UNKNOWN'),
-    sanitizeCsvField((l.websiteVerification?.commercialSignals || []).join('; ')),
-    sanitizeCsvField((l.websiteVerification?.evidence || []).map(e => e.reason).slice(0, 3).join(' | ')),
-    sanitizeCsvField(l.websiteVerification?.verifiedAt || ''),
-    sanitizeCsvField(l.canonicalPageId || ''),
-    sanitizeCsvField(l.canonicalPageSlug || ''),
-    sanitizeCsvField(l.identityConfidence || 'UNRESOLVED'),
-    sanitizeCsvField(l.relationshipType || 'INDEPENDENT_BUSINESS'),
-    sanitizeCsvField((l.aliases || []).join('; ')),
-    sanitizeCsvField(l.businessPhone || (l.phones && l.phones[0]) || ''),
-    sanitizeCsvField(l.businessEmail || (l.emails && l.emails[0]) || ''),
-    sanitizeCsvField(l.contactProfile?.observedPhones?.[0]?.syntaxState || (l.businessPhone ? 'SYNTAX_VALID' : 'NOT_OBSERVED')),
-    sanitizeCsvField(l.contactProfile?.observedEmails?.[0]?.syntaxState || (l.businessEmail ? 'SYNTAX_VALID' : 'NOT_OBSERVED')),
-    sanitizeCsvField(l.contactProfile?.observedPhones?.[0]?.sourceSurface || l.contactProfile?.observedEmails?.[0]?.sourceSurface || (l.businessPhone || l.businessEmail ? 'AD_BODY_TEXT' : 'NOT_OBSERVED')),
-    sanitizeCsvField(l.contactProfile?.phoneConflictState || l.contactProfile?.emailConflictState || 'NOT_APPLICABLE'),
-    sanitizeCsvField(l.contactQualityState || l.contactProfile?.overallQualityState || (l.businessPhone || l.businessEmail ? 'OBSERVED_VALID_SYNTAX' : 'NOT_OBSERVED')),
-    sanitizeCsvField(l.contactProfile?.observedPhones?.[0]?.verificationStatus || l.contactProfile?.observedEmails?.[0]?.verificationStatus || (l.businessPhone || l.businessEmail ? 'UNPROBED_PUBLIC_CLAIM' : 'NOT_OBSERVED')),
-    sanitizeCsvField(l.leadScore !== undefined ? l.leadScore : 'N/A'),
-    sanitizeCsvField(l.prioritizationTier || 'UNRANKED'),
-    sanitizeCsvField(l.scoreModelVersion || 'leadnoria-scoring-v1'),
-    sanitizeCsvField(l.scoreExplanation || '')
-  ]);
+  const rows = exportLeads.map(l => {
+    const isCanonical = Boolean(l && typeof l === 'object' && ('canonicalEntityId' in l || 'canonicalBusinessName' in l));
+    const can = l as any;
+    const name = l.name || (isCanonical ? (can.canonicalBusinessName?.preferredObservedValue || can.canonicalBusinessName?.value || can.displayName) : '') || 'Unknown Advertiser';
+    const fbName = l.facebookPageName || name;
+    const fbUrl = l.facebookPageUrl || (isCanonical ? can.digital?.socialProfiles?.facebook : '') || '';
+    const destDomain = l.destinationDomain || (isCanonical ? can.digital?.domains?.value?.[0] : '') || '';
+    const destUrl = l.destinationUrl || (isCanonical ? (can.digital?.verifiedWebsite?.value || can.digital?.domains?.value?.[0]) : '') || '';
+    const targetCountry = l.targetCountryCode || l.locationCode || (isCanonical ? can.business?.country?.value : '') || '';
+    const busCountry = l.businessCountryCode || (isCanonical ? can.business?.country?.value : '') || '';
+
+    let geo = l.geographicClassification;
+    if (!geo) {
+      if (busCountry && targetCountry && busCountry === targetCountry) {
+        geo = 'LOCAL_PROBABLE'; // Do not promote unverified to LOCAL_VERIFIED without proof
+      } else if (busCountry && targetCountry && busCountry !== targetCountry) {
+        geo = 'FOREIGN_VERIFIED';
+      } else {
+        geo = 'LOCATION_UNKNOWN';
+      }
+    }
+
+    const phone = l.businessPhone || (l.phones && l.phones[0]) || (isCanonical ? can.contacts?.phones?.[0]?.value : '') || '';
+    const email = l.businessEmail || (l.emails && l.emails[0]) || (isCanonical ? can.contacts?.emails?.[0]?.value : '') || '';
+
+    return [
+      sanitizeCsvField(name),
+      sanitizeCsvField(fbName),
+      sanitizeCsvField(fbUrl),
+      sanitizeCsvField(l.facebookPageState || (fbUrl ? 'found' : 'not_found')),
+      sanitizeCsvField(destDomain),
+      sanitizeCsvField(destUrl),
+      sanitizeCsvField(l.websiteState || (destUrl ? 'found' : 'not_found')),
+      sanitizeCsvField(l.activeAdCount || (isCanonical ? can.evidence?.evidencePack?.observationCount || 1 : 1)),
+      sanitizeCsvField((l.matchedKeywords || []).join('; ')),
+      sanitizeCsvField(l.locationCode || ''),
+      sanitizeCsvField(l.locationName || ''),
+      sanitizeCsvField(targetCountry),
+      sanitizeCsvField(busCountry),
+      sanitizeCsvField(geo),
+      sanitizeCsvField(l.businessLocationConfidence || 'NONE'),
+      sanitizeCsvField((l.businessLocationEvidence || []).join(' | ')),
+      sanitizeCsvField((l.adLibraryIds || []).join('; ')),
+      sanitizeCsvField(l.adLibraryUrl || ''),
+      sanitizeCsvField(l.relevanceDecision || 'UNASSESSED'),
+      sanitizeCsvField(l.relevanceScore !== undefined ? `${(l.relevanceScore * 100).toFixed(0)}%` : (l.relevanceDecision === 'RELEVANT' ? '100%' : 'N/A')),
+      sanitizeCsvField(l.relevanceConfidence || (l.relevanceDecision ? 'HIGH' : 'NONE')),
+      sanitizeCsvField(l.relevanceMatchedTerms ? l.relevanceMatchedTerms.join('; ') : ''),
+      sanitizeCsvField(l.relevanceReasons ? l.relevanceReasons.slice(0, 2).join(' | ') : ''),
+      sanitizeCsvField(l.engineVersion || 'strict-v2'),
+      sanitizeCsvField(l.status || (isCanonical ? can.qualification?.finalState || 'QUALIFIED' : 'REVIEW_REQUIRED')),
+      sanitizeCsvField(l.discoveredAt || new Date().toISOString()),
+      sanitizeCsvField(l.sampleCopy || ''),
+      sanitizeCsvField(l.sampleCta || ''),
+      sanitizeCsvField(l.primaryCtaType || 'UNKNOWN'),
+      sanitizeCsvField(l.primaryDestinationType || 'UNKNOWN'),
+      sanitizeCsvField(l.destinationConfidence || 'NONE'),
+      sanitizeCsvField(l.destinationReasonCode || 'DESTINATION_NOT_OBSERVED'),
+      sanitizeCsvField(l.websiteVerification?.finalUrl || destUrl),
+      sanitizeCsvField(l.websiteVerificationStatus || (l.websiteVerification?.status) || (destUrl ? 'NOT_VERIFIED' : 'NOT_OBSERVED')),
+      sanitizeCsvField(l.websiteVerification?.identityMatch || 'UNKNOWN'),
+      sanitizeCsvField(l.websiteVerification?.categoryMatch || 'UNKNOWN'),
+      sanitizeCsvField((l.websiteVerification?.commercialSignals || []).join('; ')),
+      sanitizeCsvField((l.websiteVerification?.evidence || []).map(e => e.reason).slice(0, 3).join(' | ')),
+      sanitizeCsvField(l.websiteVerification?.verifiedAt || ''),
+      sanitizeCsvField(l.canonicalPageId || ''),
+      sanitizeCsvField(l.canonicalPageSlug || ''),
+      sanitizeCsvField(l.identityConfidence || 'UNRESOLVED'),
+      sanitizeCsvField(l.relationshipType || 'INDEPENDENT_BUSINESS'),
+      sanitizeCsvField((l.aliases || []).join('; ')),
+      sanitizeCsvField(phone),
+      sanitizeCsvField(email),
+      sanitizeCsvField(l.contactProfile?.observedPhones?.[0]?.syntaxState || (phone ? 'SYNTAX_VALID' : 'NOT_OBSERVED')),
+      sanitizeCsvField(l.contactProfile?.observedEmails?.[0]?.syntaxState || (email ? 'SYNTAX_VALID' : 'NOT_OBSERVED')),
+      sanitizeCsvField(l.contactProfile?.observedPhones?.[0]?.sourceSurface || l.contactProfile?.observedEmails?.[0]?.sourceSurface || (phone || email ? 'AD_BODY_TEXT' : 'NOT_OBSERVED')),
+      sanitizeCsvField(l.contactProfile?.phoneConflictState || l.contactProfile?.emailConflictState || 'NOT_APPLICABLE'),
+      sanitizeCsvField(l.contactQualityState || l.contactProfile?.overallQualityState || (phone || email ? 'OBSERVED_VALID_SYNTAX' : 'NOT_OBSERVED')),
+      sanitizeCsvField(l.contactProfile?.observedPhones?.[0]?.verificationStatus || l.contactProfile?.observedEmails?.[0]?.verificationStatus || (phone || email ? 'UNPROBED_PUBLIC_CLAIM' : 'NOT_OBSERVED')),
+      sanitizeCsvField(l.leadScore !== undefined ? l.leadScore : 'N/A'),
+      sanitizeCsvField(l.prioritizationTier || 'UNRANKED'),
+      sanitizeCsvField(l.scoreModelVersion || 'leadnoria-scoring-v1'),
+      sanitizeCsvField(l.scoreExplanation || '')
+    ];
+  });
 
   return metaHeader + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
 }
