@@ -604,6 +604,31 @@ export function canonicalLeadToResultDetailViewModel(record: CanonicalLeadRecord
  * Maps a UnifiedResearchRecord, CandidateEnvelope, CanonicalLeadRecord, or ExtensionLead into a compact ResultRowViewModel.
  */
 export function toResultRowViewModel(record: UnifiedResearchRecord | CandidateEnvelope | CanonicalLeadRecord | ExtensionLead): ResultRowViewModel {
+  if (!record || typeof record !== 'object') {
+    return {
+      recordId: `rec_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      entityId: 'unknown',
+      displayName: 'Unknown Entity',
+      primarySource: 'META',
+      provenance: 'META_DERIVED',
+      isMixedProvenance: false,
+      relevanceDecision: 'UNASSESSED',
+      websiteState: 'NOT_OBSERVED',
+      contactSummary: {
+        hasPhone: false,
+        hasEmail: false,
+        hasAddress: false,
+        hasContactForm: false,
+        hasSocialLinks: false
+      },
+      qualificationState: 'UNASSESSED',
+      isRestricted: false,
+      isExportable: false,
+      isPersistable: false,
+      corroborationCount: 0,
+      sourceBadges: [{ sourceType: 'META', label: 'Meta', isRestricted: false }]
+    };
+  }
   if (isCanonicalLeadRecord(record)) {
     return canonicalLeadToResultRowViewModel(record);
   }
@@ -615,8 +640,8 @@ export function toResultRowViewModel(record: UnifiedResearchRecord | CandidateEn
   const u = record as UnifiedResearchRecord;
   const c = record as CandidateEnvelope;
 
-  const recordId = isUnified ? u.recordId : c.candidateId;
-  const entityId = isUnified ? u.entityId : c.candidateId;
+  const recordId = isUnified ? (u.recordId || `rec_${Date.now()}`) : (c.candidateId || `cand_${Date.now()}`);
+  const entityId = isUnified ? (u.entityId || recordId) : (c.candidateId || recordId);
 
   // Extract display name
   let displayName = 'Unknown Entity';
@@ -627,7 +652,7 @@ export function toResultRowViewModel(record: UnifiedResearchRecord | CandidateEn
   }
 
   // Extract source & provenance
-  const primarySource: SourceType = isUnified ? u.primarySource : c.sourceKey.sourceType;
+  const primarySource: SourceType = isUnified ? (u.primarySource || 'META_AD_LIBRARY') : (c.sourceKey?.sourceType || 'META_AD_LIBRARY');
   const provenance = record.provenance || 'UNKNOWN';
   const isMixedProvenance = provenance === 'MIXED';
 

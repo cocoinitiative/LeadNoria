@@ -183,23 +183,29 @@ export const ExtensionApp: React.FC = () => {
   const loadHistoryState = () => {
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       chrome.storage.local.get(['researchHistory', 'meta_scraper_history'], (res: Record<string, any>) => {
-        const hist = (res.researchHistory || res.meta_scraper_history) as ExtensionResearchRun[] | undefined;
-        if (Array.isArray(hist)) {
-          setHistoryRuns(hist);
-          // Phase 32: Recompute reliability metrics from history
-          const metrics = computeReliabilityMetrics(hist);
-          const alerts = evaluateOperationalGuardrails(metrics);
-          setReliabilityMetrics(metrics);
-          setGuardrailAlerts(alerts);
+        try {
+          const rawHist = (res.researchHistory || res.meta_scraper_history) as ExtensionResearchRun[] | undefined;
+          if (Array.isArray(rawHist)) {
+            const validHist = rawHist.filter(r => r && typeof r === 'object');
+            setHistoryRuns(validHist);
+            // Phase 32: Recompute reliability metrics from history
+            const metrics = computeReliabilityMetrics(validHist);
+            const alerts = evaluateOperationalGuardrails(metrics);
+            setReliabilityMetrics(metrics);
+            setGuardrailAlerts(alerts);
+          }
+        } catch (err) {
+          console.warn('[App] Error loading research history from storage:', err);
         }
       });
     }
   };
 
   const handleRunUpdate = (run: ExtensionResearchRun) => {
+    if (!run || typeof run !== 'object') return;
     setActiveRun(run);
-    if (run.leads) {
-      setRawLeads(run.leads);
+    if (run.leads && Array.isArray(run.leads)) {
+      setRawLeads(run.leads.filter(l => l && typeof l === 'object'));
     }
 
     // Map to RunStatusViewModel
@@ -253,75 +259,84 @@ export const ExtensionApp: React.FC = () => {
 
   // Convert raw leads to ResultRowViewModel list
   const resultsVM: ResultRowViewModel[] = useMemo(() => {
-    return rawLeads.map((item, idx) => {
-      if (isCanonicalLeadRecord(item) || isExtensionLead(item)) {
-        return toResultRowViewModel(item);
-      }
-
-      // Compatibility wrapper for Phase 1-13 leads
-      const candidateEnv = {
-        candidateId: item.leadId || `cand_${idx}`,
-        sourceKey: {
-          sourceType: selectedSource,
-          sourceNamespace: 'ad_lib',
-          sourceRecordId: item.pageId || item.leadId || `rec_${idx}`,
-          sourceRecordVersion: 'v1'
-        },
-        sourceVersion: '1.0.0',
-        rawReference: item,
-        normalizedCandidate: {
-          businessName: { value: { displayName: item.advertiserName || item.name || 'Unknown Business' } },
-          websiteUrl: item.websiteUrl || item.domain,
-          pageId: item.pageId
-        },
-        sourceContributions: [
-          {
-            source: selectedSource,
-            provenance: 'META_DERIVED',
-            fieldName: 'businessName',
-            isRestricted: false,
-            policyStatus: 'POLICY_APPROVED',
-            persistenceStatus: 'PERSISTABLE',
-            exportStatus: 'EXPORTABLE'
+    if (!Array.isArray(rawLeads)) return [];
+    return rawLeads
+      .filter(item => item && typeof item === 'object')
+      .map((item, idx) => {
+        try {
+          if (isCanonicalLeadRecord(item) || isExtensionLead(item)) {
+            return toResultRowViewModel(item);
           }
-        ],
-        provenance: 'META_DERIVED',
-        restrictions: {
-          isRestricted: false,
-          persistenceEligible: true,
-          exportEligible: true,
-          displayEligible: true,
-          qualificationEligible: true
-        },
-        fieldEligibility: {},
-        stageStates: {} as any,
-        evidence: item.evidence || [],
-        geographicObservations: [{ country: item.country || 'Global', city: item.locationName }],
-        diagnostics: { warnings: [], errors: [], notes: [] },
-        createdAt: item.timestamp || new Date().toISOString(),
-        updatedAt: item.timestamp || new Date().toISOString()
-      };
 
-      const row = toResultRowViewModel(candidateEnv as any);
+          // Compatibility wrapper for Phase 1-13 leads
+          const candidateEnv = {
+            candidateId: item.leadId || (item as any).candidateId || `cand_${idx}`,
+            sourceKey: {
+              sourceType: selectedSource,
+              sourceNamespace: 'ad_lib',
+              sourceRecordId: item.pageId || item.leadId || `rec_${idx}`,
+              sourceRecordVersion: 'v1'
+            },
+            sourceVersion: '1.0.0',
+            rawReference: item,
+            normalizedCandidate: {
+              businessName: { value: { displayName: item.advertiserName || item.name || 'Unknown Business' } },
+              websiteUrl: item.websiteUrl || item.domain,
+              pageId: item.pageId
+            },
+            sourceContributions: [
+              {
+                source: selectedSource,
+                provenance: 'META_DERIVED',
+                fieldName: 'businessName',
+                isRestricted: false,
+                policyStatus: 'POLICY_APPROVED',
+                persistenceStatus: 'PERSISTABLE',
+                exportStatus: 'EXPORTABLE'
+              }
+            ],
+            provenance: 'META_DERIVED',
+            restrictions: {
+              isRestricted: false,
+              persistenceEligible: true,
+              exportEligible: true,
+              displayEligible: true,
+              qualificationEligible: true
+            },
+            fieldEligibility: {},
+            stageStates: {} as any,
+            evidence: item.evidence || [],
+            geographicObservations: [{ country: item.country || 'Global', city: item.locationName }],
+            diagnostics: { warnings: [], errors: [], notes: [] },
+            createdAt: item.timestamp || new Date().toISOString(),
+            updatedAt: item.timestamp || new Date().toISOString()
+          };
 
-      // Enhance with Phase 6 / 11 / 12 fields if present
-      if (item.strictV3Decision) {
-        row.relevanceDecision = item.strictV3Decision.decision;
-      }
-      if (item.websiteVerification) {
-        row.websiteState = item.websiteVerification.finalStatus;
-      }
-      if (item.phones && item.phones.length > 0) {
-        row.contactSummary.hasPhone = true;
-        row.contactSummary.phoneText = item.phones[0];
-      }
-      if (item.emails && item.emails.length > 0) {
-        row.contactSummary.hasEmail = true;
-        row.contactSummary.emailText = item.emails[0];
-      }
+          const row = toResultRowViewModel(candidateEnv as any);
 
-      return row;
-    });
+          // Enhance with Phase 6 / 11 / 12 fields if present
+          if (item.strictV3Decision) {
+            row.relevanceDecision = item.strictV3Decision.decision;
+          }
+          if (item.websiteVerification) {
+            row.websiteState = item.websiteVerification.finalStatus;
+          }
+          if (item.phones && item.phones.length > 0) {
+            row.contactSummary.hasPhone = true;
+            row.contactSummary.phoneText = item.phones[0];
+          }
+          if (item.emails && item.emails.length > 0) {
+            row.contactSummary.hasEmail = true;
+            row.contactSummary.emailText = item.emails[0];
+          }
+
+          return row;
+        } catch (err) {
+          console.warn('[App] Skipping unmappable lead record:', err);
+          return null;
+        }
+      })
+      .filter((r): r is ResultRowViewModel => r !== null);
   }, [rawLeads, selectedSource]);
 
   // Plan Review Handler
@@ -539,21 +554,31 @@ export const ExtensionApp: React.FC = () => {
   }, [resultsVM, selectedRecordIds]);
 
   const analyticsSnapshot: RunAnalyticsSnapshot | null = useMemo(() => {
-    if (!rawLeads || rawLeads.length === 0) return null;
-    return computeRunAnalytics(activeRun?.runId || 'current-run', rawLeads, {
-      sourceType: selectedSource,
-      runTitle: activeRun?.queryScope?.rawInput || activeRun?.runId || 'Current Run'
-    });
+    try {
+      if (!rawLeads || rawLeads.length === 0) return null;
+      return computeRunAnalytics(activeRun?.runId || 'current-run', rawLeads, {
+        sourceType: selectedSource,
+        runTitle: activeRun?.queryScope?.rawInput || activeRun?.runId || 'Current Run'
+      });
+    } catch (e) {
+      console.warn('[App] computeRunAnalytics caught error:', e);
+      return null;
+    }
   }, [rawLeads, activeRun, selectedSource]);
 
   const optimizationSnapshot: ResearchOptimizationSnapshot | null = useMemo(() => {
-    if (!rawLeads || rawLeads.length === 0) return null;
-    const canonical = rawLeads.filter(isCanonicalLeadRecord);
-    return computeResearchOptimization(
-      historyRuns.length > 0 ? historyRuns : [{ runId: activeRun?.runId || 'current-run', searchUnits: [] }],
-      canonical.length > 0 ? canonical : rawLeads as any,
-      []
-    );
+    try {
+      if (!rawLeads || rawLeads.length === 0) return null;
+      const canonical = rawLeads.filter(isCanonicalLeadRecord);
+      return computeResearchOptimization(
+        historyRuns.length > 0 ? historyRuns : [{ runId: activeRun?.runId || 'current-run', searchUnits: [] }],
+        canonical.length > 0 ? canonical : rawLeads as any,
+        []
+      );
+    } catch (e) {
+      console.warn('[App] computeResearchOptimization caught error:', e);
+      return null;
+    }
   }, [rawLeads, historyRuns, activeRun]);
 
   const handleConfirmExport = (qualifiedOnly: boolean = true) => {

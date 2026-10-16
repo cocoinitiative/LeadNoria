@@ -91,6 +91,7 @@ export function computeReliabilityMetrics(
   const runsWithIssuesSet = new Set<string>();
 
   for (const run of runs) {
+    if (!run || typeof run !== 'object') continue;
     const status = (run.status || '').toUpperCase();
     if (status === 'COMPLETED') {
       successfulRuns++;
@@ -121,6 +122,7 @@ export function computeReliabilityMetrics(
   }
 
   for (const issue of issues) {
+    if (!issue || typeof issue !== 'object') continue;
     if (issue.affectedRunIds && Array.isArray(issue.affectedRunIds)) {
       for (const rId of issue.affectedRunIds) {
         if (rId) runsWithIssuesSet.add(rId);
