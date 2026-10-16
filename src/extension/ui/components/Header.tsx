@@ -27,6 +27,7 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const tabs: Array<{ id: NavigationTab; label: string; badge?: string | number }> = [
     { id: 'RESEARCH', label: 'Research' },
+    { id: 'IMPORT', label: 'Import Signals' },
     { id: 'RUN_STATUS', label: 'Run Status', badge: isRunning ? 'LIVE' : undefined },
     { id: 'RESULTS', label: 'Results', badge: resultsCount > 0 ? resultsCount : undefined },
     { id: 'ANALYTICS', label: 'Analytics' },

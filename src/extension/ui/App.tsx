@@ -42,6 +42,7 @@ import { SettingsView } from './components/SettingsView.tsx';
 import { DiagnosticsDrawer } from './components/DiagnosticsDrawer.tsx';
 import { RecoveryBanner } from './components/RecoveryBanner.tsx';
 import { AnalyticsView } from './components/AnalyticsView.tsx';
+import { ManualImportView } from './components/ManualImportView.tsx';
 import { computeRunAnalytics } from '../analytics/analyticsEngine.ts';
 import { RunAnalyticsSnapshot } from '../analytics/types.ts';
 import { computeResearchOptimization } from '../optimization/optimizationEngine.ts';
@@ -675,6 +676,25 @@ export const ExtensionApp: React.FC = () => {
               selectedSource={selectedSource}
               onSelectSource={setSelectedSource}
               onOpenPlanReview={handleOpenPlanReview}
+              onNavigateToImport={() => setActiveTab('IMPORT')}
+              disabled={isSubmitting || isJobRunning(activeRun?.status)}
+            />
+          </div>
+        )}
+
+        {/* Tab 1B: Import Ad Signals Workspace */}
+        {activeTab === 'IMPORT' && (
+          <div role="tabpanel" id="tabpanel-IMPORT" aria-labelledby="tab-IMPORT" className="flex flex-col gap-3">
+            <ManualImportView
+              onImportComplete={(summary) => {
+                if (summary.leads && summary.leads.length > 0) {
+                  setRawLeads(summary.leads);
+                }
+              }}
+              onNavigateToResults={() => {
+                loadStorageState();
+                setActiveTab('RESULTS');
+              }}
               disabled={isSubmitting || isJobRunning(activeRun?.status)}
             />
           </div>

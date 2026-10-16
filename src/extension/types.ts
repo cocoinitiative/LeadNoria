@@ -4,7 +4,7 @@
 
 export const MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH = 5000;
 
-export type ResearchMode = 'CUSTOM' | 'PRESET';
+export type ResearchMode = 'CUSTOM' | 'PRESET' | 'MANUAL';
 export type ResearchModelType = 'AUTO_DISCOVERY';
 
 export type JobStatus =
@@ -530,6 +530,8 @@ export interface ExtensionLead {
   ctaType?: CtaType;
   destinationType?: DestinationType;
   historicalNames?: Array<{ name: string; observedAt?: string; sourceTokenId?: string }>;
+  provenance?: string;
+  provenanceLineage?: string;
 }
 
 export type GeographicClassification =

@@ -63,7 +63,8 @@ const TEST_SUITES = [
   { name: 'Phase 12 Automated Testing & Ground-Truth Validation', file: 'tests/test-phase12-ground-truth-validation.mjs' },
   { name: 'Phase 13 Documentation, Build & Dependency Audit', file: 'tests/test-phase13-documentation-build-dependency-audit.mjs' },
   { name: 'Phase 14 Final Release Gate & New Artifact', file: 'tests/test-phase14-final-release-gate.mjs' },
-  { name: 'Master E2E Business Classification (Scenarios A-O)', file: 'tests/test-e2e-country-website-cta-classification.mjs' }
+  { name: 'Master E2E Business Classification (Scenarios A-O)', file: 'tests/test-e2e-country-website-cta-classification.mjs' },
+  { name: 'Phase 34 Manual Import & Offline Qualification', file: 'tests/test-phase34-manual-import.mjs' }
 ];
 
 function sha256(filePath) {

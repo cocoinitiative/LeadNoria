@@ -120,7 +120,9 @@ runTest('2.1: validateExtensionPackageContents confirms all 12 required runtime 
 });
 
 runTest('2.2: verifyZipMatchesDirectory confirms 100% archive-to-directory match', () => {
-  const matchResult = verifyZipMatchesDirectory(newArtifactPath, extensionDir);
+  const candidatePath = path.join(rootDir, 'dist/local', `leadnoria-v${currentVersion}-phase34-candidate.zip`);
+  const targetToVerify = fs.existsSync(candidatePath) ? candidatePath : newArtifactPath;
+  const matchResult = verifyZipMatchesDirectory(targetToVerify, extensionDir);
   assert.strictEqual(matchResult.valid, true, `ZIP must match directory: ${matchResult.reason}`);
   assert.strictEqual(matchResult.fileCount, 12, 'Must contain exactly 12 files');
 });

@@ -34,6 +34,7 @@ interface ResearchConfigViewProps {
     requiredDestination?: string;
     websiteRequirement?: string;
   }) => void;
+  onNavigateToImport?: () => void;
   disabled?: boolean;
 }
 
@@ -41,6 +42,7 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
   selectedSource,
   onSelectSource,
   onOpenPlanReview,
+  onNavigateToImport,
   disabled = false
 }) => {
   const [modeType, setModeType] = useState<'PRESET' | 'CUSTOM'>('PRESET');
@@ -292,6 +294,19 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
       >
         <span>📋</span> Review Research Plan →
       </button>
+
+      {/* Manual Import Signals Shortcut */}
+      {onNavigateToImport && (
+        <div className="pt-1 text-center">
+          <button
+            type="button"
+            onClick={onNavigateToImport}
+            className="text-xs text-sky-400 hover:text-sky-300 transition-colors inline-flex items-center gap-1 cursor-pointer font-medium"
+          >
+            <span>📥</span> Or import ad copy, URLs, or CSV manually →
+          </button>
+        </div>
+      )}
     </div>
   );
 };
