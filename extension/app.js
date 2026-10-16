@@ -26232,7 +26232,7 @@ function exportLeadsToCsv(leads, runOrOptions, options) {
       sanitizeCsvField(l.relevanceReasons ? l.relevanceReasons.slice(0, 2).join(" | ") : ""),
       sanitizeCsvField(l.engineVersion || "strict-v2"),
       sanitizeCsvField(l.status || (isCanonical ? can.qualification?.finalState || "QUALIFIED" : "REVIEW_REQUIRED")),
-      sanitizeCsvField(l.discoveredAt || (/* @__PURE__ */ new Date()).toISOString()),
+      sanitizeCsvField(l.discoveredAt || ""),
       sanitizeCsvField(l.sampleCopy || ""),
       sanitizeCsvField(l.sampleCta || ""),
       sanitizeCsvField(l.primaryCtaType || "UNKNOWN"),
