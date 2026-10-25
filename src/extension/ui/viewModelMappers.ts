@@ -72,7 +72,7 @@ export function extensionLeadToResultRowViewModel(lead: ExtensionLead): ResultRo
   const displayName = lead.name || lead.advertiserName || 'Unknown Business';
   const category = (lead as any).category || (lead.matchedKeywords && lead.matchedKeywords[0]) || undefined;
 
-  const rawUrl = lead.destinationUrl || (lead as any).websiteUrl;
+  const rawUrl = lead.businessWebsiteUrl || lead.destinationUrl || (lead as any).websiteUrl;
   const safeWeb = observedWebsiteState(rawUrl, lead.destinationDomain) === 'found' ? getSafeExternalUrl(resolveObservedDestinationUrl(rawUrl)) : undefined;
 
   const phone = (lead as any).businessPhone || (lead as any).phone || lead.phones?.[0] || lead.contactProfile?.observedPhones?.[0]?.normalizedValue || lead.contactProfile?.observedPhones?.[0]?.rawValue;
@@ -898,16 +898,16 @@ export function extensionLeadToResultDetailViewModel(lead: ExtensionLead): Resul
   const businessDetails = {
     categories: lead.matchedKeywords || [],
     services: [],
-    serviceAreas: [lead.locationName || lead.targetCountryCode || 'Global'],
+    serviceAreas: [],
     businessStatus: toFriendlyStatus('OPERATIONAL')
   };
 
   const locationDetails = {
-    address: (lead.businessLocationEvidence && lead.businessLocationEvidence[0]) || undefined,
-    city: lead.locationName,
+    address: lead.businessPageEvidence?.addressText || undefined,
+    city: undefined,
     region: undefined,
-    country: lead.businessCountryCode || lead.targetCountryCode,
-    addresses: lead.businessLocationEvidence || []
+    country: lead.businessCountryCode,
+    addresses: lead.businessPageEvidence?.addressText ? [lead.businessPageEvidence.addressText] : []
   };
 
   const digitalPresence = {
@@ -960,6 +960,7 @@ export function extensionLeadToResultDetailViewModel(lead: ExtensionLead): Resul
     displayName: row.displayName,
     aliases,
     identityConfidence: (lead.businessLocationConfidence as any) || 'HIGH',
+    canonicalRecord: lead,
     contradictionFlags: [],
     primarySource: 'META',
     contributingSources: ['META'],
@@ -973,7 +974,7 @@ export function extensionLeadToResultDetailViewModel(lead: ExtensionLead): Resul
     websiteVerificationStatus: lead.websiteState === 'found' ? 'FOUND' : 'NOT_OBSERVED',
     phones: (lead as any).businessPhone ? [{ number: (lead as any).businessPhone, type: 'BUSINESS', observation: 'Observed on Ad Card' }] : [],
     emails: (lead as any).businessEmail ? [{ address: (lead as any).businessEmail, classification: 'BUSINESS', observation: 'Observed on Ad Card' }] : [],
-    addresses: (lead.businessLocationEvidence || []).map(a => ({ addressLine: a, isBranch: false })),
+    addresses: lead.businessPageEvidence?.addressText ? [{ addressLine: lead.businessPageEvidence.addressText, isBranch: false }] : [],
     hasContactForm: Boolean((lead.destinationTypes || []).includes('INSTANT_FORM' as any)),
     socialLinks: lead.facebookPageUrl ? [{ platform: 'Facebook', url: lead.facebookPageUrl }] : [],
     qualificationState: row.qualificationState,

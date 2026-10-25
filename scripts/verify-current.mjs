@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const suites = [
+  'test-public-page-research',
   'test-extension-collection-availability',
   'test-extension-collection-pipeline',
   'test-phase01-safety-lock', 'test-relevance-engine', 'test-entity-resolution', 'test-evidence-waterfall',

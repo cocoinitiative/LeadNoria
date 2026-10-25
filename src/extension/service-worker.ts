@@ -37,6 +37,7 @@ import {
 } from './queryPlanner.ts';
 import { isExternalWebsiteCrawlingPermitted } from '../config/collectionGate.ts';
 import { canStartExtensionCollection } from './collectionAvailability.ts';
+import { PublicPageResearch } from './publicPageResearch.ts';
 import {
   evaluateLeadQualification,
   buildBusinessIntelligenceProfile,
@@ -450,6 +451,7 @@ export async function executeResearchPipeline(
   let isStalled = false;
   let batchIndex = initialRun.lastCheckpointBatch || 0;
   let encounteredExtractionError = false;
+  const publicPageResearch = new PublicPageResearch();
 
   try {
     for (let qi = startQi; qi < queriesToRun.length; qi++) {
@@ -612,6 +614,8 @@ export async function executeResearchPipeline(
         const candidates: ScrapedAdCandidate[] = (response && response.payload && response.payload.candidates) || [];
 
         if (candidates.length > 0) {
+          await publicPageResearch.enrich(candidates, () => cancelledRuns.has(runId) || pausedRuns.has(runId));
+          if (cancelledRuns.has(runId) || pausedRuns.has(runId)) break;
           batchIndex++;
 
           // Bounded batch processing: dedup, entity identity, Strict Relevance Gate v2, anti-inflation, 5000 ceiling

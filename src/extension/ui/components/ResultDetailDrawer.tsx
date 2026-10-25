@@ -254,6 +254,14 @@ export const ResultDetailDrawer: React.FC<ResultDetailDrawerProps> = ({
         {/* Drawer Body: 10 Inspection Sections */}
         <div className="p-4 overflow-y-auto flex flex-col gap-4 text-xs text-slate-300">
           <LeadFollowupPanel key={lead.recordId} record={lead.canonicalRecord || lead} recordId={lead.recordId} />
+          {(lead.canonicalRecord as any)?.businessPageEvidence && (
+            <details className="rounded-lg border border-slate-800 p-3">
+              <summary className="cursor-pointer font-semibold">Facebook Page check</summary>
+              <p className="mt-2">{(lead.canonicalRecord as any).businessPageEvidence.reason}</p>
+              <p className="mt-2 text-slate-400">Checked: {(lead.canonicalRecord as any).businessPageEvidence.checkedAt}</p>
+              {getSafeExternalUrl((lead.canonicalRecord as any).businessPageEvidence.sourceUrl) && <a className="mt-2 block text-sky-300 underline" href={getSafeExternalUrl((lead.canonicalRecord as any).businessPageEvidence.sourceUrl)!} target="_blank" rel="noopener noreferrer">Open source Page</a>}
+            </details>
+          )}
           
           {/* Section 1: IDENTITY */}
           <div className="p-3 bg-slate-950/60 rounded-lg border border-slate-800 flex flex-col gap-1.5">

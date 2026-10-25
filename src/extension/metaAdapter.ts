@@ -1598,7 +1598,12 @@ export function exportLeadsToCsv(
     'Lead Priority Score',
     'Prioritization Tier',
     'Score Model Version',
-    'Score Explanation'
+    'Score Explanation',
+    'Business Website (Page)',
+    'Page Check Status',
+    'Page Check Source',
+    'Page Checked At',
+    'Page Check Explanation'
   ];
 
   const rows = exportLeads.map(l => {
@@ -1682,7 +1687,12 @@ export function exportLeadsToCsv(
       sanitizeCsvField(l.leadScore !== undefined ? l.leadScore : 'N/A'),
       sanitizeCsvField(l.prioritizationTier || 'UNRANKED'),
       sanitizeCsvField(l.scoreModelVersion || 'leadnoria-scoring-v1'),
-      sanitizeCsvField(l.scoreExplanation || '')
+      sanitizeCsvField(l.scoreExplanation || ''),
+      sanitizeCsvField(l.businessWebsiteUrl || ''),
+      sanitizeCsvField(l.businessPageEvidence?.status || 'NOT_CHECKED'),
+      sanitizeCsvField(l.businessPageEvidence?.sourceUrl || ''),
+      sanitizeCsvField(l.businessPageEvidence?.checkedAt || ''),
+      sanitizeCsvField(l.businessPageEvidence?.reason || '')
     ];
   });
 

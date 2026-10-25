@@ -20,7 +20,8 @@
  * - LOCATION_UNKNOWN: Insufficient evidence. Never populates target country without evidence.
  */
 
-import type { GeographicEvaluation } from './types.ts';
+import type { GeographicEvaluation, BusinessPageEvidence } from './types.ts';
+import { businessPageAboutUrl } from './publicPageEvidence.ts';
 import {
   getCountryProfile,
   getForeignIndicatorProfiles,
@@ -29,6 +30,7 @@ import {
 } from './countryProfiles/index.ts';
 
 export interface CandidateGeoInputs {
+  businessPageEvidence?: BusinessPageEvidence;
   pageName: string;
   pageUrl?: string;
   destinationUrl?: string;
@@ -240,6 +242,15 @@ export function evaluateGeographicOrigin(
 ): GeographicEvaluation {
   const rawTarget = targetCountryCode ? targetCountryCode.trim().toUpperCase() : 'BD';
   const normTarget = normalizeCountryCode(rawTarget) || rawTarget;
+  const page = inputs.businessPageEvidence;
+  if (page?.status === 'CHECKED' && page.addressText && businessPageAboutUrl(page.sourceUrl) && businessPageAboutUrl(page.sourceUrl) === businessPageAboutUrl(inputs.pageUrl)) {
+    const countries = [...new Set(page.addressCountryCodes)];
+    if (countries.length > 1) return { classification: 'LOCATION_UNKNOWN', targetCountryCode: normTarget, confidence: 'NONE', evidence: [page.sourceUrl, page.addressText], reason: 'The public Page lists addresses in multiple countries; business origin needs review.', reasonCode: 'MULTIPLE_PAGE_ADDRESS_COUNTRIES', isLocal: false, isForeign: false, isUnknown: true };
+    if (countries.length === 1) {
+      const local = countries[0] === normTarget;
+      return {classification: local ? 'LOCAL_VERIFIED' : 'FOREIGN_VERIFIED', targetCountryCode: normTarget, businessCountryCode: countries[0], confidence: 'HIGH', evidence: [`Public Page address claim: ${page.addressText}`, page.sourceUrl, `Checked: ${page.checkedAt}`], reason: 'Country inferred from the matched public Page address, not ad targeting or manager location. The address is a public business claim.', reasonCode: 'PUBLIC_PAGE_ADDRESS_COUNTRY', isLocal: local, isForeign: !local, isUnknown: false};
+    }
+  }
   const targetProfile = getCountryProfile(normTarget);
 
   if (!targetProfile) {

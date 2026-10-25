@@ -21,6 +21,7 @@ import type {
 import { LeadRelevanceEngine } from './relevanceEngine.ts';
 import type { ResearchIntent } from './relevanceEngine.ts';
 import { evaluateGeographicOrigin } from './geographicClassifier.ts';
+import { businessPageAboutUrl } from './publicPageEvidence.ts';
 import { classifyCta, classifyDestination, aggregateAdEvidence, observedWebsiteState } from './destinationClassifier.ts';
 import {
   evaluateStrictRelevanceV3,
@@ -148,6 +149,7 @@ export async function processBatch(
   }
 
   for (const cand of candidates) {
+    if (cand.businessPageEvidence && (!businessPageAboutUrl(cand.facebookPageUrl || cand.pageUrl) || businessPageAboutUrl(cand.businessPageEvidence.sourceUrl) !== businessPageAboutUrl(cand.facebookPageUrl || cand.pageUrl))) cand.businessPageEvidence = undefined;
     // 1. Duplicate ad protection
     if (seenAdLibraryIds.has(cand.libraryId)) {
       counters.duplicatesRemoved++;
@@ -171,6 +173,11 @@ export async function processBatch(
           counters.duplicatesRemoved++;
           counters.entityMergesCount = (counters.entityMergesCount || 0) + 1;
           mergeCandidateIntoEntity(existingEntity, cand, mergeDecision, currentKeyword, countryCode);
+          if (cand.businessPageEvidence?.status === 'CHECKED') {
+            existingEntity.businessPageEvidence = cand.businessPageEvidence;
+            const pageWebsite = cand.businessPageEvidence.websiteUrls.find(url => observedWebsiteState(url) === 'found');
+            if (pageWebsite) { existingEntity.businessWebsiteUrl = pageWebsite; existingEntity.websiteState = 'found'; }
+          }
 
           // Aggregate creative signals into existing entity with anti-inflation
           const newSignals = extractCreativeSignalsFromCandidate(cand);
@@ -181,6 +188,7 @@ export async function processBatch(
 
           // Re-evaluate geographic origin if new signals provide stronger corroboration
           const updatedGeo = evaluateGeographicOrigin({
+            businessPageEvidence: cand.businessPageEvidence || existingEntity.businessPageEvidence,
             pageName: existingEntity.name,
             pageUrl: existingEntity.facebookPageUrl,
             destinationUrl: existingEntity.destinationUrl,
@@ -193,6 +201,8 @@ export async function processBatch(
             !existingEntity.geographicClassification ||
             existingEntity.geographicClassification === 'LOCATION_UNKNOWN' ||
             updatedGeo.classification === 'FOREIGN_VERIFIED' ||
+            updatedGeo.reasonCode === 'PUBLIC_PAGE_ADDRESS_COUNTRY' ||
+            updatedGeo.reasonCode === 'MULTIPLE_PAGE_ADDRESS_COUNTRIES' ||
             (existingEntity.geographicClassification === 'LOCAL_PROBABLE' && updatedGeo.classification === 'LOCAL_VERIFIED') ||
             updatedGeo.reasonCode === 'CONFLICTING_LOCATION_EVIDENCE';
 
@@ -309,6 +319,7 @@ export async function processBatch(
       const domainNorm = normalizeDestinationDomain(cand.destinationUrl, cand.destinationDomain);
 
       const geoEval = evaluateGeographicOrigin({
+        businessPageEvidence: cand.businessPageEvidence,
         pageName: cleanName,
         pageUrl: pageNorm.canonicalUrl || cand.facebookPageUrl || cand.pageUrl,
         destinationUrl: domainNorm.cleanUrl || cand.destinationUrl,
@@ -405,7 +416,8 @@ export async function processBatch(
       }
 
       // Construct unified ExtensionLead with identity metadata and evidence coverage
-      const webState = observedWebsiteState(domainNorm.cleanUrl || cand.destinationUrl, domainNorm.canonicalDomain || cand.destinationDomain);
+      const pageWebsite = cand.businessPageEvidence?.status === 'CHECKED' ? cand.businessPageEvidence.websiteUrls.find(url => observedWebsiteState(url) === 'found') : undefined;
+      const webState = observedWebsiteState(pageWebsite || domainNorm.cleanUrl || cand.destinationUrl, pageWebsite ? undefined : domainNorm.canonicalDomain || cand.destinationDomain);
       const fbState = (pageNorm.canonicalUrl || cand.facebookPageUrl) ? 'found' : 'not_found';
 
       const candAdEvidenceItem: AdLevelEvidence = {
@@ -434,6 +446,8 @@ export async function processBatch(
       const contactProfile = aggregateContactObservations(incomingContacts);
 
       const newLead: ExtensionLead = {
+        businessPageEvidence: cand.businessPageEvidence,
+        businessWebsiteUrl: pageWebsite,
         id: `lead_${runId}_${entityKey}`,
         name: cleanName,
         canonicalName: cleanName,

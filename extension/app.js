@@ -20215,7 +20215,7 @@ var ResultDetailDrawer = ({
     services: [],
     businessStatus: "Operational"
   };
-  const location = lead.locationDetails || {
+  const location2 = lead.locationDetails || {
     address: lead.addresses?.[0]?.addressLine,
     city: lead.addresses?.[0]?.locality,
     addresses: (lead.addresses || []).map((a) => a.addressLine)
@@ -20310,12 +20310,12 @@ var ResultDetailDrawer = ({
                     "Type: ",
                     /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("strong", { className: "text-slate-200", children: identity.entityTypeLabel })
                   ] }),
-                  location.city && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
+                  location2.city && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
                     /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { children: "\u2022" }),
                     /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("span", { children: [
                       "\u{1F4CD} ",
-                      location.city,
-                      location.country ? `, ${location.country}` : ""
+                      location2.city,
+                      location2.country ? `, ${location2.country}` : ""
                     ] })
                   ] }),
                   business.categories.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
@@ -20361,6 +20361,15 @@ var ResultDetailDrawer = ({
             ] }),
             /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "p-4 overflow-y-auto flex flex-col gap-4 text-xs text-slate-300", children: [
               /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(LeadFollowupPanel, { record: lead.canonicalRecord || lead, recordId: lead.recordId }, lead.recordId),
+              lead.canonicalRecord?.businessPageEvidence && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("details", { className: "rounded-lg border border-slate-800 p-3", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("summary", { className: "cursor-pointer font-semibold", children: "Facebook Page check" }),
+                /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "mt-2", children: lead.canonicalRecord.businessPageEvidence.reason }),
+                /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("p", { className: "mt-2 text-slate-400", children: [
+                  "Checked: ",
+                  lead.canonicalRecord.businessPageEvidence.checkedAt
+                ] }),
+                getSafeExternalUrl(lead.canonicalRecord.businessPageEvidence.sourceUrl) && /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("a", { className: "mt-2 block text-sky-300 underline", href: getSafeExternalUrl(lead.canonicalRecord.businessPageEvidence.sourceUrl), target: "_blank", rel: "noopener noreferrer", children: "Open source Page" })
+              ] }),
               /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "p-3 bg-slate-950/60 rounded-lg border border-slate-800 flex flex-col gap-1.5", children: [
                 /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h3", { className: "text-xs font-semibold uppercase tracking-wider text-slate-400", children: "1. Identity" }),
                 /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "grid grid-cols-2 gap-2 text-[11px]", children: [
@@ -20421,13 +20430,13 @@ var ResultDetailDrawer = ({
               /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "p-3 bg-slate-950/60 rounded-lg border border-slate-800 flex flex-col gap-1.5", children: [
                 /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h3", { className: "text-xs font-semibold uppercase tracking-wider text-slate-400", children: "3. Location" }),
                 /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "text-[11px] flex flex-col gap-1", children: [
-                  location.addresses.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("ul", { className: "space-y-1", children: location.addresses.map((addr, i) => /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("li", { className: "p-1.5 bg-slate-900 rounded border border-slate-800 text-slate-200 flex items-start gap-1.5", children: [
+                  location2.addresses.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("ul", { className: "space-y-1", children: location2.addresses.map((addr, i) => /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("li", { className: "p-1.5 bg-slate-900 rounded border border-slate-800 text-slate-200 flex items-start gap-1.5", children: [
                     /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { children: "\u{1F4CD}" }),
                     /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { children: addr })
                   ] }, i)) }) : /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "text-slate-500", children: "Physical address data not available." }),
-                  location.city && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "mt-1 text-slate-400", children: [
+                  location2.city && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "mt-1 text-slate-400", children: [
                     /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { children: "Geographic Scope: " }),
-                    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("strong", { className: "text-slate-200", children: [location.city, location.region, location.country].filter(Boolean).join(", ") })
+                    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("strong", { className: "text-slate-200", children: [location2.city, location2.region, location2.country].filter(Boolean).join(", ") })
                   ] }),
                   lead.geographicClassification && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "mt-1.5 p-2 bg-slate-900 rounded border border-slate-800 text-[11px] flex flex-col gap-1", children: [
                     /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "flex items-center justify-between", children: [
@@ -20446,9 +20455,9 @@ var ResultDetailDrawer = ({
                     ] }),
                     /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "text-[9px] text-slate-500 mt-0.5", children: "* Targeting intent, ad delivery, or currency is not treated as proof of physical business location." })
                   ] }),
-                  location.coordinates && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "text-slate-500 font-mono text-[10px]", children: [
+                  location2.coordinates && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "text-slate-500 font-mono text-[10px]", children: [
                     "Coordinates: ",
-                    location.coordinates
+                    location2.coordinates
                   ] })
                 ] })
               ] }),
@@ -22109,7 +22118,7 @@ function extensionLeadToResultRowViewModel(lead) {
   const entityId = lead.pageId || lead.leadId || recordId;
   const displayName = lead.name || lead.advertiserName || "Unknown Business";
   const category = lead.category || lead.matchedKeywords && lead.matchedKeywords[0] || void 0;
-  const rawUrl = lead.destinationUrl || lead.websiteUrl;
+  const rawUrl = lead.businessWebsiteUrl || lead.destinationUrl || lead.websiteUrl;
   const safeWeb = observedWebsiteState(rawUrl, lead.destinationDomain) === "found" ? getSafeExternalUrl(resolveObservedDestinationUrl(rawUrl)) : void 0;
   const phone = lead.businessPhone || lead.phone || lead.phones?.[0] || lead.contactProfile?.observedPhones?.[0]?.normalizedValue || lead.contactProfile?.observedPhones?.[0]?.rawValue;
   const email = lead.businessEmail || lead.email || lead.emails?.[0] || lead.contactProfile?.observedEmails?.[0]?.normalizedValue || lead.contactProfile?.observedEmails?.[0]?.rawValue;
@@ -22803,15 +22812,15 @@ function extensionLeadToResultDetailViewModel(lead) {
   const businessDetails = {
     categories: lead.matchedKeywords || [],
     services: [],
-    serviceAreas: [lead.locationName || lead.targetCountryCode || "Global"],
+    serviceAreas: [],
     businessStatus: toFriendlyStatus("OPERATIONAL")
   };
   const locationDetails = {
-    address: lead.businessLocationEvidence && lead.businessLocationEvidence[0] || void 0,
-    city: lead.locationName,
+    address: lead.businessPageEvidence?.addressText || void 0,
+    city: void 0,
     region: void 0,
-    country: lead.businessCountryCode || lead.targetCountryCode,
-    addresses: lead.businessLocationEvidence || []
+    country: lead.businessCountryCode,
+    addresses: lead.businessPageEvidence?.addressText ? [lead.businessPageEvidence.addressText] : []
   };
   const digitalPresence = {
     websiteUrl: row.websiteUrl,
@@ -22857,6 +22866,7 @@ function extensionLeadToResultDetailViewModel(lead) {
     displayName: row.displayName,
     aliases,
     identityConfidence: lead.businessLocationConfidence || "HIGH",
+    canonicalRecord: lead,
     contradictionFlags: [],
     primarySource: "META",
     contributingSources: ["META"],
@@ -22870,7 +22880,7 @@ function extensionLeadToResultDetailViewModel(lead) {
     websiteVerificationStatus: lead.websiteState === "found" ? "FOUND" : "NOT_OBSERVED",
     phones: lead.businessPhone ? [{ number: lead.businessPhone, type: "BUSINESS", observation: "Observed on Ad Card" }] : [],
     emails: lead.businessEmail ? [{ address: lead.businessEmail, classification: "BUSINESS", observation: "Observed on Ad Card" }] : [],
-    addresses: (lead.businessLocationEvidence || []).map((a) => ({ addressLine: a, isBranch: false })),
+    addresses: lead.businessPageEvidence?.addressText ? [{ addressLine: lead.businessPageEvidence.addressText, isBranch: false }] : [],
     hasContactForm: Boolean((lead.destinationTypes || []).includes("INSTANT_FORM")),
     socialLinks: lead.facebookPageUrl ? [{ platform: "Facebook", url: lead.facebookPageUrl }] : [],
     qualificationState: row.qualificationState,
@@ -25852,6 +25862,25 @@ function parseUserSuppliedCsv(csvContent, defaultCountry = "BD") {
 // src/extension/bulkProcessor.ts
 init_relevanceEngine();
 
+// src/extension/publicPageEvidence.ts
+function businessPageAboutUrl(raw) {
+  try {
+    const url = new URL(raw || "");
+    if (url.protocol !== "https:" || !["www.facebook.com", "web.facebook.com", "facebook.com"].includes(url.hostname) || url.username || url.password) return;
+    if (url.pathname === "/profile.php") {
+      const id = url.searchParams.get("id");
+      return id && /^\d+$/.test(id) ? `https://www.facebook.com/profile.php?id=${id}&sk=about` : void 0;
+    }
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (!parts.length || ["ads", "groups", "events", "watch", "reel", "reels", "login", "help", "settings", "l.php", "share", "sharer.php", "marketplace", "search", "photo.php", "photos", "stories"].includes(parts[0].toLowerCase())) return;
+    if (parts.length > 1 && !["about", "about_details"].includes(parts[1])) return;
+    if (!/^[\w.\-]+$/.test(parts[0])) return;
+    return `https://www.facebook.com/${parts[0]}/about`;
+  } catch {
+    return;
+  }
+}
+
 // src/extension/countryProfiles/profiles/bd.ts
 var BD_PROFILE = {
   countryCode: "BD",
@@ -26753,6 +26782,15 @@ function detectSignalsForProfile(profile, inputs, textToScan) {
 function evaluateGeographicOrigin(inputs, targetCountryCode = "BD") {
   const rawTarget = targetCountryCode ? targetCountryCode.trim().toUpperCase() : "BD";
   const normTarget = normalizeCountryCode(rawTarget) || rawTarget;
+  const page = inputs.businessPageEvidence;
+  if (page?.status === "CHECKED" && page.addressText && businessPageAboutUrl(page.sourceUrl) && businessPageAboutUrl(page.sourceUrl) === businessPageAboutUrl(inputs.pageUrl)) {
+    const countries = [...new Set(page.addressCountryCodes)];
+    if (countries.length > 1) return { classification: "LOCATION_UNKNOWN", targetCountryCode: normTarget, confidence: "NONE", evidence: [page.sourceUrl, page.addressText], reason: "The public Page lists addresses in multiple countries; business origin needs review.", reasonCode: "MULTIPLE_PAGE_ADDRESS_COUNTRIES", isLocal: false, isForeign: false, isUnknown: true };
+    if (countries.length === 1) {
+      const local = countries[0] === normTarget;
+      return { classification: local ? "LOCAL_VERIFIED" : "FOREIGN_VERIFIED", targetCountryCode: normTarget, businessCountryCode: countries[0], confidence: "HIGH", evidence: [`Public Page address claim: ${page.addressText}`, page.sourceUrl, `Checked: ${page.checkedAt}`], reason: "Country inferred from the matched public Page address, not ad targeting or manager location. The address is a public business claim.", reasonCode: "PUBLIC_PAGE_ADDRESS_COUNTRY", isLocal: local, isForeign: !local, isUnknown: false };
+    }
+  }
   const targetProfile = getCountryProfile(normTarget);
   if (!targetProfile) {
     return {
@@ -27363,7 +27401,7 @@ function evaluateLeadQualificationGates(lead, criteria) {
   const reqWebMode = criteria?.websiteRequirement;
   const isWebsiteDestination = lead.primaryDestinationType === "EXTERNAL_WEBSITE" || lead.observedDestinationTypes && lead.observedDestinationTypes.includes("EXTERNAL_WEBSITE");
   if (reqWebMode === "WITH_WEBSITE" || reqWebMode === "WITH") {
-    if (lead.websiteState !== "found" || !lead.destinationUrl && !lead.destinationDomain) {
+    if (lead.websiteState !== "found" || !lead.businessWebsiteUrl && !lead.destinationUrl && !lead.destinationDomain) {
       failedGates.push("GATE_WEBSITE");
       reasons.push("Configured website requirement (WITH_WEBSITE) failed: external website destination is unobserved, missing, or unverified.");
     } else {
@@ -27372,7 +27410,7 @@ function evaluateLeadQualificationGates(lead, criteria) {
   } else if (reqWebMode === "WITHOUT_OBSERVED_WEBSITE") {
     if (lead.websiteState === "found") {
       failedGates.push("GATE_WEBSITE");
-      reasons.push("An external website was observed in this ad.");
+      reasons.push("An external website was observed in the ad or public business Page.");
     } else {
       passedGates.push("GATE_WEBSITE");
       reasons.push("No external website was observed; the business may still have one.");
@@ -27544,7 +27582,12 @@ function exportLeadsToCsv(leads, runOrOptions, options) {
     "Lead Priority Score",
     "Prioritization Tier",
     "Score Model Version",
-    "Score Explanation"
+    "Score Explanation",
+    "Business Website (Page)",
+    "Page Check Status",
+    "Page Check Source",
+    "Page Checked At",
+    "Page Check Explanation"
   ];
   const rows = exportLeads.map((l) => {
     const isCanonical = Boolean(l && typeof l === "object" && ("canonicalEntityId" in l || "canonicalBusinessName" in l));
@@ -27624,7 +27667,12 @@ function exportLeadsToCsv(leads, runOrOptions, options) {
       sanitizeCsvField(l.leadScore !== void 0 ? l.leadScore : "N/A"),
       sanitizeCsvField(l.prioritizationTier || "UNRANKED"),
       sanitizeCsvField(l.scoreModelVersion || "leadnoria-scoring-v1"),
-      sanitizeCsvField(l.scoreExplanation || "")
+      sanitizeCsvField(l.scoreExplanation || ""),
+      sanitizeCsvField(l.businessWebsiteUrl || ""),
+      sanitizeCsvField(l.businessPageEvidence?.status || "NOT_CHECKED"),
+      sanitizeCsvField(l.businessPageEvidence?.sourceUrl || ""),
+      sanitizeCsvField(l.businessPageEvidence?.checkedAt || ""),
+      sanitizeCsvField(l.businessPageEvidence?.reason || "")
     ];
   });
   return metaHeader + [headers.join(","), ...rows.map((r) => r.join(","))].join("\r\n");
@@ -28805,6 +28853,7 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
     entityIndex.indexEntity(key, lead);
   }
   for (const cand of candidates) {
+    if (cand.businessPageEvidence && (!businessPageAboutUrl(cand.facebookPageUrl || cand.pageUrl) || businessPageAboutUrl(cand.businessPageEvidence.sourceUrl) !== businessPageAboutUrl(cand.facebookPageUrl || cand.pageUrl))) cand.businessPageEvidence = void 0;
     if (seenAdLibraryIds.has(cand.libraryId)) {
       counters.duplicatesRemoved++;
       counters.duplicateAdRecordsRemoved = (counters.duplicateAdRecordsRemoved || 0) + 1;
@@ -28822,12 +28871,21 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
         counters.duplicatesRemoved++;
         counters.entityMergesCount = (counters.entityMergesCount || 0) + 1;
         mergeCandidateIntoEntity(existingEntity, cand, mergeDecision, currentKeyword, countryCode);
+        if (cand.businessPageEvidence?.status === "CHECKED") {
+          existingEntity.businessPageEvidence = cand.businessPageEvidence;
+          const pageWebsite2 = cand.businessPageEvidence.websiteUrls.find((url) => observedWebsiteState(url) === "found");
+          if (pageWebsite2) {
+            existingEntity.businessWebsiteUrl = pageWebsite2;
+            existingEntity.websiteState = "found";
+          }
+        }
         const newSignals = extractCreativeSignalsFromCandidate(cand);
         existingEntity.creativeSignals = aggregateCreativeSignals([
           ...existingEntity.creativeSignals || [],
           ...newSignals
         ]);
         const updatedGeo = evaluateGeographicOrigin({
+          businessPageEvidence: cand.businessPageEvidence || existingEntity.businessPageEvidence,
           pageName: existingEntity.name,
           pageUrl: existingEntity.facebookPageUrl,
           destinationUrl: existingEntity.destinationUrl,
@@ -28835,7 +28893,7 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
           bodyCopy: [existingEntity.sampleCopy, cand.bodyCopy].filter(Boolean).join(" "),
           ctaText: [existingEntity.sampleCta, cand.ctaText].filter(Boolean).join(" ")
         }, countryCode);
-        const shouldUpdateGeo = !existingEntity.geographicClassification || existingEntity.geographicClassification === "LOCATION_UNKNOWN" || updatedGeo.classification === "FOREIGN_VERIFIED" || existingEntity.geographicClassification === "LOCAL_PROBABLE" && updatedGeo.classification === "LOCAL_VERIFIED" || updatedGeo.reasonCode === "CONFLICTING_LOCATION_EVIDENCE";
+        const shouldUpdateGeo = !existingEntity.geographicClassification || existingEntity.geographicClassification === "LOCATION_UNKNOWN" || updatedGeo.classification === "FOREIGN_VERIFIED" || updatedGeo.reasonCode === "PUBLIC_PAGE_ADDRESS_COUNTRY" || updatedGeo.reasonCode === "MULTIPLE_PAGE_ADDRESS_COUNTRIES" || existingEntity.geographicClassification === "LOCAL_PROBABLE" && updatedGeo.classification === "LOCAL_VERIFIED" || updatedGeo.reasonCode === "CONFLICTING_LOCATION_EVIDENCE";
         if (shouldUpdateGeo) {
           existingEntity.targetCountryCode = updatedGeo.targetCountryCode;
           existingEntity.businessCountryCode = updatedGeo.businessCountryCode;
@@ -28931,6 +28989,7 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
     const pageNorm = normalizeFacebookPage(cand.facebookPageUrl || cand.pageUrl, cand.facebookPageId || cand.pageId);
     const domainNorm = normalizeDestinationDomain(cand.destinationUrl, cand.destinationDomain);
     const geoEval = evaluateGeographicOrigin({
+      businessPageEvidence: cand.businessPageEvidence,
       pageName: cleanName,
       pageUrl: pageNorm.canonicalUrl || cand.facebookPageUrl || cand.pageUrl,
       destinationUrl: domainNorm.cleanUrl || cand.destinationUrl,
@@ -29011,7 +29070,8 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
       safetyLimitReached = true;
       break;
     }
-    const webState = observedWebsiteState(domainNorm.cleanUrl || cand.destinationUrl, domainNorm.canonicalDomain || cand.destinationDomain);
+    const pageWebsite = cand.businessPageEvidence?.status === "CHECKED" ? cand.businessPageEvidence.websiteUrls.find((url) => observedWebsiteState(url) === "found") : void 0;
+    const webState = observedWebsiteState(pageWebsite || domainNorm.cleanUrl || cand.destinationUrl, pageWebsite ? void 0 : domainNorm.canonicalDomain || cand.destinationDomain);
     const fbState = pageNorm.canonicalUrl || cand.facebookPageUrl ? "found" : "not_found";
     const candAdEvidenceItem = {
       libraryId: cand.libraryId,
@@ -29037,6 +29097,8 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
     ];
     const contactProfile = aggregateContactObservations(incomingContacts);
     const newLead = {
+      businessPageEvidence: cand.businessPageEvidence,
+      businessWebsiteUrl: pageWebsite,
       id: `lead_${runId}_${entityKey}`,
       name: cleanName,
       canonicalName: cleanName,

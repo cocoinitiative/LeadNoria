@@ -124,8 +124,8 @@ const manifest = {
     "sidePanel"
   ],
   host_permissions: [
-    "https://www.facebook.com/ads/library/*",
-    "https://web.facebook.com/ads/library/*"
+    "https://www.facebook.com/*",
+    "https://web.facebook.com/*"
   ],
   background: {
     service_worker: "service-worker.js",

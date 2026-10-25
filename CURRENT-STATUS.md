@@ -2,6 +2,8 @@
 
 ## Current extension
 
+- Public Facebook About enrichment: up to 40 unique Page checks per run, identity/name checks, Page website separate from ad CTA, explicit published-address country evidence, cached checks, and source/time/status in details and CSV. See [quality research and limits](docs/current-review/public-page-quality.md). This new enrichment has not been live-tested.
+
 - Simplified collection: Start runs directly on Search, with a spinning lead counter and Stop underneath. No review popup or separate progress page is required. See [UI checks](docs/current-review/simple-collection-ui.md).
 
 - User-requested Meta Ad Library collection now checks installed Chrome extension capabilities instead of the permanently false server gate. UI and background worker use the same check. Hosted previews cannot start collection.
@@ -12,7 +14,7 @@
 
 ## Verification
 
-`npm test` runs TypeScript, the unpacked build, and 27 current offline suites. The new mocked Chrome pipeline exercises startup, country/All Ads URLs, empty results, persistence, pause and challenge stop. Mock tests make no live Meta requests.
+`npm test` runs TypeScript, the unpacked build, and 28 current offline suites. The new mocked Chrome pipeline exercises startup, country/All Ads URLs, empty results, persistence, pause and challenge stop. Mock tests make no live Meta requests.
 
 Previous hosted-browser checks covered imports, reload, business history, local notes, Sheets columns and a downloaded CSV. They do not prove MV3 runtime behavior.
 

@@ -401,7 +401,18 @@ export interface AdLevelEvidence {
   contactObservations?: ContactObservation[];
 }
 
+export interface BusinessPageEvidence {
+  sourceUrl: string;
+  checkedAt: string;
+  status: 'CHECKED' | 'BLOCKED' | 'UNAVAILABLE' | 'IDENTITY_MISMATCH';
+  websiteUrls: string[];
+  addressCountryCodes: string[];
+  addressText?: string;
+  reason: string;
+}
+
 export interface ScrapedAdCandidate {
+  businessPageEvidence?: BusinessPageEvidence;
   libraryId: string;
   pageName: string;
   facebookPageUrl?: string;
@@ -431,6 +442,8 @@ export interface ScrapedAdCandidate {
 }
 
 export interface ExtensionLead {
+  businessPageEvidence?: BusinessPageEvidence;
+  businessWebsiteUrl?: string;
   id: string;
   name: string;
   canonicalName: string;

@@ -144,7 +144,7 @@ export function evaluateLeadQualificationGates(
     (lead.observedDestinationTypes && lead.observedDestinationTypes.includes('EXTERNAL_WEBSITE'));
 
   if (reqWebMode === 'WITH_WEBSITE' || reqWebMode === 'WITH') {
-    if (lead.websiteState !== 'found' || (!lead.destinationUrl && !lead.destinationDomain)) {
+    if (lead.websiteState !== 'found' || (!lead.businessWebsiteUrl && !lead.destinationUrl && !lead.destinationDomain)) {
       failedGates.push('GATE_WEBSITE');
       reasons.push('Configured website requirement (WITH_WEBSITE) failed: external website destination is unobserved, missing, or unverified.');
     } else {
@@ -153,7 +153,7 @@ export function evaluateLeadQualificationGates(
   } else if (reqWebMode === 'WITHOUT_OBSERVED_WEBSITE') {
     if (lead.websiteState === 'found') {
       failedGates.push('GATE_WEBSITE');
-      reasons.push('An external website was observed in this ad.');
+      reasons.push('An external website was observed in the ad or public business Page.');
     } else {
       passedGates.push('GATE_WEBSITE');
       reasons.push('No external website was observed; the business may still have one.');

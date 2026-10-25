@@ -3198,6 +3198,672 @@ var MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH = 5e3;
 // src/extension/metaAdapter.ts
 init_relevanceEngine();
 
+// src/extension/destinationClassifier.ts
+function resolveObservedDestinationUrl(raw) {
+  if (!raw?.trim()) return void 0;
+  let value = raw.trim();
+  for (let depth = 0; depth < 5; depth++) {
+    try {
+      if (!/^[a-z][a-z\d+.-]*:/i.test(value)) value = `https://${value}`;
+      const url = new URL(value);
+      if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) return void 0;
+      const host = url.hostname.toLowerCase();
+      const wrapper = (host === "facebook.com" || host.endsWith(".facebook.com")) && url.pathname === "/l.php" || host === "l.instagram.com";
+      if (!wrapper) return url.href;
+      const next = url.searchParams.get("u");
+      if (!next || next === value) return void 0;
+      value = next;
+    } catch {
+      return void 0;
+    }
+  }
+  return void 0;
+}
+function observedWebsiteState(destinationUrl, destinationDomain) {
+  return classifyDestination({ destinationUrl, destinationDomain }).destinationType === "EXTERNAL_WEBSITE" && Boolean(destinationUrl || destinationDomain) ? "found" : "unknown";
+}
+function classifyCta(rawCtaText) {
+  if (!rawCtaText) {
+    return {
+      ctaType: "UNKNOWN",
+      rawCtaText: void 0,
+      originalCtaText: void 0,
+      normalizedText: "",
+      status: "MISSING",
+      confidence: "NONE",
+      evidence: "No visible call-to-action button or text observed.",
+      reasonCode: "CTA_TEXT_MISSING",
+      reason: "No visible call-to-action button or text observed."
+    };
+  }
+  const rawPreserved = rawCtaText.trim();
+  const normalizedText = rawPreserved.replace(/\s+/g, " ");
+  if (!normalizedText) {
+    return {
+      ctaType: "UNKNOWN",
+      rawCtaText: void 0,
+      originalCtaText: void 0,
+      normalizedText: "",
+      status: "MISSING",
+      confidence: "NONE",
+      evidence: "Call-to-action text is whitespace-only.",
+      reasonCode: "CTA_TEXT_MISSING",
+      reason: "Call-to-action text is whitespace-only."
+    };
+  }
+  const clean = normalizedText.replace(/^[\p{P}\s]+|[\p{P}\s]+$/gu, "").toLowerCase();
+  const hasCall = /\b(?:call|phone)\b/i.test(clean);
+  const hasDownload = /\b(?:download|install|app)\b/i.test(clean);
+  const hasShop = /\b(?:shop|buy|order)\b/i.test(clean);
+  const hasMsg = /\b(?:message|whatsapp|chat)\b/i.test(clean);
+  const intentCount = [hasCall, hasDownload, hasShop, hasMsg].filter(Boolean).length;
+  if (intentCount >= 2) {
+    return {
+      ctaType: "OTHER",
+      rawCtaText: rawPreserved,
+      originalCtaText: rawPreserved,
+      normalizedText,
+      status: "AMBIGUOUS",
+      confidence: "LOW",
+      evidence: `Ambiguous CTA text containing multiple conflicting action intents: "${normalizedText}".`,
+      reasonCode: "CTA_TEXT_AMBIGUOUS",
+      reason: `Call-to-action text combines multiple distinct intents ("${normalizedText}").`
+    };
+  }
+  if (/^(?:shop(?:\s*now|\s*collection)?|buy(?:\s*now)?|order(?:\s*now)?)$/i.test(clean)) {
+    return {
+      ctaType: "SHOP_NOW",
+      rawCtaText: rawPreserved,
+      originalCtaText: rawPreserved,
+      normalizedText,
+      status: "CLASSIFIED",
+      confidence: "HIGH",
+      evidence: "Recognized call-to-action intent: SHOP_NOW.",
+      reasonCode: "CTA_TEXT_MATCH",
+      reason: "Recognized call-to-action intent: SHOP_NOW."
+    };
+  }
+  if (/^(?:learn(?:\s*more)?|explore(?:\s*more)?|see(?:\s*more)?|read(?:\s*more)?|view(?:\s*more)?)$/i.test(clean)) {
+    return {
+      ctaType: "LEARN_MORE",
+      rawCtaText: rawPreserved,
+      originalCtaText: rawPreserved,
+      normalizedText,
+      status: "CLASSIFIED",
+      confidence: "HIGH",
+      evidence: "Recognized call-to-action intent: LEARN_MORE.",
+      reasonCode: "CTA_TEXT_MATCH",
+      reason: "Recognized call-to-action intent: LEARN_MORE."
+    };
+  }
+  if (/^(?:sign(?:\s*up)?|register(?:\s*now)?|subscribe|join(?:\s*now|\s*us)?)$/i.test(clean)) {
+    return {
+      ctaType: "SIGN_UP",
+      rawCtaText: rawPreserved,
+      originalCtaText: rawPreserved,
+      normalizedText,
+      status: "CLASSIFIED",
+      confidence: "HIGH",
+      evidence: "Recognized call-to-action intent: SIGN_UP.",
+      reasonCode: "CTA_TEXT_MATCH",
+      reason: "Recognized call-to-action intent: SIGN_UP."
+    };
+  }
+  if (/^(?:contact(?:\s*us)?|inquire(?:\s*now)?|get(?:\s*in\s*touch)?|send(?:\s*inquiry)?)$/i.test(clean)) {
+    return {
+      ctaType: "CONTACT_US",
+      rawCtaText: rawPreserved,
+      originalCtaText: rawPreserved,
+      normalizedText,
+      status: "CLASSIFIED",
+      confidence: "HIGH",
+      evidence: "Recognized call-to-action intent: CONTACT_US.",
+      reasonCode: "CTA_TEXT_MATCH",
+      reason: "Recognized call-to-action intent: CONTACT_US."
+    };
+  }
+  if (/^(?:send(?:\s*message|\s*whatsapp(?:\s*message)?)?|message(?:\s*us)?|chat(?:\s*now)?|whatsapp)$/i.test(clean)) {
+    return {
+      ctaType: "SEND_MESSAGE",
+      rawCtaText: rawPreserved,
+      originalCtaText: rawPreserved,
+      normalizedText,
+      status: "CLASSIFIED",
+      confidence: "HIGH",
+      evidence: "Recognized call-to-action intent: SEND_MESSAGE.",
+      reasonCode: "CTA_TEXT_MATCH",
+      reason: "Recognized call-to-action intent: SEND_MESSAGE."
+    };
+  }
+  if (/^(?:call(?:\s*now|\s*us)?|phone(?:\s*us)?)$/i.test(clean)) {
+    return {
+      ctaType: "CALL_NOW",
+      rawCtaText: rawPreserved,
+      originalCtaText: rawPreserved,
+      normalizedText,
+      status: "CLASSIFIED",
+      confidence: "HIGH",
+      evidence: "Recognized call-to-action intent: CALL_NOW.",
+      reasonCode: "CTA_TEXT_MATCH",
+      reason: "Recognized call-to-action intent: CALL_NOW."
+    };
+  }
+  if (/^(?:download(?:\s*now)?|install(?:\s*now)?|get(?:\s*app)?)$/i.test(clean)) {
+    return {
+      ctaType: "DOWNLOAD",
+      rawCtaText: rawPreserved,
+      originalCtaText: rawPreserved,
+      normalizedText,
+      status: "CLASSIFIED",
+      confidence: "HIGH",
+      evidence: "Recognized call-to-action intent: DOWNLOAD.",
+      reasonCode: "CTA_TEXT_MATCH",
+      reason: "Recognized call-to-action intent: DOWNLOAD."
+    };
+  }
+  if (/^(?:get(?:\s*quote|\s*offer)?|request(?:\s*quote)?|apply(?:\s*now)?)$/i.test(clean)) {
+    return {
+      ctaType: "GET_QUOTE",
+      rawCtaText: rawPreserved,
+      originalCtaText: rawPreserved,
+      normalizedText,
+      status: "CLASSIFIED",
+      confidence: "HIGH",
+      evidence: "Recognized call-to-action intent: GET_QUOTE.",
+      reasonCode: "CTA_TEXT_MATCH",
+      reason: "Recognized call-to-action intent: GET_QUOTE."
+    };
+  }
+  return {
+    ctaType: "OTHER",
+    rawCtaText: rawPreserved,
+    originalCtaText: rawPreserved,
+    normalizedText,
+    status: "UNSUPPORTED",
+    confidence: "LOW",
+    evidence: `Observed visible CTA text: "${normalizedText}".`,
+    reasonCode: "CTA_TEXT_OTHER",
+    reason: `Observed visible CTA text: "${normalizedText}".`
+  };
+}
+function classifyDestination(inputs) {
+  const rawUrl = (inputs.destinationUrl || "").trim();
+  const hasNoDest = Boolean(inputs.hasNoDestination || inputs.hasNoDestinationSignal);
+  if (hasNoDest && rawUrl) {
+    return {
+      destinationType: "UNKNOWN",
+      confidence: "LOW",
+      reasonCode: "CONFLICTING_DESTINATION_SIGNALS",
+      reason: "Ad marked with no destination signal but destination URL is present."
+    };
+  }
+  if (hasNoDest) {
+    return {
+      destinationType: "NO_VISIBLE_DESTINATION",
+      confidence: "HIGH",
+      reasonCode: "DESTINATION_NOT_OBSERVED",
+      reason: "Explicit observation that ad creative contains no clickable destination or action button."
+    };
+  }
+  if (inputs.hasLeadFormSignal && !rawUrl) {
+    return {
+      destinationType: "INSTANT_FORM",
+      confidence: "HIGH",
+      reasonCode: "EXPLICIT_INSTANT_FORM_SIGNAL",
+      reason: "Meta on-platform instant lead generation form signal detected."
+    };
+  }
+  const targetCtaType = inputs.ctaType || (inputs.ctaText ? classifyCta(inputs.ctaText).ctaType : "UNKNOWN");
+  if (rawUrl) {
+    const lowerUrl = rawUrl.toLowerCase();
+    if (lowerUrl.startsWith("javascript:") || lowerUrl.startsWith("data:") || lowerUrl.startsWith("about:")) {
+      return {
+        destinationType: "UNKNOWN",
+        confidence: "NONE",
+        reasonCode: "MALFORMED_DESTINATION_URL",
+        reason: `Unsupported or invalid script/data URL scheme: "${rawUrl}".`
+      };
+    }
+    if (lowerUrl.startsWith("tel:") || lowerUrl.startsWith("callto:")) {
+      if (targetCtaType === "DOWNLOAD") {
+        return {
+          destinationType: "OTHER",
+          confidence: "LOW",
+          reasonCode: "CONFLICTING_DESTINATION_SIGNALS",
+          reason: "Conflicting destination signals detected between telephone URI and download CTA."
+        };
+      }
+      return {
+        destinationType: "CALL",
+        destinationDomain: void 0,
+        confidence: "HIGH",
+        reasonCode: "EXPLICIT_CALL_SIGNAL",
+        reason: `Direct telephone call URI observed: "${rawUrl}".`
+      };
+    }
+    if (lowerUrl.startsWith("sms:") || lowerUrl.startsWith("whatsapp:") || lowerUrl.startsWith("fb-messenger:") || lowerUrl.startsWith("tg:")) {
+      if (targetCtaType === "CALL_NOW") {
+        return {
+          destinationType: "OTHER",
+          confidence: "LOW",
+          reasonCode: "CONFLICTING_DESTINATION_SIGNALS",
+          reason: "Conflicting destination signals detected between messaging URI and call CTA."
+        };
+      }
+      return {
+        destinationType: "MESSAGING",
+        destinationDomain: void 0,
+        confidence: "HIGH",
+        reasonCode: "EXPLICIT_MESSAGING_SIGNAL",
+        reason: `Direct messaging URI protocol observed: "${rawUrl}".`
+      };
+    }
+    if (lowerUrl.startsWith("market:") || lowerUrl.startsWith("itms-apps:")) {
+      if (targetCtaType === "CALL_NOW" || targetCtaType === "SEND_MESSAGE") {
+        return {
+          destinationType: "OTHER",
+          confidence: "LOW",
+          reasonCode: "CONFLICTING_DESTINATION_SIGNALS",
+          reason: "Conflicting destination signals detected between native app marketplace URI and CTA intent."
+        };
+      }
+      return {
+        destinationType: "APP",
+        destinationDomain: void 0,
+        confidence: "HIGH",
+        reasonCode: "EXPLICIT_APP_SIGNAL",
+        reason: `Native application marketplace protocol URI observed: "${rawUrl}".`
+      };
+    }
+    if (lowerUrl.startsWith("mailto:")) {
+      return {
+        destinationType: "OTHER",
+        destinationDomain: void 0,
+        confidence: "MEDIUM",
+        reasonCode: "EMAIL_DESTINATION_SIGNAL",
+        reason: `Direct email destination URI observed: "${rawUrl}".`
+      };
+    }
+    const resolved = resolveObservedDestinationUrl(rawUrl);
+    let domain = "";
+    const resolvedUrl = (resolved || "").toLowerCase();
+    {
+      try {
+        if (!resolved) throw new Error("Invalid destination");
+        const u = new URL(resolved);
+        const host = u.hostname.toLowerCase();
+        domain = host === "m.me" ? "m.me" : host.replace(/^(?:www\.|m\.|l\.)/, "");
+      } catch {
+        return {
+          destinationType: "UNKNOWN",
+          confidence: "NONE",
+          reasonCode: "MALFORMED_DESTINATION_URL",
+          reason: `Provided destination URL is malformed or invalid: "${rawUrl}".`
+        };
+      }
+    }
+    if (!domain || !domain.includes(".") || domain.length < 4 || domain.endsWith(".") || domain.startsWith(".") || !/^[a-z0-9]([a-z0-9\-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9\-]*[a-z0-9])?)+$/i.test(domain)) {
+      return {
+        destinationType: "UNKNOWN",
+        confidence: "NONE",
+        reasonCode: "MALFORMED_DESTINATION_URL",
+        reason: `Provided destination URL does not contain a valid domain hostname: "${rawUrl}".`
+      };
+    }
+    const isAppUrl = /^(?:play\.google\.com|apps\.apple\.com|itunes\.apple\.com)$/i.test(domain);
+    if (isAppUrl && (targetCtaType === "CALL_NOW" || targetCtaType === "SEND_MESSAGE")) {
+      return {
+        destinationType: "OTHER",
+        confidence: "LOW",
+        reasonCode: "CONFLICTING_DESTINATION_SIGNALS",
+        reason: "Conflicting destination signals detected between action URL (App) and CTA intent."
+      };
+    }
+    if (domain === "wa.me" || domain === "api.whatsapp.com" || domain === "whatsapp.com" || domain === "m.me" || domain === "messenger.com" || domain === "t.me" || domain === "telegram.me" || domain.endsWith(".whatsapp.com") || domain.endsWith(".messenger.com") || domain === "facebook.com" && new URL(resolved).pathname.toLowerCase().startsWith("/messages")) {
+      if (targetCtaType === "CALL_NOW") {
+        return {
+          destinationType: "OTHER",
+          confidence: "LOW",
+          reasonCode: "CONFLICTING_DESTINATION_SIGNALS",
+          reason: "Conflicting destination signals detected between messaging URL and call CTA."
+        };
+      }
+      return {
+        destinationType: "MESSAGING",
+        destinationDomain: domain || void 0,
+        confidence: "HIGH",
+        reasonCode: "EXPLICIT_MESSAGING_SIGNAL",
+        reason: "Verified messaging destination via WhatsApp or Messenger endpoint."
+      };
+    }
+    if (domain === "play.google.com" && resolvedUrl.includes("/store/apps") || domain === "apps.apple.com" || domain === "itunes.apple.com") {
+      return {
+        destinationType: "APP",
+        destinationDomain: domain || void 0,
+        confidence: "HIGH",
+        reasonCode: "EXPLICIT_APP_SIGNAL",
+        reason: "Verified native application marketplace destination."
+      };
+    }
+    if ((domain === "facebook.com" || domain === "fb.com") && (resolvedUrl.includes("/lead_gen/") || resolvedUrl.includes("fb.com/lead_gen") || resolvedUrl.includes("/canvas_doc/") || resolvedUrl.includes("instant_form"))) {
+      return {
+        destinationType: "INSTANT_FORM",
+        destinationDomain: domain || void 0,
+        confidence: "HIGH",
+        reasonCode: "EXPLICIT_INSTANT_FORM_SIGNAL",
+        reason: "Verified Meta on-platform instant lead generation form."
+      };
+    }
+    if (["bit.ly", "tinyurl.com", "t.co", "shorturl.at", "fb.me"].includes(domain)) {
+      return {
+        destinationType: "UNKNOWN",
+        destinationDomain: domain,
+        confidence: "LOW",
+        reasonCode: "UNRESOLVED_SHORT_LINK",
+        reason: "A short link was observed; its final destination cannot be confirmed offline."
+      };
+    }
+    const isInternalSocialDomain = domain === "facebook.com" || domain === "web.facebook.com" || domain === "m.facebook.com" || domain === "fb.com" || domain === "instagram.com" || domain === "meta.com" || ["facebook.com", "fb.com", "instagram.com", "meta.com"].some((suffix) => domain.endsWith(`.${suffix}`));
+    if (!isInternalSocialDomain && domain.length > 3 && domain.includes(".")) {
+      return {
+        destinationType: "EXTERNAL_WEBSITE",
+        destinationDomain: domain,
+        confidence: "HIGH",
+        reasonCode: "VISIBLE_EXTERNAL_DESTINATION",
+        reason: `Positively identified external commercial website: "${domain}".`
+      };
+    }
+    if (isInternalSocialDomain) {
+      return {
+        destinationType: "OTHER",
+        destinationDomain: domain || void 0,
+        confidence: "MEDIUM",
+        reasonCode: "INTERNAL_PAGE_DESTINATION",
+        reason: "Destination directs to internal social page rather than external commercial website."
+      };
+    }
+  }
+  if (targetCtaType === "CALL_NOW") {
+    return {
+      destinationType: "CALL",
+      confidence: "MEDIUM",
+      reasonCode: "EXPLICIT_CALL_SIGNAL",
+      reason: "Direct telephone call action observed from call CTA."
+    };
+  }
+  if (targetCtaType === "SEND_MESSAGE") {
+    return {
+      destinationType: "MESSAGING",
+      confidence: "MEDIUM",
+      reasonCode: "EXPLICIT_MESSAGING_SIGNAL",
+      reason: "Direct messaging flow indicated by messaging CTA without external URL."
+    };
+  }
+  const combinedContext = [inputs.bodyCopy || "", inputs.rawText || ""].join(" ").toLowerCase();
+  if (combinedContext.includes("[instant form]") || combinedContext.includes("lead form")) {
+    return {
+      destinationType: "INSTANT_FORM",
+      confidence: "MEDIUM",
+      reasonCode: "EXPLICIT_INSTANT_FORM_SIGNAL",
+      reason: "Instant form destination indicated by ad metadata."
+    };
+  }
+  if (targetCtaType === "SHOP_NOW" || targetCtaType === "LEARN_MORE" || targetCtaType === "SIGN_UP" || targetCtaType === "GET_QUOTE" || targetCtaType === "DOWNLOAD" || targetCtaType === "CONTACT_US") {
+    return {
+      destinationType: "UNKNOWN",
+      confidence: "LOW",
+      reasonCode: "INSUFFICIENT_DESTINATION_EVIDENCE",
+      reason: "Action button observed but destination URL was not extracted; destination type remains unverified."
+    };
+  }
+  return {
+    destinationType: "UNKNOWN",
+    confidence: "NONE",
+    reasonCode: "DESTINATION_NOT_OBSERVED",
+    reason: "No destination URL or destination metadata observed for this ad candidate."
+  };
+}
+var DESTINATION_PRECEDENCE = {
+  EXTERNAL_WEBSITE: 7,
+  INSTANT_FORM: 6,
+  MESSAGING: 5,
+  CALL: 4,
+  APP: 3,
+  OTHER: 2,
+  NO_VISIBLE_DESTINATION: 1,
+  UNKNOWN: 0
+};
+function aggregateAdEvidence(adEvidenceList) {
+  if (!adEvidenceList || adEvidenceList.length === 0) {
+    return {
+      observedCtaTexts: [],
+      observedCtaTypes: [],
+      observedDestinationTypes: [],
+      primaryCtaType: "UNKNOWN",
+      primaryDestinationType: "UNKNOWN",
+      destinationConfidence: "NONE",
+      destinationReasonCode: "DESTINATION_NOT_OBSERVED"
+    };
+  }
+  const ctaTexts = Array.from(new Set(adEvidenceList.map((e) => e.ctaText).filter(Boolean)));
+  const ctaTypes = Array.from(new Set(adEvidenceList.map((e) => e.ctaType).filter((t) => t !== "UNKNOWN")));
+  const destinationTypes = Array.from(new Set(adEvidenceList.map((e) => e.destinationType)));
+  const ctaCounts = /* @__PURE__ */ new Map();
+  for (const e of adEvidenceList) {
+    if (e.ctaType && e.ctaType !== "UNKNOWN") {
+      ctaCounts.set(e.ctaType, (ctaCounts.get(e.ctaType) || 0) + 1);
+    }
+  }
+  let primaryCta = "UNKNOWN";
+  let maxCtaCount = 0;
+  for (const [type, count] of ctaCounts.entries()) {
+    if (count > maxCtaCount) {
+      maxCtaCount = count;
+      primaryCta = type;
+    }
+  }
+  if (primaryCta === "UNKNOWN" && adEvidenceList.length > 0) {
+    primaryCta = adEvidenceList[0].ctaType;
+  }
+  let primaryDest = "UNKNOWN";
+  let maxPrec = -1;
+  let bestEvidence = adEvidenceList[0];
+  for (const e of adEvidenceList) {
+    const prec = DESTINATION_PRECEDENCE[e.destinationType] ?? 0;
+    if (prec > maxPrec) {
+      maxPrec = prec;
+      primaryDest = e.destinationType;
+      bestEvidence = e;
+    }
+  }
+  return {
+    observedCtaTexts: ctaTexts,
+    observedCtaTypes: ctaTypes.length > 0 ? ctaTypes : ["UNKNOWN"],
+    observedDestinationTypes: destinationTypes.length > 0 ? destinationTypes : ["UNKNOWN"],
+    primaryCtaType: primaryCta,
+    primaryDestinationType: primaryDest,
+    destinationConfidence: bestEvidence.confidence,
+    destinationReasonCode: bestEvidence.reasonCode
+  };
+}
+
+// src/data/locationCatalogue.ts
+var META_AD_LIBRARY_LOCATIONS = [
+  // Popular / Key Commercial Markets
+  { locationCode: "US", displayName: "United States", region: "North America", aliases: ["USA", "America", "United States of America"], isPopular: true, status: "ACTIVE" },
+  { locationCode: "GB", displayName: "United Kingdom", region: "Europe", aliases: ["UK", "Britain", "Great Britain", "England"], isPopular: true, status: "ACTIVE" },
+  { locationCode: "CA", displayName: "Canada", region: "North America", aliases: ["CAN"], isPopular: true, status: "ACTIVE" },
+  { locationCode: "AU", displayName: "Australia", region: "Asia-Pacific", aliases: ["AUS", "Oz"], isPopular: true, status: "ACTIVE" },
+  { locationCode: "DE", displayName: "Germany", region: "Europe", aliases: ["Deutschland", "DEU"], isPopular: true, status: "ACTIVE" },
+  { locationCode: "FR", displayName: "France", region: "Europe", aliases: ["FRA"], isPopular: true, status: "ACTIVE" },
+  { locationCode: "IN", displayName: "India", region: "Asia-Pacific", aliases: ["Bharat", "IND"], isPopular: true, status: "ACTIVE" },
+  { locationCode: "SG", displayName: "Singapore", region: "Asia-Pacific", aliases: ["SGP"], isPopular: true, status: "ACTIVE" },
+  { locationCode: "AE", displayName: "United Arab Emirates", region: "Middle East", aliases: ["UAE", "Dubai", "Abu Dhabi"], isPopular: true, status: "ACTIVE" },
+  { locationCode: "BD", displayName: "Bangladesh", region: "Asia-Pacific", aliases: ["BGD", "Bangla"], isPopular: true, status: "ACTIVE" },
+  { locationCode: "BR", displayName: "Brazil", region: "Latin America", aliases: ["Brasil", "BRA"], isPopular: true, status: "ACTIVE" },
+  { locationCode: "JP", displayName: "Japan", region: "Asia-Pacific", aliases: ["Nihon", "Nippon", "JPN"], isPopular: true, status: "ACTIVE" },
+  // Europe
+  { locationCode: "AT", displayName: "Austria", region: "Europe", aliases: ["\xD6sterreich", "AUT"], status: "ACTIVE" },
+  { locationCode: "BE", displayName: "Belgium", region: "Europe", aliases: ["Belgique", "Belgi\xEB", "BEL"], status: "ACTIVE" },
+  { locationCode: "BG", displayName: "Bulgaria", region: "Europe", aliases: ["BGR"], status: "ACTIVE" },
+  { locationCode: "CH", displayName: "Switzerland", region: "Europe", aliases: ["Schweiz", "Suisse", "CHE"], status: "ACTIVE" },
+  { locationCode: "CY", displayName: "Cyprus", region: "Europe", aliases: ["CYP"], status: "ACTIVE" },
+  { locationCode: "CZ", displayName: "Czech Republic", region: "Europe", aliases: ["Czechia", "CZE"], status: "ACTIVE" },
+  { locationCode: "DK", displayName: "Denmark", region: "Europe", aliases: ["Danmark", "DNK"], status: "ACTIVE" },
+  { locationCode: "EE", displayName: "Estonia", region: "Europe", aliases: ["Eesti", "EST"], status: "ACTIVE" },
+  { locationCode: "ES", displayName: "Spain", region: "Europe", aliases: ["Espa\xF1a", "ESP"], status: "ACTIVE" },
+  { locationCode: "FI", displayName: "Finland", region: "Europe", aliases: ["Suomi", "FIN"], status: "ACTIVE" },
+  { locationCode: "GR", displayName: "Greece", region: "Europe", aliases: ["Hellas", "GRC"], status: "ACTIVE" },
+  { locationCode: "HR", displayName: "Croatia", region: "Europe", aliases: ["Hrvatska", "HRV"], status: "ACTIVE" },
+  { locationCode: "HU", displayName: "Hungary", region: "Europe", aliases: ["Magyarorsz\xE1g", "HUN"], status: "ACTIVE" },
+  { locationCode: "IE", displayName: "Ireland", region: "Europe", aliases: ["\xC9ire", "IRL"], status: "ACTIVE" },
+  { locationCode: "IS", displayName: "Iceland", region: "Europe", aliases: ["\xCDsland", "ISL"], status: "ACTIVE" },
+  { locationCode: "IT", displayName: "Italy", region: "Europe", aliases: ["Italia", "ITA"], status: "ACTIVE" },
+  { locationCode: "LI", displayName: "Liechtenstein", region: "Europe", aliases: ["LIE"], status: "ACTIVE" },
+  { locationCode: "LT", displayName: "Lithuania", region: "Europe", aliases: ["Lietuva", "LTU"], status: "ACTIVE" },
+  { locationCode: "LU", displayName: "Luxembourg", region: "Europe", aliases: ["LUX"], status: "ACTIVE" },
+  { locationCode: "LV", displayName: "Latvia", region: "Europe", aliases: ["Latvija", "LVA"], status: "ACTIVE" },
+  { locationCode: "MT", displayName: "Malta", region: "Europe", aliases: ["MLT"], status: "ACTIVE" },
+  { locationCode: "NL", displayName: "Netherlands", region: "Europe", aliases: ["Holland", "NLD"], status: "ACTIVE" },
+  { locationCode: "NO", displayName: "Norway", region: "Europe", aliases: ["Norge", "NOR"], status: "ACTIVE" },
+  { locationCode: "PL", displayName: "Poland", region: "Europe", aliases: ["Polska", "POL"], status: "ACTIVE" },
+  { locationCode: "PT", displayName: "Portugal", region: "Europe", aliases: ["PRT"], status: "ACTIVE" },
+  { locationCode: "RO", displayName: "Romania", region: "Europe", aliases: ["Rom\xE2nia", "ROU"], status: "ACTIVE" },
+  { locationCode: "RS", displayName: "Serbia", region: "Europe", aliases: ["Srbija", "SRB"], status: "ACTIVE" },
+  { locationCode: "SE", displayName: "Sweden", region: "Europe", aliases: ["Sverige", "SWE"], status: "ACTIVE" },
+  { locationCode: "SI", displayName: "Slovenia", region: "Europe", aliases: ["Slovenija", "SVN"], status: "ACTIVE" },
+  { locationCode: "SK", displayName: "Slovakia", region: "Europe", aliases: ["Slovensko", "SVK"], status: "ACTIVE" },
+  { locationCode: "UA", displayName: "Ukraine", region: "Europe", aliases: ["UKR"], status: "ACTIVE" },
+  // Asia-Pacific
+  { locationCode: "HK", displayName: "Hong Kong", region: "Asia-Pacific", aliases: ["HKG"], status: "ACTIVE" },
+  { locationCode: "ID", displayName: "Indonesia", region: "Asia-Pacific", aliases: ["IDN"], status: "ACTIVE" },
+  { locationCode: "KR", displayName: "South Korea", region: "Asia-Pacific", aliases: ["Korea", "KOR"], status: "ACTIVE" },
+  { locationCode: "MY", displayName: "Malaysia", region: "Asia-Pacific", aliases: ["MYS"], status: "ACTIVE" },
+  { locationCode: "NZ", displayName: "New Zealand", region: "Asia-Pacific", aliases: ["Aotearoa", "NZL"], status: "ACTIVE" },
+  { locationCode: "PH", displayName: "Philippines", region: "Asia-Pacific", aliases: ["PHL", "Pilipinas"], status: "ACTIVE" },
+  { locationCode: "PK", displayName: "Pakistan", region: "Asia-Pacific", aliases: ["PAK"], status: "ACTIVE" },
+  { locationCode: "TH", displayName: "Thailand", region: "Asia-Pacific", aliases: ["THA", "Siam"], status: "ACTIVE" },
+  { locationCode: "TW", displayName: "Taiwan", region: "Asia-Pacific", aliases: ["TWN"], status: "ACTIVE" },
+  { locationCode: "VN", displayName: "Vietnam", region: "Asia-Pacific", aliases: ["VNM"], status: "ACTIVE" },
+  { locationCode: "LK", displayName: "Sri Lanka", region: "Asia-Pacific", aliases: ["LKA", "Ceylon"], status: "ACTIVE" },
+  { locationCode: "NP", displayName: "Nepal", region: "Asia-Pacific", aliases: ["NPL"], status: "ACTIVE" },
+  // Middle East & North Africa
+  { locationCode: "BH", displayName: "Bahrain", region: "Middle East", aliases: ["BHR"], status: "ACTIVE" },
+  { locationCode: "EG", displayName: "Egypt", region: "Middle East", aliases: ["EGY", "Misr"], status: "ACTIVE" },
+  { locationCode: "IL", displayName: "Israel", region: "Middle East", aliases: ["ISR"], status: "ACTIVE" },
+  { locationCode: "JO", displayName: "Jordan", region: "Middle East", aliases: ["JOR"], status: "ACTIVE" },
+  { locationCode: "KW", displayName: "Kuwait", region: "Middle East", aliases: ["KWT"], status: "ACTIVE" },
+  { locationCode: "OM", displayName: "Oman", region: "Middle East", aliases: ["OMN"], status: "ACTIVE" },
+  { locationCode: "QA", displayName: "Qatar", region: "Middle East", aliases: ["QAT"], status: "ACTIVE" },
+  { locationCode: "SA", displayName: "Saudi Arabia", region: "Middle East", aliases: ["KSA", "SAU"], status: "ACTIVE" },
+  { locationCode: "TR", displayName: "Turkey", region: "Middle East", aliases: ["T\xFCrkiye", "TUR"], status: "ACTIVE" },
+  // Latin America & Caribbean
+  { locationCode: "AR", displayName: "Argentina", region: "Latin America", aliases: ["ARG"], status: "ACTIVE" },
+  { locationCode: "CL", displayName: "Chile", region: "Latin America", aliases: ["CHL"], status: "ACTIVE" },
+  { locationCode: "CO", displayName: "Colombia", region: "Latin America", aliases: ["COL"], status: "ACTIVE" },
+  { locationCode: "CR", displayName: "Costa Rica", region: "Latin America", aliases: ["CRI"], status: "ACTIVE" },
+  { locationCode: "DO", displayName: "Dominican Republic", region: "Latin America", aliases: ["DOM"], status: "ACTIVE" },
+  { locationCode: "EC", displayName: "Ecuador", region: "Latin America", aliases: ["ECU"], status: "ACTIVE" },
+  { locationCode: "MX", displayName: "Mexico", region: "Latin America", aliases: ["MEX", "M\xE9jico"], status: "ACTIVE" },
+  { locationCode: "PA", displayName: "Panama", region: "Latin America", aliases: ["PAN"], status: "ACTIVE" },
+  { locationCode: "PE", displayName: "Peru", region: "Latin America", aliases: ["PER"], status: "ACTIVE" },
+  { locationCode: "UY", displayName: "Uruguay", region: "Latin America", aliases: ["URY"], status: "ACTIVE" },
+  // Africa
+  { locationCode: "GH", displayName: "Ghana", region: "Africa", aliases: ["GHA"], status: "ACTIVE" },
+  { locationCode: "KE", displayName: "Kenya", region: "Africa", aliases: ["KEN"], status: "ACTIVE" },
+  { locationCode: "MA", displayName: "Morocco", region: "Africa", aliases: ["Maroc", "MAR"], status: "ACTIVE" },
+  { locationCode: "NG", displayName: "Nigeria", region: "Africa", aliases: ["NGA"], status: "ACTIVE" },
+  { locationCode: "ZA", displayName: "South Africa", region: "Africa", aliases: ["RSA", "ZAF"], status: "ACTIVE" },
+  { locationCode: "UG", displayName: "Uganda", region: "Africa", aliases: ["UGA"], status: "ACTIVE" },
+  { locationCode: "TZ", displayName: "Tanzania", region: "Africa", aliases: ["TZA"], status: "ACTIVE" }
+];
+
+// src/extension/publicPageEvidence.ts
+function businessPageAboutUrl(raw) {
+  try {
+    const url = new URL(raw || "");
+    if (url.protocol !== "https:" || !["www.facebook.com", "web.facebook.com", "facebook.com"].includes(url.hostname) || url.username || url.password) return;
+    if (url.pathname === "/profile.php") {
+      const id = url.searchParams.get("id");
+      return id && /^\d+$/.test(id) ? `https://www.facebook.com/profile.php?id=${id}&sk=about` : void 0;
+    }
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (!parts.length || ["ads", "groups", "events", "watch", "reel", "reels", "login", "help", "settings", "l.php", "share", "sharer.php", "marketplace", "search", "photo.php", "photos", "stories"].includes(parts[0].toLowerCase())) return;
+    if (parts.length > 1 && !["about", "about_details"].includes(parts[1])) return;
+    if (!/^[\w.\-]+$/.test(parts[0])) return;
+    return `https://www.facebook.com/${parts[0]}/about`;
+  } catch {
+    return;
+  }
+}
+var normalizeName = (name) => name.normalize("NFKC").toLocaleLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, " ").trim();
+function countryCode(raw) {
+  if (!raw) return;
+  const text = raw.trim().toLocaleLowerCase();
+  const match = META_AD_LIBRARY_LOCATIONS.find((country) => [country.locationCode, country.displayName, ...country.aliases].some((name) => name.toLocaleLowerCase() === text));
+  return match?.locationCode;
+}
+function interpretPublicPage(snapshot, expectedUrl, expectedName) {
+  const base = { sourceUrl: expectedUrl, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), status: "UNAVAILABLE", websiteUrls: [], addressCountryCodes: [], reason: "Public Page details could not be confirmed." };
+  if (snapshot.blocked) return { ...base, status: "BLOCKED", reason: "A login or access restriction prevented Page checking." };
+  if (businessPageAboutUrl(snapshot.url) !== businessPageAboutUrl(expectedUrl)) return { ...base, status: "IDENTITY_MISMATCH", reason: "The Page redirected to a different identity." };
+  const observedUrl = new URL(snapshot.url);
+  if (!/\/about(?:_details)?\/?$/.test(observedUrl.pathname) && !/^about/.test(observedUrl.searchParams.get("sk") || "")) return { ...base, reason: "The public About section was not available; posts were not used as business evidence." };
+  const expected = normalizeName(expectedName), heading = normalizeName(snapshot.heading);
+  if (!expected || !heading || expected !== heading) return { ...base, status: "IDENTITY_MISMATCH", reason: "The visible Page name did not match the advertiser; no Page evidence was applied." };
+  const businesses = snapshot.businesses.filter((b) => normalizeName(b.name) === expected);
+  const websites = [...snapshot.links, ...businesses.map((b) => b.url || "")].map(resolveObservedDestinationUrl).filter((url) => Boolean(url)).filter((url) => {
+    const host = new URL(url).hostname;
+    return !["meta.com", "facebook.net", "fbcdn.net", "maps.google.com", "maps.app.goo.gl"].some((domain) => host === domain || host.endsWith("." + domain)) && !/^maps\.google\./i.test(host) && !/^https:\/\/(?:www\.)?google\.[^/]+\/maps(?:\/|\?)/i.test(url) && classifyDestination({ destinationUrl: url }).destinationType === "EXTERNAL_WEBSITE";
+  });
+  const visibleAddresses = (snapshot.addressTexts || []).filter((address) => address.split(/[,\n]/).length > 1);
+  const countries = [...new Set([...businesses.map((b) => countryCode(b.country)), ...visibleAddresses.flatMap((address) => address.split(/[,\n]/).map(countryCode))].filter((code) => Boolean(code)))];
+  return { ...base, status: "CHECKED", websiteUrls: [...new Set(websites)].slice(0, 5), addressCountryCodes: countries, addressText: [...businesses.map((b) => b.address), ...visibleAddresses].filter(Boolean).join(" | ").slice(0, 1e3) || void 0, reason: websites.length ? "External website link observed on the matched public Page. Reachability and ownership are unverified." : "No website link was observed in the checked Page details. This does not prove the business has no website." };
+}
+function readPublicPageSnapshot() {
+  const main = document.querySelector("[role=main]") || document.querySelector("main");
+  const heading = main?.querySelector('h1,[role=heading][aria-level="1"]')?.textContent?.trim() || "";
+  const text = (main?.textContent || "").slice(0, 12e3);
+  const blocked = /\/login|checkpoint|challenge/i.test(location.pathname) || /^(log (?:in|into)|login|লগ ইন)/i.test(heading) || !heading && /log in|login|captcha|temporarily blocked|rate limit|লগ ইন/i.test(text);
+  const links = [];
+  const addressTexts = [];
+  if (main && !blocked) {
+    for (const anchor of Array.from(main.querySelectorAll("a[href]"))) {
+      const label = (anchor.textContent || "").trim();
+      let addressHref = anchor.href;
+      try {
+        const url = new URL(addressHref);
+        if (url.pathname === "/l.php") addressHref = url.searchParams.get("u") || addressHref;
+      } catch {
+      }
+      if (!anchor.closest("[role=article]") && anchor.getClientRects().length && /maps\.google\.|google\.[^/]+\/maps|maps\.app\.goo\.gl|goo\.gl\/maps/i.test(addressHref)) {
+        if (label) addressTexts.push(label.slice(0, 500));
+        continue;
+      }
+      if (!anchor.closest("[role=article]") && anchor.getClientRects().length && (/^https?:|^www\.|\.[a-z]{2,}(?:\/|$)/i.test(label) || /website|visit site|ওয়েবসাইট/i.test(anchor.getAttribute("aria-label") || "") || /\/l\.php\?/.test(anchor.href))) links.push(anchor.href);
+    }
+  }
+  const businesses = [];
+  for (const script of Array.from(document.querySelectorAll('script[type="application/ld+json"]')).slice(0, 10)) {
+    try {
+      const root = JSON.parse(script.textContent || "null");
+      const queue = Array.isArray(root) ? root : [root];
+      for (let i = 0; i < queue.length && i < 50; i++) {
+        const node = queue[i];
+        if (!node || typeof node !== "object") continue;
+        if (Array.isArray(node["@graph"])) queue.push(...node["@graph"]);
+        const types = Array.isArray(node["@type"]) ? node["@type"] : [node["@type"]];
+        if (!types.some((type) => typeof type === "string" && /^(LocalBusiness|Organization|Store|FurnitureStore|Restaurant|ProfessionalService|MedicalBusiness|LodgingBusiness)$/.test(type))) continue;
+        const address = node.address;
+        const country = typeof address?.addressCountry === "string" ? address.addressCountry : address?.addressCountry?.name;
+        businesses.push({ name: typeof node.name === "string" ? node.name : "", url: typeof node.url === "string" ? node.url : void 0, country: typeof country === "string" ? country : void 0, address: address && typeof address === "object" ? [address.streetAddress, address.addressLocality, address.addressRegion, address.postalCode, country].filter((v) => typeof v === "string").join(", ") : void 0 });
+      }
+    } catch {
+    }
+  }
+  return { url: location.href, heading, blocked, links: links.slice(0, 50), businesses, addressTexts: addressTexts.slice(0, 5) };
+}
+
 // src/extension/countryProfiles/profiles/bd.ts
 var BD_PROFILE = {
   countryCode: "BD",
@@ -4099,6 +4765,15 @@ function detectSignalsForProfile(profile, inputs, textToScan) {
 function evaluateGeographicOrigin(inputs, targetCountryCode = "BD") {
   const rawTarget = targetCountryCode ? targetCountryCode.trim().toUpperCase() : "BD";
   const normTarget = normalizeCountryCode(rawTarget) || rawTarget;
+  const page = inputs.businessPageEvidence;
+  if (page?.status === "CHECKED" && page.addressText && businessPageAboutUrl(page.sourceUrl) && businessPageAboutUrl(page.sourceUrl) === businessPageAboutUrl(inputs.pageUrl)) {
+    const countries = [...new Set(page.addressCountryCodes)];
+    if (countries.length > 1) return { classification: "LOCATION_UNKNOWN", targetCountryCode: normTarget, confidence: "NONE", evidence: [page.sourceUrl, page.addressText], reason: "The public Page lists addresses in multiple countries; business origin needs review.", reasonCode: "MULTIPLE_PAGE_ADDRESS_COUNTRIES", isLocal: false, isForeign: false, isUnknown: true };
+    if (countries.length === 1) {
+      const local = countries[0] === normTarget;
+      return { classification: local ? "LOCAL_VERIFIED" : "FOREIGN_VERIFIED", targetCountryCode: normTarget, businessCountryCode: countries[0], confidence: "HIGH", evidence: [`Public Page address claim: ${page.addressText}`, page.sourceUrl, `Checked: ${page.checkedAt}`], reason: "Country inferred from the matched public Page address, not ad targeting or manager location. The address is a public business claim.", reasonCode: "PUBLIC_PAGE_ADDRESS_COUNTRY", isLocal: local, isForeign: !local, isUnknown: false };
+    }
+  }
   const targetProfile = getCountryProfile(normTarget);
   if (!targetProfile) {
     return {
@@ -4296,495 +4971,6 @@ function evaluateGeographicOrigin(inputs, targetCountryCode = "BD") {
   };
 }
 
-// src/extension/destinationClassifier.ts
-function resolveObservedDestinationUrl(raw) {
-  if (!raw?.trim()) return void 0;
-  let value = raw.trim();
-  for (let depth = 0; depth < 5; depth++) {
-    try {
-      if (!/^[a-z][a-z\d+.-]*:/i.test(value)) value = `https://${value}`;
-      const url = new URL(value);
-      if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) return void 0;
-      const host = url.hostname.toLowerCase();
-      const wrapper = (host === "facebook.com" || host.endsWith(".facebook.com")) && url.pathname === "/l.php" || host === "l.instagram.com";
-      if (!wrapper) return url.href;
-      const next = url.searchParams.get("u");
-      if (!next || next === value) return void 0;
-      value = next;
-    } catch {
-      return void 0;
-    }
-  }
-  return void 0;
-}
-function observedWebsiteState(destinationUrl, destinationDomain) {
-  return classifyDestination({ destinationUrl, destinationDomain }).destinationType === "EXTERNAL_WEBSITE" && Boolean(destinationUrl || destinationDomain) ? "found" : "unknown";
-}
-function classifyCta(rawCtaText) {
-  if (!rawCtaText) {
-    return {
-      ctaType: "UNKNOWN",
-      rawCtaText: void 0,
-      originalCtaText: void 0,
-      normalizedText: "",
-      status: "MISSING",
-      confidence: "NONE",
-      evidence: "No visible call-to-action button or text observed.",
-      reasonCode: "CTA_TEXT_MISSING",
-      reason: "No visible call-to-action button or text observed."
-    };
-  }
-  const rawPreserved = rawCtaText.trim();
-  const normalizedText = rawPreserved.replace(/\s+/g, " ");
-  if (!normalizedText) {
-    return {
-      ctaType: "UNKNOWN",
-      rawCtaText: void 0,
-      originalCtaText: void 0,
-      normalizedText: "",
-      status: "MISSING",
-      confidence: "NONE",
-      evidence: "Call-to-action text is whitespace-only.",
-      reasonCode: "CTA_TEXT_MISSING",
-      reason: "Call-to-action text is whitespace-only."
-    };
-  }
-  const clean = normalizedText.replace(/^[\p{P}\s]+|[\p{P}\s]+$/gu, "").toLowerCase();
-  const hasCall = /\b(?:call|phone)\b/i.test(clean);
-  const hasDownload = /\b(?:download|install|app)\b/i.test(clean);
-  const hasShop = /\b(?:shop|buy|order)\b/i.test(clean);
-  const hasMsg = /\b(?:message|whatsapp|chat)\b/i.test(clean);
-  const intentCount = [hasCall, hasDownload, hasShop, hasMsg].filter(Boolean).length;
-  if (intentCount >= 2) {
-    return {
-      ctaType: "OTHER",
-      rawCtaText: rawPreserved,
-      originalCtaText: rawPreserved,
-      normalizedText,
-      status: "AMBIGUOUS",
-      confidence: "LOW",
-      evidence: `Ambiguous CTA text containing multiple conflicting action intents: "${normalizedText}".`,
-      reasonCode: "CTA_TEXT_AMBIGUOUS",
-      reason: `Call-to-action text combines multiple distinct intents ("${normalizedText}").`
-    };
-  }
-  if (/^(?:shop(?:\s*now|\s*collection)?|buy(?:\s*now)?|order(?:\s*now)?)$/i.test(clean)) {
-    return {
-      ctaType: "SHOP_NOW",
-      rawCtaText: rawPreserved,
-      originalCtaText: rawPreserved,
-      normalizedText,
-      status: "CLASSIFIED",
-      confidence: "HIGH",
-      evidence: "Recognized call-to-action intent: SHOP_NOW.",
-      reasonCode: "CTA_TEXT_MATCH",
-      reason: "Recognized call-to-action intent: SHOP_NOW."
-    };
-  }
-  if (/^(?:learn(?:\s*more)?|explore(?:\s*more)?|see(?:\s*more)?|read(?:\s*more)?|view(?:\s*more)?)$/i.test(clean)) {
-    return {
-      ctaType: "LEARN_MORE",
-      rawCtaText: rawPreserved,
-      originalCtaText: rawPreserved,
-      normalizedText,
-      status: "CLASSIFIED",
-      confidence: "HIGH",
-      evidence: "Recognized call-to-action intent: LEARN_MORE.",
-      reasonCode: "CTA_TEXT_MATCH",
-      reason: "Recognized call-to-action intent: LEARN_MORE."
-    };
-  }
-  if (/^(?:sign(?:\s*up)?|register(?:\s*now)?|subscribe|join(?:\s*now|\s*us)?)$/i.test(clean)) {
-    return {
-      ctaType: "SIGN_UP",
-      rawCtaText: rawPreserved,
-      originalCtaText: rawPreserved,
-      normalizedText,
-      status: "CLASSIFIED",
-      confidence: "HIGH",
-      evidence: "Recognized call-to-action intent: SIGN_UP.",
-      reasonCode: "CTA_TEXT_MATCH",
-      reason: "Recognized call-to-action intent: SIGN_UP."
-    };
-  }
-  if (/^(?:contact(?:\s*us)?|inquire(?:\s*now)?|get(?:\s*in\s*touch)?|send(?:\s*inquiry)?)$/i.test(clean)) {
-    return {
-      ctaType: "CONTACT_US",
-      rawCtaText: rawPreserved,
-      originalCtaText: rawPreserved,
-      normalizedText,
-      status: "CLASSIFIED",
-      confidence: "HIGH",
-      evidence: "Recognized call-to-action intent: CONTACT_US.",
-      reasonCode: "CTA_TEXT_MATCH",
-      reason: "Recognized call-to-action intent: CONTACT_US."
-    };
-  }
-  if (/^(?:send(?:\s*message|\s*whatsapp(?:\s*message)?)?|message(?:\s*us)?|chat(?:\s*now)?|whatsapp)$/i.test(clean)) {
-    return {
-      ctaType: "SEND_MESSAGE",
-      rawCtaText: rawPreserved,
-      originalCtaText: rawPreserved,
-      normalizedText,
-      status: "CLASSIFIED",
-      confidence: "HIGH",
-      evidence: "Recognized call-to-action intent: SEND_MESSAGE.",
-      reasonCode: "CTA_TEXT_MATCH",
-      reason: "Recognized call-to-action intent: SEND_MESSAGE."
-    };
-  }
-  if (/^(?:call(?:\s*now|\s*us)?|phone(?:\s*us)?)$/i.test(clean)) {
-    return {
-      ctaType: "CALL_NOW",
-      rawCtaText: rawPreserved,
-      originalCtaText: rawPreserved,
-      normalizedText,
-      status: "CLASSIFIED",
-      confidence: "HIGH",
-      evidence: "Recognized call-to-action intent: CALL_NOW.",
-      reasonCode: "CTA_TEXT_MATCH",
-      reason: "Recognized call-to-action intent: CALL_NOW."
-    };
-  }
-  if (/^(?:download(?:\s*now)?|install(?:\s*now)?|get(?:\s*app)?)$/i.test(clean)) {
-    return {
-      ctaType: "DOWNLOAD",
-      rawCtaText: rawPreserved,
-      originalCtaText: rawPreserved,
-      normalizedText,
-      status: "CLASSIFIED",
-      confidence: "HIGH",
-      evidence: "Recognized call-to-action intent: DOWNLOAD.",
-      reasonCode: "CTA_TEXT_MATCH",
-      reason: "Recognized call-to-action intent: DOWNLOAD."
-    };
-  }
-  if (/^(?:get(?:\s*quote|\s*offer)?|request(?:\s*quote)?|apply(?:\s*now)?)$/i.test(clean)) {
-    return {
-      ctaType: "GET_QUOTE",
-      rawCtaText: rawPreserved,
-      originalCtaText: rawPreserved,
-      normalizedText,
-      status: "CLASSIFIED",
-      confidence: "HIGH",
-      evidence: "Recognized call-to-action intent: GET_QUOTE.",
-      reasonCode: "CTA_TEXT_MATCH",
-      reason: "Recognized call-to-action intent: GET_QUOTE."
-    };
-  }
-  return {
-    ctaType: "OTHER",
-    rawCtaText: rawPreserved,
-    originalCtaText: rawPreserved,
-    normalizedText,
-    status: "UNSUPPORTED",
-    confidence: "LOW",
-    evidence: `Observed visible CTA text: "${normalizedText}".`,
-    reasonCode: "CTA_TEXT_OTHER",
-    reason: `Observed visible CTA text: "${normalizedText}".`
-  };
-}
-function classifyDestination(inputs) {
-  const rawUrl = (inputs.destinationUrl || "").trim();
-  const hasNoDest = Boolean(inputs.hasNoDestination || inputs.hasNoDestinationSignal);
-  if (hasNoDest && rawUrl) {
-    return {
-      destinationType: "UNKNOWN",
-      confidence: "LOW",
-      reasonCode: "CONFLICTING_DESTINATION_SIGNALS",
-      reason: "Ad marked with no destination signal but destination URL is present."
-    };
-  }
-  if (hasNoDest) {
-    return {
-      destinationType: "NO_VISIBLE_DESTINATION",
-      confidence: "HIGH",
-      reasonCode: "DESTINATION_NOT_OBSERVED",
-      reason: "Explicit observation that ad creative contains no clickable destination or action button."
-    };
-  }
-  if (inputs.hasLeadFormSignal && !rawUrl) {
-    return {
-      destinationType: "INSTANT_FORM",
-      confidence: "HIGH",
-      reasonCode: "EXPLICIT_INSTANT_FORM_SIGNAL",
-      reason: "Meta on-platform instant lead generation form signal detected."
-    };
-  }
-  const targetCtaType = inputs.ctaType || (inputs.ctaText ? classifyCta(inputs.ctaText).ctaType : "UNKNOWN");
-  if (rawUrl) {
-    const lowerUrl = rawUrl.toLowerCase();
-    if (lowerUrl.startsWith("javascript:") || lowerUrl.startsWith("data:") || lowerUrl.startsWith("about:")) {
-      return {
-        destinationType: "UNKNOWN",
-        confidence: "NONE",
-        reasonCode: "MALFORMED_DESTINATION_URL",
-        reason: `Unsupported or invalid script/data URL scheme: "${rawUrl}".`
-      };
-    }
-    if (lowerUrl.startsWith("tel:") || lowerUrl.startsWith("callto:")) {
-      if (targetCtaType === "DOWNLOAD") {
-        return {
-          destinationType: "OTHER",
-          confidence: "LOW",
-          reasonCode: "CONFLICTING_DESTINATION_SIGNALS",
-          reason: "Conflicting destination signals detected between telephone URI and download CTA."
-        };
-      }
-      return {
-        destinationType: "CALL",
-        destinationDomain: void 0,
-        confidence: "HIGH",
-        reasonCode: "EXPLICIT_CALL_SIGNAL",
-        reason: `Direct telephone call URI observed: "${rawUrl}".`
-      };
-    }
-    if (lowerUrl.startsWith("sms:") || lowerUrl.startsWith("whatsapp:") || lowerUrl.startsWith("fb-messenger:") || lowerUrl.startsWith("tg:")) {
-      if (targetCtaType === "CALL_NOW") {
-        return {
-          destinationType: "OTHER",
-          confidence: "LOW",
-          reasonCode: "CONFLICTING_DESTINATION_SIGNALS",
-          reason: "Conflicting destination signals detected between messaging URI and call CTA."
-        };
-      }
-      return {
-        destinationType: "MESSAGING",
-        destinationDomain: void 0,
-        confidence: "HIGH",
-        reasonCode: "EXPLICIT_MESSAGING_SIGNAL",
-        reason: `Direct messaging URI protocol observed: "${rawUrl}".`
-      };
-    }
-    if (lowerUrl.startsWith("market:") || lowerUrl.startsWith("itms-apps:")) {
-      if (targetCtaType === "CALL_NOW" || targetCtaType === "SEND_MESSAGE") {
-        return {
-          destinationType: "OTHER",
-          confidence: "LOW",
-          reasonCode: "CONFLICTING_DESTINATION_SIGNALS",
-          reason: "Conflicting destination signals detected between native app marketplace URI and CTA intent."
-        };
-      }
-      return {
-        destinationType: "APP",
-        destinationDomain: void 0,
-        confidence: "HIGH",
-        reasonCode: "EXPLICIT_APP_SIGNAL",
-        reason: `Native application marketplace protocol URI observed: "${rawUrl}".`
-      };
-    }
-    if (lowerUrl.startsWith("mailto:")) {
-      return {
-        destinationType: "OTHER",
-        destinationDomain: void 0,
-        confidence: "MEDIUM",
-        reasonCode: "EMAIL_DESTINATION_SIGNAL",
-        reason: `Direct email destination URI observed: "${rawUrl}".`
-      };
-    }
-    const resolved = resolveObservedDestinationUrl(rawUrl);
-    let domain = "";
-    const resolvedUrl = (resolved || "").toLowerCase();
-    {
-      try {
-        if (!resolved) throw new Error("Invalid destination");
-        const u = new URL(resolved);
-        const host = u.hostname.toLowerCase();
-        domain = host === "m.me" ? "m.me" : host.replace(/^(?:www\.|m\.|l\.)/, "");
-      } catch {
-        return {
-          destinationType: "UNKNOWN",
-          confidence: "NONE",
-          reasonCode: "MALFORMED_DESTINATION_URL",
-          reason: `Provided destination URL is malformed or invalid: "${rawUrl}".`
-        };
-      }
-    }
-    if (!domain || !domain.includes(".") || domain.length < 4 || domain.endsWith(".") || domain.startsWith(".") || !/^[a-z0-9]([a-z0-9\-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9\-]*[a-z0-9])?)+$/i.test(domain)) {
-      return {
-        destinationType: "UNKNOWN",
-        confidence: "NONE",
-        reasonCode: "MALFORMED_DESTINATION_URL",
-        reason: `Provided destination URL does not contain a valid domain hostname: "${rawUrl}".`
-      };
-    }
-    const isAppUrl = /^(?:play\.google\.com|apps\.apple\.com|itunes\.apple\.com)$/i.test(domain);
-    if (isAppUrl && (targetCtaType === "CALL_NOW" || targetCtaType === "SEND_MESSAGE")) {
-      return {
-        destinationType: "OTHER",
-        confidence: "LOW",
-        reasonCode: "CONFLICTING_DESTINATION_SIGNALS",
-        reason: "Conflicting destination signals detected between action URL (App) and CTA intent."
-      };
-    }
-    if (domain === "wa.me" || domain === "api.whatsapp.com" || domain === "whatsapp.com" || domain === "m.me" || domain === "messenger.com" || domain === "t.me" || domain === "telegram.me" || domain.endsWith(".whatsapp.com") || domain.endsWith(".messenger.com") || domain === "facebook.com" && new URL(resolved).pathname.toLowerCase().startsWith("/messages")) {
-      if (targetCtaType === "CALL_NOW") {
-        return {
-          destinationType: "OTHER",
-          confidence: "LOW",
-          reasonCode: "CONFLICTING_DESTINATION_SIGNALS",
-          reason: "Conflicting destination signals detected between messaging URL and call CTA."
-        };
-      }
-      return {
-        destinationType: "MESSAGING",
-        destinationDomain: domain || void 0,
-        confidence: "HIGH",
-        reasonCode: "EXPLICIT_MESSAGING_SIGNAL",
-        reason: "Verified messaging destination via WhatsApp or Messenger endpoint."
-      };
-    }
-    if (domain === "play.google.com" && resolvedUrl.includes("/store/apps") || domain === "apps.apple.com" || domain === "itunes.apple.com") {
-      return {
-        destinationType: "APP",
-        destinationDomain: domain || void 0,
-        confidence: "HIGH",
-        reasonCode: "EXPLICIT_APP_SIGNAL",
-        reason: "Verified native application marketplace destination."
-      };
-    }
-    if ((domain === "facebook.com" || domain === "fb.com") && (resolvedUrl.includes("/lead_gen/") || resolvedUrl.includes("fb.com/lead_gen") || resolvedUrl.includes("/canvas_doc/") || resolvedUrl.includes("instant_form"))) {
-      return {
-        destinationType: "INSTANT_FORM",
-        destinationDomain: domain || void 0,
-        confidence: "HIGH",
-        reasonCode: "EXPLICIT_INSTANT_FORM_SIGNAL",
-        reason: "Verified Meta on-platform instant lead generation form."
-      };
-    }
-    if (["bit.ly", "tinyurl.com", "t.co", "shorturl.at", "fb.me"].includes(domain)) {
-      return {
-        destinationType: "UNKNOWN",
-        destinationDomain: domain,
-        confidence: "LOW",
-        reasonCode: "UNRESOLVED_SHORT_LINK",
-        reason: "A short link was observed; its final destination cannot be confirmed offline."
-      };
-    }
-    const isInternalSocialDomain = domain === "facebook.com" || domain === "web.facebook.com" || domain === "m.facebook.com" || domain === "fb.com" || domain === "instagram.com" || domain === "meta.com" || ["facebook.com", "fb.com", "instagram.com", "meta.com"].some((suffix) => domain.endsWith(`.${suffix}`));
-    if (!isInternalSocialDomain && domain.length > 3 && domain.includes(".")) {
-      return {
-        destinationType: "EXTERNAL_WEBSITE",
-        destinationDomain: domain,
-        confidence: "HIGH",
-        reasonCode: "VISIBLE_EXTERNAL_DESTINATION",
-        reason: `Positively identified external commercial website: "${domain}".`
-      };
-    }
-    if (isInternalSocialDomain) {
-      return {
-        destinationType: "OTHER",
-        destinationDomain: domain || void 0,
-        confidence: "MEDIUM",
-        reasonCode: "INTERNAL_PAGE_DESTINATION",
-        reason: "Destination directs to internal social page rather than external commercial website."
-      };
-    }
-  }
-  if (targetCtaType === "CALL_NOW") {
-    return {
-      destinationType: "CALL",
-      confidence: "MEDIUM",
-      reasonCode: "EXPLICIT_CALL_SIGNAL",
-      reason: "Direct telephone call action observed from call CTA."
-    };
-  }
-  if (targetCtaType === "SEND_MESSAGE") {
-    return {
-      destinationType: "MESSAGING",
-      confidence: "MEDIUM",
-      reasonCode: "EXPLICIT_MESSAGING_SIGNAL",
-      reason: "Direct messaging flow indicated by messaging CTA without external URL."
-    };
-  }
-  const combinedContext = [inputs.bodyCopy || "", inputs.rawText || ""].join(" ").toLowerCase();
-  if (combinedContext.includes("[instant form]") || combinedContext.includes("lead form")) {
-    return {
-      destinationType: "INSTANT_FORM",
-      confidence: "MEDIUM",
-      reasonCode: "EXPLICIT_INSTANT_FORM_SIGNAL",
-      reason: "Instant form destination indicated by ad metadata."
-    };
-  }
-  if (targetCtaType === "SHOP_NOW" || targetCtaType === "LEARN_MORE" || targetCtaType === "SIGN_UP" || targetCtaType === "GET_QUOTE" || targetCtaType === "DOWNLOAD" || targetCtaType === "CONTACT_US") {
-    return {
-      destinationType: "UNKNOWN",
-      confidence: "LOW",
-      reasonCode: "INSUFFICIENT_DESTINATION_EVIDENCE",
-      reason: "Action button observed but destination URL was not extracted; destination type remains unverified."
-    };
-  }
-  return {
-    destinationType: "UNKNOWN",
-    confidence: "NONE",
-    reasonCode: "DESTINATION_NOT_OBSERVED",
-    reason: "No destination URL or destination metadata observed for this ad candidate."
-  };
-}
-var DESTINATION_PRECEDENCE = {
-  EXTERNAL_WEBSITE: 7,
-  INSTANT_FORM: 6,
-  MESSAGING: 5,
-  CALL: 4,
-  APP: 3,
-  OTHER: 2,
-  NO_VISIBLE_DESTINATION: 1,
-  UNKNOWN: 0
-};
-function aggregateAdEvidence(adEvidenceList) {
-  if (!adEvidenceList || adEvidenceList.length === 0) {
-    return {
-      observedCtaTexts: [],
-      observedCtaTypes: [],
-      observedDestinationTypes: [],
-      primaryCtaType: "UNKNOWN",
-      primaryDestinationType: "UNKNOWN",
-      destinationConfidence: "NONE",
-      destinationReasonCode: "DESTINATION_NOT_OBSERVED"
-    };
-  }
-  const ctaTexts = Array.from(new Set(adEvidenceList.map((e) => e.ctaText).filter(Boolean)));
-  const ctaTypes = Array.from(new Set(adEvidenceList.map((e) => e.ctaType).filter((t) => t !== "UNKNOWN")));
-  const destinationTypes = Array.from(new Set(adEvidenceList.map((e) => e.destinationType)));
-  const ctaCounts = /* @__PURE__ */ new Map();
-  for (const e of adEvidenceList) {
-    if (e.ctaType && e.ctaType !== "UNKNOWN") {
-      ctaCounts.set(e.ctaType, (ctaCounts.get(e.ctaType) || 0) + 1);
-    }
-  }
-  let primaryCta = "UNKNOWN";
-  let maxCtaCount = 0;
-  for (const [type, count] of ctaCounts.entries()) {
-    if (count > maxCtaCount) {
-      maxCtaCount = count;
-      primaryCta = type;
-    }
-  }
-  if (primaryCta === "UNKNOWN" && adEvidenceList.length > 0) {
-    primaryCta = adEvidenceList[0].ctaType;
-  }
-  let primaryDest = "UNKNOWN";
-  let maxPrec = -1;
-  let bestEvidence = adEvidenceList[0];
-  for (const e of adEvidenceList) {
-    const prec = DESTINATION_PRECEDENCE[e.destinationType] ?? 0;
-    if (prec > maxPrec) {
-      maxPrec = prec;
-      primaryDest = e.destinationType;
-      bestEvidence = e;
-    }
-  }
-  return {
-    observedCtaTexts: ctaTexts,
-    observedCtaTypes: ctaTypes.length > 0 ? ctaTypes : ["UNKNOWN"],
-    observedDestinationTypes: destinationTypes.length > 0 ? destinationTypes : ["UNKNOWN"],
-    primaryCtaType: primaryCta,
-    primaryDestinationType: primaryDest,
-    destinationConfidence: bestEvidence.confidence,
-    destinationReasonCode: bestEvidence.reasonCode
-  };
-}
-
 // src/extension/qualificationGate.ts
 function evaluateLeadQualificationGates(lead, criteria) {
   const failedGates = [];
@@ -4856,7 +5042,7 @@ function evaluateLeadQualificationGates(lead, criteria) {
   const reqWebMode = criteria?.websiteRequirement;
   const isWebsiteDestination = lead.primaryDestinationType === "EXTERNAL_WEBSITE" || lead.observedDestinationTypes && lead.observedDestinationTypes.includes("EXTERNAL_WEBSITE");
   if (reqWebMode === "WITH_WEBSITE" || reqWebMode === "WITH") {
-    if (lead.websiteState !== "found" || !lead.destinationUrl && !lead.destinationDomain) {
+    if (lead.websiteState !== "found" || !lead.businessWebsiteUrl && !lead.destinationUrl && !lead.destinationDomain) {
       failedGates.push("GATE_WEBSITE");
       reasons.push("Configured website requirement (WITH_WEBSITE) failed: external website destination is unobserved, missing, or unverified.");
     } else {
@@ -4865,7 +5051,7 @@ function evaluateLeadQualificationGates(lead, criteria) {
   } else if (reqWebMode === "WITHOUT_OBSERVED_WEBSITE") {
     if (lead.websiteState === "found") {
       failedGates.push("GATE_WEBSITE");
-      reasons.push("An external website was observed in this ad.");
+      reasons.push("An external website was observed in the ad or public business Page.");
     } else {
       passedGates.push("GATE_WEBSITE");
       reasons.push("No external website was observed; the business may still have one.");
@@ -5620,8 +5806,8 @@ function mergeCandidateIntoEntity(target, cand, decision, sourceQuery, targetCou
 }
 
 // src/extension/metaAdapter.ts
-function buildMetaAdLibrarySearchUrl(countryCode, keyword) {
-  const country = countryCode.trim().toUpperCase();
+function buildMetaAdLibrarySearchUrl(countryCode2, keyword) {
+  const country = countryCode2.trim().toUpperCase();
   if (!/^[A-Z]{2}$/.test(country) || !keyword.trim()) throw new Error("Country and keyword are required.");
   const url = new URL("https://www.facebook.com/ads/library/");
   url.search = new URLSearchParams({
@@ -7026,7 +7212,7 @@ function normalizeAdvertiserName2(rawName) {
 async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, seenEntityKeys, currentCounters, options) {
   const {
     runId,
-    countryCode,
+    countryCode: countryCode2,
     locationName,
     currentKeyword,
     intent,
@@ -7067,6 +7253,7 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
     entityIndex.indexEntity(key, lead);
   }
   for (const cand of candidates) {
+    if (cand.businessPageEvidence && (!businessPageAboutUrl(cand.facebookPageUrl || cand.pageUrl) || businessPageAboutUrl(cand.businessPageEvidence.sourceUrl) !== businessPageAboutUrl(cand.facebookPageUrl || cand.pageUrl))) cand.businessPageEvidence = void 0;
     if (seenAdLibraryIds.has(cand.libraryId)) {
       counters.duplicatesRemoved++;
       counters.duplicateAdRecordsRemoved = (counters.duplicateAdRecordsRemoved || 0) + 1;
@@ -7083,21 +7270,30 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
       if (existingEntity) {
         counters.duplicatesRemoved++;
         counters.entityMergesCount = (counters.entityMergesCount || 0) + 1;
-        mergeCandidateIntoEntity(existingEntity, cand, mergeDecision, currentKeyword, countryCode);
+        mergeCandidateIntoEntity(existingEntity, cand, mergeDecision, currentKeyword, countryCode2);
+        if (cand.businessPageEvidence?.status === "CHECKED") {
+          existingEntity.businessPageEvidence = cand.businessPageEvidence;
+          const pageWebsite2 = cand.businessPageEvidence.websiteUrls.find((url) => observedWebsiteState(url) === "found");
+          if (pageWebsite2) {
+            existingEntity.businessWebsiteUrl = pageWebsite2;
+            existingEntity.websiteState = "found";
+          }
+        }
         const newSignals = extractCreativeSignalsFromCandidate(cand);
         existingEntity.creativeSignals = aggregateCreativeSignals([
           ...existingEntity.creativeSignals || [],
           ...newSignals
         ]);
         const updatedGeo = evaluateGeographicOrigin({
+          businessPageEvidence: cand.businessPageEvidence || existingEntity.businessPageEvidence,
           pageName: existingEntity.name,
           pageUrl: existingEntity.facebookPageUrl,
           destinationUrl: existingEntity.destinationUrl,
           destinationDomain: existingEntity.destinationDomain,
           bodyCopy: [existingEntity.sampleCopy, cand.bodyCopy].filter(Boolean).join(" "),
           ctaText: [existingEntity.sampleCta, cand.ctaText].filter(Boolean).join(" ")
-        }, countryCode);
-        const shouldUpdateGeo = !existingEntity.geographicClassification || existingEntity.geographicClassification === "LOCATION_UNKNOWN" || updatedGeo.classification === "FOREIGN_VERIFIED" || existingEntity.geographicClassification === "LOCAL_PROBABLE" && updatedGeo.classification === "LOCAL_VERIFIED" || updatedGeo.reasonCode === "CONFLICTING_LOCATION_EVIDENCE";
+        }, countryCode2);
+        const shouldUpdateGeo = !existingEntity.geographicClassification || existingEntity.geographicClassification === "LOCATION_UNKNOWN" || updatedGeo.classification === "FOREIGN_VERIFIED" || updatedGeo.reasonCode === "PUBLIC_PAGE_ADDRESS_COUNTRY" || updatedGeo.reasonCode === "MULTIPLE_PAGE_ADDRESS_COUNTRIES" || existingEntity.geographicClassification === "LOCAL_PROBABLE" && updatedGeo.classification === "LOCAL_VERIFIED" || updatedGeo.reasonCode === "CONFLICTING_LOCATION_EVIDENCE";
         if (shouldUpdateGeo) {
           existingEntity.targetCountryCode = updatedGeo.targetCountryCode;
           existingEntity.businessCountryCode = updatedGeo.businessCountryCode;
@@ -7193,13 +7389,14 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
     const pageNorm = normalizeFacebookPage(cand.facebookPageUrl || cand.pageUrl, cand.facebookPageId || cand.pageId);
     const domainNorm = normalizeDestinationDomain(cand.destinationUrl, cand.destinationDomain);
     const geoEval = evaluateGeographicOrigin({
+      businessPageEvidence: cand.businessPageEvidence,
       pageName: cleanName,
       pageUrl: pageNorm.canonicalUrl || cand.facebookPageUrl || cand.pageUrl,
       destinationUrl: domainNorm.cleanUrl || cand.destinationUrl,
       destinationDomain: domainNorm.canonicalDomain || cand.destinationDomain,
       bodyCopy: cand.bodyCopy || cand.adText,
       ctaText: cand.ctaText || cand.callToAction
-    }, countryCode);
+    }, countryCode2);
     if (intent?.strictLocalMode) {
       if (geoEval.classification === "FOREIGN_VERIFIED") {
         counters.notRelevantCandidates++;
@@ -7273,7 +7470,8 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
       safetyLimitReached = true;
       break;
     }
-    const webState = observedWebsiteState(domainNorm.cleanUrl || cand.destinationUrl, domainNorm.canonicalDomain || cand.destinationDomain);
+    const pageWebsite = cand.businessPageEvidence?.status === "CHECKED" ? cand.businessPageEvidence.websiteUrls.find((url) => observedWebsiteState(url) === "found") : void 0;
+    const webState = observedWebsiteState(pageWebsite || domainNorm.cleanUrl || cand.destinationUrl, pageWebsite ? void 0 : domainNorm.canonicalDomain || cand.destinationDomain);
     const fbState = pageNorm.canonicalUrl || cand.facebookPageUrl ? "found" : "not_found";
     const candAdEvidenceItem = {
       libraryId: cand.libraryId,
@@ -7299,6 +7497,8 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
     ];
     const contactProfile = aggregateContactObservations(incomingContacts);
     const newLead = {
+      businessPageEvidence: cand.businessPageEvidence,
+      businessWebsiteUrl: pageWebsite,
       id: `lead_${runId}_${entityKey}`,
       name: cleanName,
       canonicalName: cleanName,
@@ -7319,7 +7519,7 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
       adLibraryUrl: `https://www.facebook.com/ads/library/?id=${cand.libraryId}`,
       matchedKeywords: currentKeyword ? [currentKeyword] : intent?.primaryKeywords?.slice(0, 1) || [],
       matchedQueries: currentKeyword ? [currentKeyword] : intent?.primaryKeywords?.slice(0, 1) || [],
-      locationCode: countryCode,
+      locationCode: countryCode2,
       locationName,
       // Ad-level CTA & Destination Intelligence (Phase 0.4)
       adEvidence: [candAdEvidenceItem],
@@ -7683,7 +7883,7 @@ function matchCategoryTaxonomy(keyword) {
 function planResearchQueries(options) {
   const {
     seedKeywords,
-    countryCode = "US",
+    countryCode: countryCode2 = "US",
     locale = "",
     runId,
     maxQueries = MAX_QUERIES_PER_RESEARCH_RUN,
@@ -7707,7 +7907,7 @@ function planResearchQueries(options) {
         variantType: "SEED",
         rationale: "Original user-entered seed query (primary discovery anchor)",
         locale,
-        country: countryCode,
+        country: countryCode2,
         sequence: sequenceCounter++,
         runId,
         status: "PENDING"
@@ -7734,7 +7934,7 @@ function planResearchQueries(options) {
           rationale: `High-intent product keyword for ${taxonomy.category}`
         });
       }
-      const countryUpper = countryCode.toUpperCase();
+      const countryUpper = countryCode2.toUpperCase();
       const localeTerms = taxonomy.localeMappings[countryUpper] || [];
       for (const term of localeTerms.slice(0, 2)) {
         candidatePool.push({
@@ -7804,7 +8004,7 @@ function planResearchQueries(options) {
           variantType: item.type,
           rationale: item.rationale,
           locale,
-          country: countryCode,
+          country: countryCode2,
           sequence: sequenceCounter++,
           runId,
           status: "PENDING"
@@ -7924,6 +8124,69 @@ var QueryFrontier = class _QueryFrontier {
 function canStartExtensionCollection() {
   return typeof chrome !== "undefined" && Boolean(chrome.runtime?.id) && typeof chrome.runtime?.sendMessage === "function" && typeof chrome.tabs?.create === "function" && typeof chrome.tabs?.sendMessage === "function" && typeof chrome.storage?.local?.get === "function";
 }
+
+// src/extension/publicPageResearch.ts
+var delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+var PublicPageResearch = class {
+  constructor(maxChecks = 40) {
+    this.maxChecks = maxChecks;
+    this.cache = /* @__PURE__ */ new Map();
+    this.checks = 0;
+    this.blocked = false;
+  }
+  async enrich(candidates, cancelled) {
+    if (typeof chrome === "undefined" || !chrome.scripting?.executeScript) return;
+    for (const candidate of candidates) {
+      if (cancelled() || this.blocked) break;
+      const source = businessPageAboutUrl(candidate.facebookPageUrl || candidate.pageUrl);
+      if (!source) continue;
+      const cached = this.cache.get(source);
+      if (cached) {
+        candidate.businessPageEvidence = cached;
+        continue;
+      }
+      if (this.checks >= this.maxChecks) {
+        candidate.businessPageEvidence = { sourceUrl: source, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), status: "UNAVAILABLE", websiteUrls: [], addressCountryCodes: [], reason: "The bounded Page-check budget was reached. This Page was not checked; website presence remains unknown." };
+        continue;
+      }
+      this.checks++;
+      let tabId;
+      let evidence = { sourceUrl: source, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), status: "UNAVAILABLE", websiteUrls: [], addressCountryCodes: [], reason: "The public Page could not be read; website presence remains unknown." };
+      try {
+        const tab = await chrome.tabs.create({ url: source, active: false });
+        tabId = tab.id;
+        if (tabId === void 0) throw new Error("No Page tab");
+        let loaded = false;
+        for (let attempt = 0; attempt < 12 && !cancelled(); attempt++) {
+          const current = await chrome.tabs.get(tabId);
+          if (current.status === "complete") {
+            loaded = true;
+            break;
+          }
+          await delay(500);
+        }
+        if (!loaded || cancelled()) throw new Error("Page not ready");
+        await delay(800);
+        let snapshot;
+        for (let attempt = 0; attempt < 3 && !cancelled(); attempt++) {
+          const result = await chrome.scripting.executeScript({ target: { tabId }, func: readPublicPageSnapshot });
+          snapshot = result[0]?.result;
+          if (snapshot?.blocked || snapshot?.heading) break;
+          await delay(500);
+        }
+        if (snapshot) evidence = interpretPublicPage(snapshot, source, candidate.pageName || candidate.advertiserName || "");
+      } catch {
+      } finally {
+        if (tabId !== void 0) await chrome.tabs.remove(tabId).catch(() => {
+        });
+      }
+      this.cache.set(source, evidence);
+      candidate.businessPageEvidence = evidence;
+      if (evidence.status === "BLOCKED") this.blocked = true;
+      if (!cancelled() && !this.blocked) await delay(700);
+    }
+  }
+};
 
 // src/extension/qualification/qualificationProfile.ts
 var VALID_CRITERION_TYPES = /* @__PURE__ */ new Set([
@@ -11790,7 +12053,7 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
   cancelledRuns.delete(runId);
   pausedRuns.delete(runId);
   const keywords = payload.keywords.map((k) => k.trim()).filter(Boolean);
-  const countryCode = payload.countryCode || "US";
+  const countryCode2 = payload.countryCode || "US";
   const requestedLimit = payload.maxFinalUniqueRelevantLeads ?? payload.maxResults;
   const isAutoDiscovery = payload.researchMode === "AUTO_DISCOVERY" && requestedLimit === void 0;
   const effectiveCeiling = isAutoDiscovery ? MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH : Math.min(Math.max(1, requestedLimit || MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH), MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH);
@@ -11803,7 +12066,7 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
       presetId: payload.presetId,
       presetName: payload.presetName,
       keywords,
-      countryCode,
+      countryCode: countryCode2,
       locationName: payload.locationName,
       researchMode: isAutoDiscovery ? "AUTO_DISCOVERY" : void 0,
       maxFinalUniqueRelevantLeads: isAutoDiscovery ? MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH : void 0,
@@ -11847,7 +12110,7 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
     payload.mode,
     keywords,
     payload.presetId,
-    countryCode,
+    countryCode2,
     {
       strictLocalMode: payload.strictLocalMode,
       allowProbableLocal: payload.allowProbableLocal,
@@ -11864,7 +12127,7 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
     presetId: payload.presetId,
     presetName: payload.presetName,
     keywords,
-    countryCode,
+    countryCode: countryCode2,
     locationName: payload.locationName,
     strictLocalMode: payload.strictLocalMode,
     allowProbableLocal: payload.allowProbableLocal,
@@ -11916,7 +12179,7 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
   await saveActiveRun(initialRun);
   const plannedQueries = initialRun.plannedQueries || planResearchQueries({
     seedKeywords: keywords,
-    countryCode,
+    countryCode: countryCode2,
     runId,
     maxQueries: MAX_QUERIES_PER_RESEARCH_RUN
   });
@@ -11949,6 +12212,7 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
   let isStalled = false;
   let batchIndex = initialRun.lastCheckpointBatch || 0;
   let encounteredExtractionError = false;
+  const publicPageResearch = new PublicPageResearch();
   try {
     for (let qi = startQi; qi < queriesToRun.length; qi++) {
       if (cancelledRuns.has(runId) || pausedRuns.has(runId)) break;
@@ -11970,9 +12234,9 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
       let queryNormalizedAds = 0;
       let queryNewEntities = 0;
       let queryDuplicateEntities = 0;
-      const searchUrl = buildMetaAdLibrarySearchUrl(countryCode, currentKeyword);
+      const searchUrl = buildMetaAdLibrarySearchUrl(countryCode2, currentKeyword);
       const queryTypeLabel = currentPlannedQuery.variantType === "SEED" ? "Primary Seed" : `Expansion: ${currentPlannedQuery.variantType}`;
-      broadcastProgress(initialRun, "NAVIGATING", `[${qi + 1}/${queriesToRun.length} ${queryTypeLabel}] Opening Meta Ad Library for "${currentKeyword}" in ${countryCode}...`);
+      broadcastProgress(initialRun, "NAVIGATING", `[${qi + 1}/${queriesToRun.length} ${queryTypeLabel}] Opening Meta Ad Library for "${currentKeyword}" in ${countryCode2}...`);
       try {
         if (!currentTabId) {
           const tab = await chrome.tabs.create({ url: searchUrl, active: false });
@@ -12086,6 +12350,8 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
         }
         const candidates = response && response.payload && response.payload.candidates || [];
         if (candidates.length > 0) {
+          await publicPageResearch.enrich(candidates, () => cancelledRuns.has(runId) || pausedRuns.has(runId));
+          if (cancelledRuns.has(runId) || pausedRuns.has(runId)) break;
           batchIndex++;
           const batchResult = await processBatch(
             candidates,
@@ -12111,7 +12377,7 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
             },
             {
               runId,
-              countryCode,
+              countryCode: countryCode2,
               locationName: payload.locationName,
               currentKeyword,
               intent: researchIntent,
