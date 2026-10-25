@@ -1,29 +1,15 @@
-# Current project status — 25 October 2026
+# Current project status - 25 October 2026
 
-## Current extension
+The extension attempts each unique advertiser Page's public About information, then contact/basic information when website, email or phone is missing. The old 40-Page cap is removed. Results are cached per run. Access restrictions stop further Page visits; missing fields stay empty and unchecked Pages are marked explicitly.
 
-- Public Facebook About enrichment: up to 40 unique Page checks per run, identity/name checks, Page website separate from ad CTA, explicit published-address country evidence, cached checks, and source/time/status in details and CSV. See [quality research and limits](docs/current-review/public-page-quality.md). This new enrichment has not been live-tested.
+CSV and Copy for Sheets contain exactly: Page name, Page URL, Website, Email, Phone. Export uses the full stored list rather than the 50-row preview. Missing stored rows block export and offer Retry.
 
-- Simplified collection: Start runs directly on Search, with a spinning lead counter and Stop underneath. No review popup or separate progress page is required. See [UI checks](docs/current-review/simple-collection-ui.md).
-
-- User-requested Meta Ad Library collection now checks installed Chrome extension capabilities instead of the permanently false server gate. UI and background worker use the same check. Hosted previews cannot start collection.
-- Search uses country and All Ads URL parameters. Preset identity survives plan review. Empty scans terminate; pause remains paused. Startup failures are visible rather than silently leaving a running screen.
-- Existing login/challenge and rate-limit stops remain. No challenge bypass, paid API, external website crawling, or server collection was added.
-- Local URL-wrapper decoding, messaging/short-link classification, conservative business history, only-new-business filter, local follow-up notes/status, excluded keywords and configurable CSV/Sheets columns are included.
-- Country inference remains evidence-based; missing evidence is unknown. An observed website link is not proof of reachability or ownership.
+Observed Page websites remain separate from messaging ad CTAs. Page identity and address evidence are checked; search country does not establish business country. No paid API, external website crawling, login bypass or fabricated contacts.
 
 ## Verification
 
-`npm test` runs TypeScript, the unpacked build, and 28 current offline suites. The new mocked Chrome pipeline exercises startup, country/All Ads URLs, empty results, persistence, pause and challenge stop. Mock tests make no live Meta requests.
+29 current offline suites plus TypeScript, extension build and ZIP immutability checks. Isolated Chromium loads the actual MV3 extension against intercepted fixture pages: collection, About/contact fallback, storage, five-column CSV, real clipboard, reload and tab cleanup. A separate seeded 65-row storage scenario verifies export beyond the preview and missing-row recovery.
 
-Previous hosted-browser checks covered imports, reload, business history, local notes, Sheets columns and a downloaded CSV. They do not prove MV3 runtime behavior.
+These are fixture checks, not live Meta tests. Current Facebook layouts, real access restrictions and worker suspension/resumption still require live testing. Historical archive suites remain separate.
 
-Historical release-archive tests remain separate (`npm run verify:legacy`); older missing archives have not been fabricated. No claim that every historical test passes is made.
-
-## Remaining limits
-
-Real installed Chrome MV3 integration, current Meta DOM compatibility, automatic scrolling on live ads, service-worker suspension/resumption and full live collection remain unverified. The user will perform the live test. A passing offline test does not establish production readiness.
-
-`extension.zip` is the current distributable; extract and load its manifest folder. `extension/` is the matching unpacked runtime. Older `review/` packages are historical.
-
-Original upstream: https://github.com/nafiz-pranto/LeadNoria
+See [benchmark report](docs/current-review/about-contacts-five-column-benchmark.md). Extract extension.zip and load the folder containing manifest.json. extension/ contains the matching runtime.

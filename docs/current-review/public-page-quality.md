@@ -1,3 +1,5 @@
+> Historical report: the 40-Page cap and export columns below are superseded by [the current benchmark](about-contacts-five-column-benchmark.md).
+
 # Public Facebook Page evidence — 25 October 2026
 
 The user reports that the preceding basic collection build worked in their live test. This report does not treat that as a live test of the new Page enrichment.

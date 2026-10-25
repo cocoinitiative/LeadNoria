@@ -1,35 +1,33 @@
 import type { ResultRowViewModel } from '../ui/types.ts';
 
-/** Tabs delimit cells; line breaks delimit rows when pasted into Sheets. */
-export const LEAD_EXPORT_COLUMNS = ['Business', 'Facebook page', 'Website', 'Phone', 'Email', 'Business country', 'Ad target country', 'CTA', 'Website status', 'Ad copy'] as const;
-export type LeadExportColumn = typeof LEAD_EXPORT_COLUMNS[number];
-const DEFAULT_COLUMNS = LEAD_EXPORT_COLUMNS.slice(0, 9);
+export const LEAD_EXPORT_COLUMNS = ['Page name', 'Page URL', 'Website', 'Email', 'Phone'] as const;
 
-function exportRows(results: readonly ResultRowViewModel[], columns: readonly LeadExportColumn[]) {
-  const headers = [...new Set(columns)].filter(column => LEAD_EXPORT_COLUMNS.includes(column));
-  if (!headers.length) throw new Error('Choose at least one export column.');
-  const rows = results.filter(row => row.isExportable && !row.isRestricted).map(row => {
-    const values: Record<LeadExportColumn, unknown> = {
-      'Business': row.displayName, 'Facebook page': row.canonicalRecord?.facebookPageUrl,
-      'Website': row.websiteUrl, 'Phone': row.contactSummary.phoneText, 'Email': row.contactSummary.emailText,
-      'Business country': row.businessCountryCode || 'Unknown', 'Ad target country': row.targetCountryCode || 'Unknown',
-      'CTA': row.ctaType, 'Website status': row.websiteUrl ? 'Website observed' : 'No website observed',
-      'Ad copy': row.canonicalRecord?.sampleCopy || row.canonicalRecord?.adEvidence?.[0]?.bodyCopy
-    };
-    return headers.map(column => values[column]);
-  });
-  return [headers, ...rows];
+function contactValues(row: ResultRowViewModel, type: 'PHONE' | 'EMAIL'): string {
+  const profile = row.canonicalRecord?.contactProfile;
+  const observations = type === 'PHONE' ? profile?.observedPhones : profile?.observedEmails;
+  const values = observations?.filter((item: any) => item.syntaxState === 'SYNTAX_VALID' || (type === 'PHONE' && item.syntaxState === 'AMBIGUOUS'))
+    .map((item: any) => item.normalizedValue || item.rawValue).filter(Boolean) || [];
+  const fallback = type === 'PHONE' ? row.contactSummary.phoneText : row.contactSummary.emailText;
+  return [...new Set(values.length ? values : fallback ? [fallback] : [])].join('; ');
 }
 
-function safeCell(value: unknown, flatten: boolean): string {
-  const text = (flatten ? String(value ?? '').replace(/[\t\r\n]+/g, ' ') : String(value ?? '')).trim();
-  return /^[=+@-]/.test(text) ? `'${text}` : text;
+function exportRows(results: readonly ResultRowViewModel[]) {
+  return [LEAD_EXPORT_COLUMNS, ...results.filter(row => row.isExportable && !row.isRestricted).map(row => [
+    row.displayName, row.canonicalRecord?.facebookPageUrl || '', row.websiteUrl || '',
+    contactValues(row, 'EMAIL'), contactValues(row, 'PHONE')
+  ])];
 }
 
-export function leadResultsToSheets(results: readonly ResultRowViewModel[], columns: readonly LeadExportColumn[] = DEFAULT_COLUMNS): string {
-  return exportRows(results, columns).map(row => row.map(value => safeCell(value, true)).join('\t')).join('\n');
+function safeCell(value: unknown): string {
+  const text = String(value ?? '').replace(/[\t\r\n]+/g, ' ').trim();
+  return /^[=+@-]|^0\d/.test(text) ? `'${text}` : text;
 }
 
-export function leadResultsToCsv(results: readonly ResultRowViewModel[], columns: readonly LeadExportColumn[]): string {
-  return exportRows(results, columns).map(row => row.map(value => `"${safeCell(value, false).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+/** Five columns only. Tabs delimit cells for direct Google Sheets pasting. */
+export function leadResultsToSheets(results: readonly ResultRowViewModel[]): string {
+  return exportRows(results).map(row => row.map(safeCell).join('\t')).join('\n');
+}
+
+export function leadResultsToCsv(results: readonly ResultRowViewModel[]): string {
+  return exportRows(results).map(row => row.map(value => `"${safeCell(value).replace(/"/g, '""')}"`).join(',')).join('\r\n');
 }

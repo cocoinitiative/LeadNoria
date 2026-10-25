@@ -2860,6 +2860,459 @@
   // src/extension/metaAdapter.ts
   init_relevanceEngine();
 
+  // src/extension/extraction/normalizer.ts
+  var COMMON_COUNTRY_CODES = {
+    US: { code: "US", dial: "1", nationalDigits: [10] },
+    CA: { code: "CA", dial: "1", nationalDigits: [10] },
+    GB: { code: "GB", dial: "44", nationalDigits: [10, 11] },
+    UK: { code: "GB", dial: "44", nationalDigits: [10, 11] },
+    BD: { code: "BD", dial: "880", nationalDigits: [10, 11] },
+    DE: { code: "DE", dial: "49", nationalDigits: [9, 10, 11, 12] },
+    FR: { code: "FR", dial: "33", nationalDigits: [9, 10] },
+    ES: { code: "ES", dial: "34", nationalDigits: [9] },
+    AU: { code: "AU", dial: "61", nationalDigits: [9, 10] },
+    AE: { code: "AE", dial: "971", nationalDigits: [9] },
+    IN: { code: "IN", dial: "91", nationalDigits: [10] },
+    SG: { code: "SG", dial: "65", nationalDigits: [8] },
+    NZ: { code: "NZ", dial: "64", nationalDigits: [8, 9] },
+    IE: { code: "IE", dial: "353", nationalDigits: [9] },
+    NL: { code: "NL", dial: "31", nationalDigits: [9] },
+    IT: { code: "IT", dial: "39", nationalDigits: [9, 10] },
+    BR: { code: "BR", dial: "55", nationalDigits: [10, 11] },
+    JP: { code: "JP", dial: "81", nationalDigits: [10] }
+  };
+  function sanitizeText(raw, maxLength = 2e3) {
+    if (raw === null || raw === void 0) return "";
+    let text = String(raw);
+    text = text.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "");
+    text = text.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "");
+    text = text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u200B-\u200D\uFEFF]/g, "");
+    text = text.replace(/<[^>]*>/g, " ");
+    text = text.normalize("NFC");
+    text = text.replace(/[ \t\r\f\v]+/g, " ").trim();
+    if (text.length > maxLength) {
+      text = text.substring(0, maxLength).trim();
+    }
+    return text;
+  }
+  function normalizePhone(rawPhone, countryHint) {
+    const original = sanitizeText(rawPhone, 100);
+    if (!original) {
+      return {
+        rawPhone: "",
+        phoneState: "PHONE_INVALID",
+        countryInference: "COUNTRY_UNKNOWN",
+        isValid: false,
+        error: "EMPTY_PHONE"
+      };
+    }
+    let extension;
+    let cleanInput = original;
+    const extMatch = original.match(/(?:ext|ext\.|x|#)\s*([0-9]{1,6})/i);
+    if (extMatch) {
+      extension = extMatch[1];
+      cleanInput = original.substring(0, extMatch.index).trim();
+    }
+    const hasPlus = cleanInput.trim().startsWith("+");
+    const digits = cleanInput.replace(/[^0-9]/g, "");
+    if (digits.length < 5 || digits.length > 15) {
+      return {
+        rawPhone: original,
+        phoneState: "PHONE_INVALID",
+        countryInference: "COUNTRY_UNKNOWN",
+        isValid: false,
+        error: "INVALID_DIGIT_LENGTH"
+      };
+    }
+    let countryMeta = countryHint ? COMMON_COUNTRY_CODES[countryHint.toUpperCase()] : void 0;
+    let countryInference = countryHint ? "COUNTRY_EXPLICIT" : "COUNTRY_UNKNOWN";
+    let e164;
+    let dialCode;
+    let nationalNumber = digits;
+    if (hasPlus) {
+      for (const meta of Object.values(COMMON_COUNTRY_CODES)) {
+        if (digits.startsWith(meta.dial)) {
+          dialCode = meta.dial;
+          nationalNumber = digits.substring(meta.dial.length);
+          e164 = `+${digits}`;
+          if (!countryMeta) {
+            countryMeta = meta;
+            countryInference = "COUNTRY_INFERRED";
+          }
+          break;
+        }
+      }
+      if (!e164) {
+        e164 = `+${digits}`;
+        countryInference = "COUNTRY_INFERRED";
+      }
+    } else if (countryMeta) {
+      if (countryMeta.nationalDigits.includes(digits.length)) {
+        e164 = `+${countryMeta.dial}${digits}`;
+        dialCode = countryMeta.dial;
+        nationalNumber = digits;
+      } else if (digits.startsWith(countryMeta.dial)) {
+        e164 = `+${digits}`;
+        dialCode = countryMeta.dial;
+        nationalNumber = digits.substring(countryMeta.dial.length);
+      } else {
+        return {
+          rawPhone: original,
+          phoneState: "PHONE_AMBIGUOUS",
+          countryInference: "COUNTRY_EXPLICIT",
+          countryCode: countryMeta.code,
+          isValid: false,
+          error: "AMBIGUOUS_NATIONAL_NUMBER_FOR_COUNTRY"
+        };
+      }
+    } else {
+      return {
+        rawPhone: original,
+        phoneState: "PHONE_AMBIGUOUS",
+        countryInference: "COUNTRY_UNKNOWN",
+        isValid: false,
+        error: "AMBIGUOUS_WITHOUT_COUNTRY_CODE"
+      };
+    }
+    return {
+      rawPhone: original,
+      e164Format: e164,
+      internationalFormat: e164,
+      nationalFormat: nationalNumber,
+      countryCode: countryMeta?.code,
+      countryInference,
+      dialCode,
+      extension,
+      phoneState: "PHONE_NORMALIZED",
+      isValid: true
+    };
+  }
+  function normalizeEmail(rawEmail) {
+    if (!rawEmail) {
+      return {
+        rawEmail: "",
+        normalizedEmail: "",
+        localPart: "",
+        domainPart: "",
+        isValid: false,
+        error: "EMPTY_EMAIL"
+      };
+    }
+    const stripped = String(rawEmail).trim().replace(/^[<(\["']+|[>)\]"']+$/g, "").trim();
+    const original = sanitizeText(stripped, 254);
+    if (!original) {
+      return {
+        rawEmail: String(rawEmail),
+        normalizedEmail: "",
+        localPart: "",
+        domainPart: "",
+        isValid: false,
+        error: "EMPTY_EMAIL"
+      };
+    }
+    const emailRegex = /^([a-zA-Z0-9_\.\-\+]+)@([a-zA-Z0-9\-]+\.[a-zA-Z0-9\-\.]+)$/;
+    const match = original.match(emailRegex);
+    if (!match) {
+      return {
+        rawEmail: String(rawEmail),
+        normalizedEmail: "",
+        localPart: "",
+        domainPart: "",
+        isValid: false,
+        error: "INVALID_EMAIL_SYNTAX"
+      };
+    }
+    const localPart = match[1];
+    const domainPart = match[2].toLowerCase();
+    const normalizedEmail = `${localPart}@${domainPart}`;
+    return {
+      rawEmail: String(rawEmail),
+      normalizedEmail,
+      localPart,
+      domainPart,
+      isValid: true
+    };
+  }
+
+  // src/extension/contactQuality.ts
+  var PLACEHOLDER_EMAIL_DOMAINS = /* @__PURE__ */ new Set([
+    "example.com",
+    "example.org",
+    "example.net",
+    "domain.com",
+    "email.com",
+    "sentry.io",
+    "wixpress.com",
+    "wordpress.org",
+    "shopify.com",
+    "myshopify.com",
+    "gravatar.com",
+    "schema.org",
+    "facebook.com",
+    "fb.com",
+    "meta.com",
+    "instagram.com"
+  ]);
+  function normalizeContactPhone(rawPhone, countryHint) {
+    if (!rawPhone || !rawPhone.trim()) {
+      return {
+        syntaxState: "NOT_OBSERVED",
+        reason: "No phone number observed in ad creative or links."
+      };
+    }
+    const cleaned = sanitizeText(rawPhone, 100);
+    const digitsOnly = cleaned.replace(/[^0-9]/g, "");
+    if (digitsOnly.length < 7 || digitsOnly.length > 15) {
+      return {
+        syntaxState: "SYNTAX_INVALID",
+        reason: `Phone digits count (${digitsOnly.length}) is outside standard E.164 boundary (7-15 digits).`
+      };
+    }
+    const norm = normalizePhone(cleaned, countryHint);
+    if (!norm.isValid) {
+      if (norm.error === "AMBIGUOUS_WITHOUT_COUNTRY_CODE" || norm.phoneState === "PHONE_AMBIGUOUS") {
+        return {
+          normalized: digitsOnly,
+          e164: void 0,
+          syntaxState: "AMBIGUOUS",
+          reason: "Local phone number lacks explicit international country dial code.",
+          nationalFormat: digitsOnly
+        };
+      }
+      return {
+        syntaxState: "SYNTAX_INVALID",
+        reason: norm.error || "Failed standard phone validation."
+      };
+    }
+    return {
+      normalized: norm.e164Format || norm.nationalFormat || digitsOnly,
+      e164: norm.e164Format,
+      syntaxState: "SYNTAX_VALID",
+      reason: `Format validated via E.164/national standard (inferred: ${norm.countryInference}).`,
+      extension: norm.extension,
+      nationalFormat: norm.nationalFormat
+    };
+  }
+  function normalizeContactEmail(rawEmail) {
+    if (!rawEmail || !rawEmail.trim()) {
+      return {
+        syntaxState: "NOT_OBSERVED",
+        reason: "No email address observed in ad creative or links."
+      };
+    }
+    const stripped = String(rawEmail).trim().replace(/^[<(\["']+|[>)\]"']+$/g, "").trim();
+    const cleaned = sanitizeText(stripped, 254);
+    const norm = normalizeEmail(cleaned);
+    if (!norm.isValid) {
+      return {
+        syntaxState: "SYNTAX_INVALID",
+        reason: norm.error || "Invalid RFC 5322 email syntax."
+      };
+    }
+    const domain = norm.domainPart.toLowerCase();
+    if (PLACEHOLDER_EMAIL_DOMAINS.has(domain)) {
+      return {
+        normalized: norm.normalizedEmail,
+        syntaxState: "SYNTAX_INVALID",
+        reason: `Email domain "${domain}" is a known placeholder/vendor domain, not a private business contact.`,
+        localPart: norm.localPart,
+        domainPart: domain
+      };
+    }
+    if (!domain.includes(".") || domain.startsWith(".") || domain.endsWith(".")) {
+      return {
+        syntaxState: "SYNTAX_INVALID",
+        reason: "Email domain lacks valid top-level domain."
+      };
+    }
+    return {
+      normalized: norm.normalizedEmail,
+      syntaxState: "SYNTAX_VALID",
+      reason: "RFC 5322 compliant syntax validated.",
+      localPart: norm.localPart,
+      domainPart: domain
+    };
+  }
+  function extractContactsFromText(text, sourceSurface = "AD_BODY_TEXT", libraryId, countryHint) {
+    const phones = [];
+    const emails = [];
+    if (!text || typeof text !== "string") return { phones, emails };
+    const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
+    let emailMatch;
+    const seenEmails = /* @__PURE__ */ new Set();
+    while ((emailMatch = emailRegex.exec(text)) !== null) {
+      const raw = emailMatch[0];
+      const lower = raw.toLowerCase();
+      if (seenEmails.has(lower)) continue;
+      seenEmails.add(lower);
+      const normRes = normalizeContactEmail(raw);
+      const startIdx = Math.max(0, emailMatch.index - 25);
+      const endIdx = Math.min(text.length, emailMatch.index + raw.length + 25);
+      const contextSnippet = text.substring(startIdx, endIdx).replace(/\s+/g, " ").trim();
+      emails.push({
+        id: `email_${libraryId || "anon"}_${emails.length + 1}`,
+        type: "EMAIL",
+        rawValue: raw,
+        normalizedValue: normRes.normalized,
+        sourceSurface,
+        syntaxState: normRes.syntaxState,
+        verificationStatus: normRes.syntaxState === "SYNTAX_VALID" ? "UNPROBED_PUBLIC_CLAIM" : "NOT_OBSERVED",
+        confidence: normRes.syntaxState === "SYNTAX_VALID" ? "HIGH" : "LOW",
+        contextSnippet,
+        adLibraryId: libraryId,
+        observedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        evidenceReason: normRes.reason
+      });
+    }
+    const phoneRegex = /(?:\+?\d{1,4}[-.\s]?)?(?:\(?\d{2,4}\)?[-.\s]?)?\d{3,4}[-.\s]?\d{3,5}\b/g;
+    let phoneMatch;
+    const seenPhones = /* @__PURE__ */ new Set();
+    while ((phoneMatch = phoneRegex.exec(text)) !== null) {
+      const raw = phoneMatch[0].trim();
+      const digitsOnly = raw.replace(/[^0-9]/g, "");
+      if (digitsOnly.length < 7 || digitsOnly.length > 15) continue;
+      if (/^\d{4}[-/]\d{2}[-/]\d{2}$/.test(raw)) continue;
+      if (seenPhones.has(digitsOnly)) continue;
+      seenPhones.add(digitsOnly);
+      const normRes = normalizeContactPhone(raw, countryHint);
+      const startIdx = Math.max(0, phoneMatch.index - 25);
+      const endIdx = Math.min(text.length, phoneMatch.index + raw.length + 25);
+      const contextSnippet = text.substring(startIdx, endIdx).replace(/\s+/g, " ").trim();
+      phones.push({
+        id: `phone_${libraryId || "anon"}_${phones.length + 1}`,
+        type: "PHONE",
+        rawValue: raw,
+        normalizedValue: normRes.normalized,
+        sourceSurface,
+        syntaxState: normRes.syntaxState,
+        verificationStatus: normRes.syntaxState === "SYNTAX_VALID" || normRes.syntaxState === "AMBIGUOUS" ? "UNPROBED_PUBLIC_CLAIM" : "NOT_OBSERVED",
+        confidence: normRes.syntaxState === "SYNTAX_VALID" ? "HIGH" : normRes.syntaxState === "AMBIGUOUS" ? "MEDIUM" : "LOW",
+        contextSnippet,
+        adLibraryId: libraryId,
+        observedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        evidenceReason: normRes.reason,
+        countryHint,
+        e164Format: normRes.e164,
+        nationalFormat: normRes.nationalFormat,
+        extension: normRes.extension
+      });
+    }
+    return { phones, emails };
+  }
+  function extractContactsFromAdCard(cardRoot, libraryId, countryHint) {
+    const allPhones = [];
+    const allEmails = [];
+    const seenPhoneDigits = /* @__PURE__ */ new Set();
+    const seenEmailNorms = /* @__PURE__ */ new Set();
+    const links = Array.from(cardRoot.querySelectorAll("a"));
+    for (const link of links) {
+      const href = link.href || link.getAttribute("href") || "";
+      const linkText = (link.innerText || link.textContent || "").trim();
+      if (href.startsWith("tel:")) {
+        const raw = href.replace(/^tel:\s*/i, "").trim();
+        const normRes = normalizeContactPhone(raw, countryHint);
+        const digits = raw.replace(/[^0-9]/g, "");
+        if (digits && !seenPhoneDigits.has(digits)) {
+          seenPhoneDigits.add(digits);
+          allPhones.push({
+            id: `tel_link_${libraryId || "anon"}_${allPhones.length + 1}`,
+            type: "PHONE",
+            rawValue: raw,
+            normalizedValue: normRes.normalized,
+            sourceSurface: "TEL_LINK",
+            syntaxState: normRes.syntaxState,
+            verificationStatus: normRes.syntaxState === "SYNTAX_VALID" || normRes.syntaxState === "AMBIGUOUS" ? "UNPROBED_PUBLIC_CLAIM" : "NOT_OBSERVED",
+            confidence: "HIGH",
+            contextSnippet: `Link text: "${linkText}"`,
+            adLibraryId: libraryId,
+            observedAt: (/* @__PURE__ */ new Date()).toISOString(),
+            evidenceReason: `Explicit tel: anchor observed in DOM: ${normRes.reason}`,
+            countryHint,
+            e164Format: normRes.e164,
+            nationalFormat: normRes.nationalFormat
+          });
+        }
+      }
+      if (href.startsWith("mailto:")) {
+        const raw = href.replace(/^mailto:\s*/i, "").split("?")[0].trim();
+        const normRes = normalizeContactEmail(raw);
+        const lower = raw.toLowerCase();
+        if (lower && !seenEmailNorms.has(lower)) {
+          seenEmailNorms.add(lower);
+          allEmails.push({
+            id: `mailto_link_${libraryId || "anon"}_${allEmails.length + 1}`,
+            type: "EMAIL",
+            rawValue: raw,
+            normalizedValue: normRes.normalized,
+            sourceSurface: "MAILTO_LINK",
+            syntaxState: normRes.syntaxState,
+            verificationStatus: normRes.syntaxState === "SYNTAX_VALID" ? "UNPROBED_PUBLIC_CLAIM" : "NOT_OBSERVED",
+            confidence: "HIGH",
+            contextSnippet: `Link text: "${linkText}"`,
+            adLibraryId: libraryId,
+            observedAt: (/* @__PURE__ */ new Date()).toISOString(),
+            evidenceReason: `Explicit mailto: anchor observed in DOM: ${normRes.reason}`
+          });
+        }
+      }
+      if (href.includes("wa.me/") || href.includes("api.whatsapp.com/send")) {
+        let rawPhone = "";
+        if (href.includes("wa.me/")) {
+          const match = href.match(/wa\.me\/([0-9+]+)/i);
+          if (match) rawPhone = match[1];
+        } else {
+          try {
+            const u = new URL(href);
+            rawPhone = u.searchParams.get("phone") || "";
+          } catch {
+          }
+        }
+        if (rawPhone) {
+          const intlPhone = rawPhone.startsWith("+") ? rawPhone : `+${rawPhone}`;
+          const normRes = normalizeContactPhone(intlPhone, countryHint);
+          const digits = rawPhone.replace(/[^0-9]/g, "");
+          if (digits && !seenPhoneDigits.has(digits)) {
+            seenPhoneDigits.add(digits);
+            allPhones.push({
+              id: `wa_link_${libraryId || "anon"}_${allPhones.length + 1}`,
+              type: "PHONE",
+              rawValue: rawPhone,
+              normalizedValue: normRes.normalized,
+              sourceSurface: "WHATSAPP_LINK",
+              syntaxState: normRes.syntaxState,
+              verificationStatus: normRes.syntaxState === "SYNTAX_VALID" || normRes.syntaxState === "AMBIGUOUS" ? "UNPROBED_PUBLIC_CLAIM" : "NOT_OBSERVED",
+              confidence: "HIGH",
+              contextSnippet: `WhatsApp link destination: ${href.substring(0, 60)}`,
+              adLibraryId: libraryId,
+              observedAt: (/* @__PURE__ */ new Date()).toISOString(),
+              evidenceReason: `WhatsApp direct link observed in ad card: ${normRes.reason}`,
+              countryHint,
+              e164Format: normRes.e164,
+              nationalFormat: normRes.nationalFormat
+            });
+          }
+        }
+      }
+    }
+    const fullText = cardRoot.innerText || cardRoot.textContent || "";
+    const textContacts = extractContactsFromText(fullText, "AD_BODY_TEXT", libraryId, countryHint);
+    for (const p of textContacts.phones) {
+      const digits = p.rawValue.replace(/[^0-9]/g, "");
+      if (!seenPhoneDigits.has(digits)) {
+        seenPhoneDigits.add(digits);
+        allPhones.push(p);
+      }
+    }
+    for (const e of textContacts.emails) {
+      const lower = e.rawValue.toLowerCase();
+      if (!seenEmailNorms.has(lower)) {
+        seenEmailNorms.add(lower);
+        allEmails.push(e);
+      }
+    }
+    return { phones: allPhones, emails: allEmails };
+  }
+
   // src/extension/countryProfiles/profiles/bd.ts
   var BD_PROFILE = {
     countryCode: "BD",
@@ -3615,459 +4068,6 @@
     for (const alias of profile.aliases) {
       ALIAS_MAP.set(alias.toUpperCase(), code);
     }
-  }
-
-  // src/extension/extraction/normalizer.ts
-  var COMMON_COUNTRY_CODES = {
-    US: { code: "US", dial: "1", nationalDigits: [10] },
-    CA: { code: "CA", dial: "1", nationalDigits: [10] },
-    GB: { code: "GB", dial: "44", nationalDigits: [10, 11] },
-    UK: { code: "GB", dial: "44", nationalDigits: [10, 11] },
-    BD: { code: "BD", dial: "880", nationalDigits: [10, 11] },
-    DE: { code: "DE", dial: "49", nationalDigits: [9, 10, 11, 12] },
-    FR: { code: "FR", dial: "33", nationalDigits: [9, 10] },
-    ES: { code: "ES", dial: "34", nationalDigits: [9] },
-    AU: { code: "AU", dial: "61", nationalDigits: [9, 10] },
-    AE: { code: "AE", dial: "971", nationalDigits: [9] },
-    IN: { code: "IN", dial: "91", nationalDigits: [10] },
-    SG: { code: "SG", dial: "65", nationalDigits: [8] },
-    NZ: { code: "NZ", dial: "64", nationalDigits: [8, 9] },
-    IE: { code: "IE", dial: "353", nationalDigits: [9] },
-    NL: { code: "NL", dial: "31", nationalDigits: [9] },
-    IT: { code: "IT", dial: "39", nationalDigits: [9, 10] },
-    BR: { code: "BR", dial: "55", nationalDigits: [10, 11] },
-    JP: { code: "JP", dial: "81", nationalDigits: [10] }
-  };
-  function sanitizeText(raw, maxLength = 2e3) {
-    if (raw === null || raw === void 0) return "";
-    let text = String(raw);
-    text = text.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "");
-    text = text.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "");
-    text = text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u200B-\u200D\uFEFF]/g, "");
-    text = text.replace(/<[^>]*>/g, " ");
-    text = text.normalize("NFC");
-    text = text.replace(/[ \t\r\f\v]+/g, " ").trim();
-    if (text.length > maxLength) {
-      text = text.substring(0, maxLength).trim();
-    }
-    return text;
-  }
-  function normalizePhone(rawPhone, countryHint) {
-    const original = sanitizeText(rawPhone, 100);
-    if (!original) {
-      return {
-        rawPhone: "",
-        phoneState: "PHONE_INVALID",
-        countryInference: "COUNTRY_UNKNOWN",
-        isValid: false,
-        error: "EMPTY_PHONE"
-      };
-    }
-    let extension;
-    let cleanInput = original;
-    const extMatch = original.match(/(?:ext|ext\.|x|#)\s*([0-9]{1,6})/i);
-    if (extMatch) {
-      extension = extMatch[1];
-      cleanInput = original.substring(0, extMatch.index).trim();
-    }
-    const hasPlus = cleanInput.trim().startsWith("+");
-    const digits = cleanInput.replace(/[^0-9]/g, "");
-    if (digits.length < 5 || digits.length > 15) {
-      return {
-        rawPhone: original,
-        phoneState: "PHONE_INVALID",
-        countryInference: "COUNTRY_UNKNOWN",
-        isValid: false,
-        error: "INVALID_DIGIT_LENGTH"
-      };
-    }
-    let countryMeta = countryHint ? COMMON_COUNTRY_CODES[countryHint.toUpperCase()] : void 0;
-    let countryInference = countryHint ? "COUNTRY_EXPLICIT" : "COUNTRY_UNKNOWN";
-    let e164;
-    let dialCode;
-    let nationalNumber = digits;
-    if (hasPlus) {
-      for (const meta of Object.values(COMMON_COUNTRY_CODES)) {
-        if (digits.startsWith(meta.dial)) {
-          dialCode = meta.dial;
-          nationalNumber = digits.substring(meta.dial.length);
-          e164 = `+${digits}`;
-          if (!countryMeta) {
-            countryMeta = meta;
-            countryInference = "COUNTRY_INFERRED";
-          }
-          break;
-        }
-      }
-      if (!e164) {
-        e164 = `+${digits}`;
-        countryInference = "COUNTRY_INFERRED";
-      }
-    } else if (countryMeta) {
-      if (countryMeta.nationalDigits.includes(digits.length)) {
-        e164 = `+${countryMeta.dial}${digits}`;
-        dialCode = countryMeta.dial;
-        nationalNumber = digits;
-      } else if (digits.startsWith(countryMeta.dial)) {
-        e164 = `+${digits}`;
-        dialCode = countryMeta.dial;
-        nationalNumber = digits.substring(countryMeta.dial.length);
-      } else {
-        return {
-          rawPhone: original,
-          phoneState: "PHONE_AMBIGUOUS",
-          countryInference: "COUNTRY_EXPLICIT",
-          countryCode: countryMeta.code,
-          isValid: false,
-          error: "AMBIGUOUS_NATIONAL_NUMBER_FOR_COUNTRY"
-        };
-      }
-    } else {
-      return {
-        rawPhone: original,
-        phoneState: "PHONE_AMBIGUOUS",
-        countryInference: "COUNTRY_UNKNOWN",
-        isValid: false,
-        error: "AMBIGUOUS_WITHOUT_COUNTRY_CODE"
-      };
-    }
-    return {
-      rawPhone: original,
-      e164Format: e164,
-      internationalFormat: e164,
-      nationalFormat: nationalNumber,
-      countryCode: countryMeta?.code,
-      countryInference,
-      dialCode,
-      extension,
-      phoneState: "PHONE_NORMALIZED",
-      isValid: true
-    };
-  }
-  function normalizeEmail(rawEmail) {
-    if (!rawEmail) {
-      return {
-        rawEmail: "",
-        normalizedEmail: "",
-        localPart: "",
-        domainPart: "",
-        isValid: false,
-        error: "EMPTY_EMAIL"
-      };
-    }
-    const stripped = String(rawEmail).trim().replace(/^[<(\["']+|[>)\]"']+$/g, "").trim();
-    const original = sanitizeText(stripped, 254);
-    if (!original) {
-      return {
-        rawEmail: String(rawEmail),
-        normalizedEmail: "",
-        localPart: "",
-        domainPart: "",
-        isValid: false,
-        error: "EMPTY_EMAIL"
-      };
-    }
-    const emailRegex = /^([a-zA-Z0-9_\.\-\+]+)@([a-zA-Z0-9\-]+\.[a-zA-Z0-9\-\.]+)$/;
-    const match = original.match(emailRegex);
-    if (!match) {
-      return {
-        rawEmail: String(rawEmail),
-        normalizedEmail: "",
-        localPart: "",
-        domainPart: "",
-        isValid: false,
-        error: "INVALID_EMAIL_SYNTAX"
-      };
-    }
-    const localPart = match[1];
-    const domainPart = match[2].toLowerCase();
-    const normalizedEmail = `${localPart}@${domainPart}`;
-    return {
-      rawEmail: String(rawEmail),
-      normalizedEmail,
-      localPart,
-      domainPart,
-      isValid: true
-    };
-  }
-
-  // src/extension/contactQuality.ts
-  var PLACEHOLDER_EMAIL_DOMAINS = /* @__PURE__ */ new Set([
-    "example.com",
-    "example.org",
-    "example.net",
-    "domain.com",
-    "email.com",
-    "sentry.io",
-    "wixpress.com",
-    "wordpress.org",
-    "shopify.com",
-    "myshopify.com",
-    "gravatar.com",
-    "schema.org",
-    "facebook.com",
-    "fb.com",
-    "meta.com",
-    "instagram.com"
-  ]);
-  function normalizeContactPhone(rawPhone, countryHint) {
-    if (!rawPhone || !rawPhone.trim()) {
-      return {
-        syntaxState: "NOT_OBSERVED",
-        reason: "No phone number observed in ad creative or links."
-      };
-    }
-    const cleaned = sanitizeText(rawPhone, 100);
-    const digitsOnly = cleaned.replace(/[^0-9]/g, "");
-    if (digitsOnly.length < 7 || digitsOnly.length > 15) {
-      return {
-        syntaxState: "SYNTAX_INVALID",
-        reason: `Phone digits count (${digitsOnly.length}) is outside standard E.164 boundary (7-15 digits).`
-      };
-    }
-    const norm = normalizePhone(cleaned, countryHint);
-    if (!norm.isValid) {
-      if (norm.error === "AMBIGUOUS_WITHOUT_COUNTRY_CODE" || norm.phoneState === "PHONE_AMBIGUOUS") {
-        return {
-          normalized: digitsOnly,
-          e164: void 0,
-          syntaxState: "AMBIGUOUS",
-          reason: "Local phone number lacks explicit international country dial code.",
-          nationalFormat: digitsOnly
-        };
-      }
-      return {
-        syntaxState: "SYNTAX_INVALID",
-        reason: norm.error || "Failed standard phone validation."
-      };
-    }
-    return {
-      normalized: norm.e164Format || norm.nationalFormat || digitsOnly,
-      e164: norm.e164Format,
-      syntaxState: "SYNTAX_VALID",
-      reason: `Format validated via E.164/national standard (inferred: ${norm.countryInference}).`,
-      extension: norm.extension,
-      nationalFormat: norm.nationalFormat
-    };
-  }
-  function normalizeContactEmail(rawEmail) {
-    if (!rawEmail || !rawEmail.trim()) {
-      return {
-        syntaxState: "NOT_OBSERVED",
-        reason: "No email address observed in ad creative or links."
-      };
-    }
-    const stripped = String(rawEmail).trim().replace(/^[<(\["']+|[>)\]"']+$/g, "").trim();
-    const cleaned = sanitizeText(stripped, 254);
-    const norm = normalizeEmail(cleaned);
-    if (!norm.isValid) {
-      return {
-        syntaxState: "SYNTAX_INVALID",
-        reason: norm.error || "Invalid RFC 5322 email syntax."
-      };
-    }
-    const domain = norm.domainPart.toLowerCase();
-    if (PLACEHOLDER_EMAIL_DOMAINS.has(domain)) {
-      return {
-        normalized: norm.normalizedEmail,
-        syntaxState: "SYNTAX_INVALID",
-        reason: `Email domain "${domain}" is a known placeholder/vendor domain, not a private business contact.`,
-        localPart: norm.localPart,
-        domainPart: domain
-      };
-    }
-    if (!domain.includes(".") || domain.startsWith(".") || domain.endsWith(".")) {
-      return {
-        syntaxState: "SYNTAX_INVALID",
-        reason: "Email domain lacks valid top-level domain."
-      };
-    }
-    return {
-      normalized: norm.normalizedEmail,
-      syntaxState: "SYNTAX_VALID",
-      reason: "RFC 5322 compliant syntax validated.",
-      localPart: norm.localPart,
-      domainPart: domain
-    };
-  }
-  function extractContactsFromText(text, sourceSurface = "AD_BODY_TEXT", libraryId, countryHint) {
-    const phones = [];
-    const emails = [];
-    if (!text || typeof text !== "string") return { phones, emails };
-    const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
-    let emailMatch;
-    const seenEmails = /* @__PURE__ */ new Set();
-    while ((emailMatch = emailRegex.exec(text)) !== null) {
-      const raw = emailMatch[0];
-      const lower = raw.toLowerCase();
-      if (seenEmails.has(lower)) continue;
-      seenEmails.add(lower);
-      const normRes = normalizeContactEmail(raw);
-      const startIdx = Math.max(0, emailMatch.index - 25);
-      const endIdx = Math.min(text.length, emailMatch.index + raw.length + 25);
-      const contextSnippet = text.substring(startIdx, endIdx).replace(/\s+/g, " ").trim();
-      emails.push({
-        id: `email_${libraryId || "anon"}_${emails.length + 1}`,
-        type: "EMAIL",
-        rawValue: raw,
-        normalizedValue: normRes.normalized,
-        sourceSurface,
-        syntaxState: normRes.syntaxState,
-        verificationStatus: normRes.syntaxState === "SYNTAX_VALID" ? "UNPROBED_PUBLIC_CLAIM" : "NOT_OBSERVED",
-        confidence: normRes.syntaxState === "SYNTAX_VALID" ? "HIGH" : "LOW",
-        contextSnippet,
-        adLibraryId: libraryId,
-        observedAt: (/* @__PURE__ */ new Date()).toISOString(),
-        evidenceReason: normRes.reason
-      });
-    }
-    const phoneRegex = /(?:\+?\d{1,4}[-.\s]?)?(?:\(?\d{2,4}\)?[-.\s]?)?\d{3,4}[-.\s]?\d{3,5}\b/g;
-    let phoneMatch;
-    const seenPhones = /* @__PURE__ */ new Set();
-    while ((phoneMatch = phoneRegex.exec(text)) !== null) {
-      const raw = phoneMatch[0].trim();
-      const digitsOnly = raw.replace(/[^0-9]/g, "");
-      if (digitsOnly.length < 7 || digitsOnly.length > 15) continue;
-      if (/^\d{4}[-/]\d{2}[-/]\d{2}$/.test(raw)) continue;
-      if (seenPhones.has(digitsOnly)) continue;
-      seenPhones.add(digitsOnly);
-      const normRes = normalizeContactPhone(raw, countryHint);
-      const startIdx = Math.max(0, phoneMatch.index - 25);
-      const endIdx = Math.min(text.length, phoneMatch.index + raw.length + 25);
-      const contextSnippet = text.substring(startIdx, endIdx).replace(/\s+/g, " ").trim();
-      phones.push({
-        id: `phone_${libraryId || "anon"}_${phones.length + 1}`,
-        type: "PHONE",
-        rawValue: raw,
-        normalizedValue: normRes.normalized,
-        sourceSurface,
-        syntaxState: normRes.syntaxState,
-        verificationStatus: normRes.syntaxState === "SYNTAX_VALID" || normRes.syntaxState === "AMBIGUOUS" ? "UNPROBED_PUBLIC_CLAIM" : "NOT_OBSERVED",
-        confidence: normRes.syntaxState === "SYNTAX_VALID" ? "HIGH" : normRes.syntaxState === "AMBIGUOUS" ? "MEDIUM" : "LOW",
-        contextSnippet,
-        adLibraryId: libraryId,
-        observedAt: (/* @__PURE__ */ new Date()).toISOString(),
-        evidenceReason: normRes.reason,
-        countryHint,
-        e164Format: normRes.e164,
-        nationalFormat: normRes.nationalFormat,
-        extension: normRes.extension
-      });
-    }
-    return { phones, emails };
-  }
-  function extractContactsFromAdCard(cardRoot, libraryId, countryHint) {
-    const allPhones = [];
-    const allEmails = [];
-    const seenPhoneDigits = /* @__PURE__ */ new Set();
-    const seenEmailNorms = /* @__PURE__ */ new Set();
-    const links = Array.from(cardRoot.querySelectorAll("a"));
-    for (const link of links) {
-      const href = link.href || link.getAttribute("href") || "";
-      const linkText = (link.innerText || link.textContent || "").trim();
-      if (href.startsWith("tel:")) {
-        const raw = href.replace(/^tel:\s*/i, "").trim();
-        const normRes = normalizeContactPhone(raw, countryHint);
-        const digits = raw.replace(/[^0-9]/g, "");
-        if (digits && !seenPhoneDigits.has(digits)) {
-          seenPhoneDigits.add(digits);
-          allPhones.push({
-            id: `tel_link_${libraryId || "anon"}_${allPhones.length + 1}`,
-            type: "PHONE",
-            rawValue: raw,
-            normalizedValue: normRes.normalized,
-            sourceSurface: "TEL_LINK",
-            syntaxState: normRes.syntaxState,
-            verificationStatus: normRes.syntaxState === "SYNTAX_VALID" || normRes.syntaxState === "AMBIGUOUS" ? "UNPROBED_PUBLIC_CLAIM" : "NOT_OBSERVED",
-            confidence: "HIGH",
-            contextSnippet: `Link text: "${linkText}"`,
-            adLibraryId: libraryId,
-            observedAt: (/* @__PURE__ */ new Date()).toISOString(),
-            evidenceReason: `Explicit tel: anchor observed in DOM: ${normRes.reason}`,
-            countryHint,
-            e164Format: normRes.e164,
-            nationalFormat: normRes.nationalFormat
-          });
-        }
-      }
-      if (href.startsWith("mailto:")) {
-        const raw = href.replace(/^mailto:\s*/i, "").split("?")[0].trim();
-        const normRes = normalizeContactEmail(raw);
-        const lower = raw.toLowerCase();
-        if (lower && !seenEmailNorms.has(lower)) {
-          seenEmailNorms.add(lower);
-          allEmails.push({
-            id: `mailto_link_${libraryId || "anon"}_${allEmails.length + 1}`,
-            type: "EMAIL",
-            rawValue: raw,
-            normalizedValue: normRes.normalized,
-            sourceSurface: "MAILTO_LINK",
-            syntaxState: normRes.syntaxState,
-            verificationStatus: normRes.syntaxState === "SYNTAX_VALID" ? "UNPROBED_PUBLIC_CLAIM" : "NOT_OBSERVED",
-            confidence: "HIGH",
-            contextSnippet: `Link text: "${linkText}"`,
-            adLibraryId: libraryId,
-            observedAt: (/* @__PURE__ */ new Date()).toISOString(),
-            evidenceReason: `Explicit mailto: anchor observed in DOM: ${normRes.reason}`
-          });
-        }
-      }
-      if (href.includes("wa.me/") || href.includes("api.whatsapp.com/send")) {
-        let rawPhone = "";
-        if (href.includes("wa.me/")) {
-          const match = href.match(/wa\.me\/([0-9+]+)/i);
-          if (match) rawPhone = match[1];
-        } else {
-          try {
-            const u = new URL(href);
-            rawPhone = u.searchParams.get("phone") || "";
-          } catch {
-          }
-        }
-        if (rawPhone) {
-          const intlPhone = rawPhone.startsWith("+") ? rawPhone : `+${rawPhone}`;
-          const normRes = normalizeContactPhone(intlPhone, countryHint);
-          const digits = rawPhone.replace(/[^0-9]/g, "");
-          if (digits && !seenPhoneDigits.has(digits)) {
-            seenPhoneDigits.add(digits);
-            allPhones.push({
-              id: `wa_link_${libraryId || "anon"}_${allPhones.length + 1}`,
-              type: "PHONE",
-              rawValue: rawPhone,
-              normalizedValue: normRes.normalized,
-              sourceSurface: "WHATSAPP_LINK",
-              syntaxState: normRes.syntaxState,
-              verificationStatus: normRes.syntaxState === "SYNTAX_VALID" || normRes.syntaxState === "AMBIGUOUS" ? "UNPROBED_PUBLIC_CLAIM" : "NOT_OBSERVED",
-              confidence: "HIGH",
-              contextSnippet: `WhatsApp link destination: ${href.substring(0, 60)}`,
-              adLibraryId: libraryId,
-              observedAt: (/* @__PURE__ */ new Date()).toISOString(),
-              evidenceReason: `WhatsApp direct link observed in ad card: ${normRes.reason}`,
-              countryHint,
-              e164Format: normRes.e164,
-              nationalFormat: normRes.nationalFormat
-            });
-          }
-        }
-      }
-    }
-    const fullText = cardRoot.innerText || cardRoot.textContent || "";
-    const textContacts = extractContactsFromText(fullText, "AD_BODY_TEXT", libraryId, countryHint);
-    for (const p of textContacts.phones) {
-      const digits = p.rawValue.replace(/[^0-9]/g, "");
-      if (!seenPhoneDigits.has(digits)) {
-        seenPhoneDigits.add(digits);
-        allPhones.push(p);
-      }
-    }
-    for (const e of textContacts.emails) {
-      const lower = e.rawValue.toLowerCase();
-      if (!seenEmailNorms.has(lower)) {
-        seenEmailNorms.add(lower);
-        allEmails.push(e);
-      }
-    }
-    return { phones: allPhones, emails: allEmails };
   }
 
   // src/extension/metaAdapter.ts

@@ -42,6 +42,7 @@ export const PLACEHOLDER_EMAIL_DOMAINS = new Set([
 export type ContactFieldType = 'PHONE' | 'EMAIL' | 'WEBSITE' | 'SOCIAL_PROFILE';
 
 export type ContactSourceSurface =
+  | 'FACEBOOK_PAGE_ABOUT'
   | 'AD_BODY_TEXT'
   | 'TEL_LINK'
   | 'MAILTO_LINK'
@@ -73,6 +74,7 @@ export type ContactQualityState =
   | 'NOT_OBSERVED';
 
 export interface ContactObservation {
+  sourceUrl?: string;
   id: string;
   type: ContactFieldType;
   rawValue: string;
@@ -490,7 +492,7 @@ export function aggregateContactObservations(
     if (distinctPhoneKeys.size > 1) {
       profile.phoneConflict = true;
       profile.phoneConflictState = 'CONFLICT_DETECTED';
-      profile.diagnostics.push(`Observed ${distinctPhoneKeys.size} conflicting phone numbers across ads: ${Array.from(distinctPhoneKeys).join(', ')}`);
+      profile.diagnostics.push(`Observed ${distinctPhoneKeys.size} conflicting phone numbers across observed business sources: ${Array.from(distinctPhoneKeys).join(', ')}`);
     } else if (distinctPhoneKeys.size === 1) {
       profile.phoneConflict = false;
       profile.phoneConflictState = phoneObs.length > 1 ? 'MULTIPLE_CONSISTENT' : 'NO_CONFLICT';
@@ -501,7 +503,7 @@ export function aggregateContactObservations(
 
     // Select primary phone: prioritize TEL_LINK, WHATSAPP_LINK, then high confidence
     const sortedPhones = [...validPhones].sort((a, b) => {
-      const surfaceRank = (s: ContactSourceSurface) => (s === 'TEL_LINK' ? 3 : s === 'WHATSAPP_LINK' ? 2 : 1);
+      const surfaceRank = (s: ContactSourceSurface) => (s === 'FACEBOOK_PAGE_ABOUT' ? 4 : s === 'TEL_LINK' ? 3 : s === 'WHATSAPP_LINK' ? 2 : 1);
       return surfaceRank(b.sourceSurface) - surfaceRank(a.sourceSurface);
     });
 
@@ -522,7 +524,7 @@ export function aggregateContactObservations(
     if (distinctEmailKeys.size > 1) {
       profile.emailConflict = true;
       profile.emailConflictState = 'CONFLICT_DETECTED';
-      profile.diagnostics.push(`Observed ${distinctEmailKeys.size} conflicting email addresses across ads: ${Array.from(distinctEmailKeys).join(', ')}`);
+      profile.diagnostics.push(`Observed ${distinctEmailKeys.size} conflicting email addresses across observed business sources: ${Array.from(distinctEmailKeys).join(', ')}`);
     } else if (distinctEmailKeys.size === 1) {
       profile.emailConflict = false;
       profile.emailConflictState = emailObs.length > 1 ? 'MULTIPLE_CONSISTENT' : 'NO_CONFLICT';
@@ -533,7 +535,7 @@ export function aggregateContactObservations(
 
     // Select primary email: prioritize MAILTO_LINK then first valid
     const sortedEmails = [...validEmails].sort((a, b) => {
-      const surfaceRank = (s: ContactSourceSurface) => (s === 'MAILTO_LINK' ? 2 : 1);
+      const surfaceRank = (s: ContactSourceSurface) => (s === 'FACEBOOK_PAGE_ABOUT' ? 3 : s === 'MAILTO_LINK' ? 2 : 1);
       return surfaceRank(b.sourceSurface) - surfaceRank(a.sourceSurface);
     });
 

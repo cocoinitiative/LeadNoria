@@ -17958,37 +17958,32 @@ function isNewToSavedLists(value, seen) {
 }
 
 // src/extension/clipboard/leadSheets.ts
-var LEAD_EXPORT_COLUMNS = ["Business", "Facebook page", "Website", "Phone", "Email", "Business country", "Ad target country", "CTA", "Website status", "Ad copy"];
-var DEFAULT_COLUMNS = LEAD_EXPORT_COLUMNS.slice(0, 9);
-function exportRows(results, columns) {
-  const headers = [...new Set(columns)].filter((column) => LEAD_EXPORT_COLUMNS.includes(column));
-  if (!headers.length) throw new Error("Choose at least one export column.");
-  const rows = results.filter((row) => row.isExportable && !row.isRestricted).map((row) => {
-    const values = {
-      "Business": row.displayName,
-      "Facebook page": row.canonicalRecord?.facebookPageUrl,
-      "Website": row.websiteUrl,
-      "Phone": row.contactSummary.phoneText,
-      "Email": row.contactSummary.emailText,
-      "Business country": row.businessCountryCode || "Unknown",
-      "Ad target country": row.targetCountryCode || "Unknown",
-      "CTA": row.ctaType,
-      "Website status": row.websiteUrl ? "Website observed" : "No website observed",
-      "Ad copy": row.canonicalRecord?.sampleCopy || row.canonicalRecord?.adEvidence?.[0]?.bodyCopy
-    };
-    return headers.map((column) => values[column]);
-  });
-  return [headers, ...rows];
+var LEAD_EXPORT_COLUMNS = ["Page name", "Page URL", "Website", "Email", "Phone"];
+function contactValues(row, type) {
+  const profile = row.canonicalRecord?.contactProfile;
+  const observations = type === "PHONE" ? profile?.observedPhones : profile?.observedEmails;
+  const values = observations?.filter((item) => item.syntaxState === "SYNTAX_VALID" || type === "PHONE" && item.syntaxState === "AMBIGUOUS").map((item) => item.normalizedValue || item.rawValue).filter(Boolean) || [];
+  const fallback = type === "PHONE" ? row.contactSummary.phoneText : row.contactSummary.emailText;
+  return [...new Set(values.length ? values : fallback ? [fallback] : [])].join("; ");
 }
-function safeCell(value, flatten) {
-  const text = (flatten ? String(value ?? "").replace(/[\t\r\n]+/g, " ") : String(value ?? "")).trim();
-  return /^[=+@-]/.test(text) ? `'${text}` : text;
+function exportRows(results) {
+  return [LEAD_EXPORT_COLUMNS, ...results.filter((row) => row.isExportable && !row.isRestricted).map((row) => [
+    row.displayName,
+    row.canonicalRecord?.facebookPageUrl || "",
+    row.websiteUrl || "",
+    contactValues(row, "EMAIL"),
+    contactValues(row, "PHONE")
+  ])];
 }
-function leadResultsToSheets(results, columns = DEFAULT_COLUMNS) {
-  return exportRows(results, columns).map((row) => row.map((value) => safeCell(value, true)).join("	")).join("\n");
+function safeCell(value) {
+  const text = String(value ?? "").replace(/[\t\r\n]+/g, " ").trim();
+  return /^[=+@-]|^0\d/.test(text) ? `'${text}` : text;
 }
-function leadResultsToCsv(results, columns) {
-  return exportRows(results, columns).map((row) => row.map((value) => `"${safeCell(value, false).replace(/"/g, '""')}"`).join(",")).join("\r\n");
+function leadResultsToSheets(results) {
+  return exportRows(results).map((row) => row.map(safeCell).join("	")).join("\n");
+}
+function leadResultsToCsv(results) {
+  return exportRows(results).map((row) => row.map((value) => `"${safeCell(value).replace(/"/g, '""')}"`).join(",")).join("\r\n");
 }
 
 // src/extension/ui/components/Header.tsx
@@ -19109,6 +19104,7 @@ async function writeClipboardText(text, options) {
 var import_jsx_runtime6 = __toESM(require_jsx_runtime(), 1);
 var EMPTY_BUSINESS_HISTORY = /* @__PURE__ */ new Set();
 var ResultsTableView = ({
+  exportUnavailable = false,
   results,
   selectedRecordIds,
   onToggleSelect,
@@ -19123,8 +19119,6 @@ var ResultsTableView = ({
   const [searchTerm, setSearchTerm] = (0, import_react3.useState)("");
   const [websitePreference, setWebsitePreference] = (0, import_react3.useState)(initialWebsitePreference);
   const [newBusinessesOnly, setNewBusinessesOnly] = (0, import_react3.useState)(false);
-  const [customColumns, setCustomColumns] = (0, import_react3.useState)(false);
-  const [exportColumns, setExportColumns] = (0, import_react3.useState)([...LEAD_EXPORT_COLUMNS]);
   const [sourceFilter, setSourceFilter] = (0, import_react3.useState)("ALL");
   const [qualificationFilter, setQualificationFilter] = (0, import_react3.useState)("ALL");
   const [targetCountryFilter, setTargetCountryFilter] = (0, import_react3.useState)("ALL");
@@ -19359,11 +19353,11 @@ var ResultsTableView = ({
     }
   };
   const handleCopyAll = async () => {
-    if (csvRows.length === 0 || isCopying) return;
+    if (csvRows.length === 0 || isCopying || exportUnavailable) return;
     setIsCopying(true);
     setCopyFeedback(null);
     try {
-      const tsv = leadResultsToSheets(csvRows, customColumns ? exportColumns : void 0);
+      const tsv = leadResultsToSheets(csvRows);
       const result = await writeClipboardText(tsv);
       if (result.success) {
         setCopyFeedback({
@@ -19434,7 +19428,7 @@ var ResultsTableView = ({
             type: "button",
             id: "meta-copy-all-btn",
             onClick: handleCopyAll,
-            disabled: csvRows.length === 0 || isCopying || customColumns && exportColumns.length === 0,
+            disabled: csvRows.length === 0 || isCopying || exportUnavailable,
             className: `px-3 py-1.5 text-xs font-semibold rounded transition-colors flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-sky-400 cursor-pointer ${csvRows.length > 0 && !isCopying ? "bg-slate-800 hover:bg-slate-700 text-sky-400 border border-slate-700" : "bg-slate-900 text-slate-600 cursor-not-allowed border border-slate-800"}`,
             "aria-label": `Copy ${csvRows.length} leads for Google Sheets`,
             children: [
@@ -19448,8 +19442,8 @@ var ResultsTableView = ({
           "button",
           {
             type: "button",
-            disabled: csvRows.length === 0 || customColumns && exportColumns.length === 0,
-            onClick: () => onDownloadCsv(csvRows.map((row) => row.recordId), customColumns ? exportColumns : void 0),
+            disabled: csvRows.length === 0 || exportUnavailable,
+            onClick: () => onDownloadCsv(csvRows.map((row) => row.recordId)),
             className: "px-3 py-2 text-xs font-semibold rounded-lg bg-sky-700 text-white disabled:opacity-50",
             children: [
               "Download CSV (",
@@ -19457,37 +19451,7 @@ var ResultsTableView = ({
               ")"
             ]
           }
-        ),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("details", { className: "text-xs text-slate-400", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("summary", { className: "cursor-pointer", children: "Export options" }),
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("label", { className: "flex items-center gap-2 my-2", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("input", { type: "checkbox", checked: customColumns, onChange: (e) => setCustomColumns(e.target.checked) }),
-            "Choose columns for CSV and Sheets"
-          ] }),
-          customColumns && /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("fieldset", { className: "grid grid-cols-2 gap-2 my-2", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("legend", { children: "Export columns" }),
-            LEAD_EXPORT_COLUMNS.map((column) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("label", { className: "flex gap-2 items-center", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("input", { type: "checkbox", checked: exportColumns.includes(column), onChange: (e) => setExportColumns((columns) => e.target.checked ? LEAD_EXPORT_COLUMNS.filter((value) => value === column || columns.includes(value)) : columns.filter((value) => value !== column)) }),
-              column
-            ] }, column)),
-            !exportColumns.length && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { role: "alert", children: "Choose at least one column." })
-          ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(
-            "button",
-            {
-              type: "button",
-              onClick: onOpenExportModal,
-              disabled: results.length === 0,
-              className: `px-3 py-1.5 text-xs font-semibold rounded transition-colors flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-sky-400 cursor-pointer ${results.length > 0 ? "bg-sky-600 hover:bg-sky-500 text-white" : "bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700"}`,
-              children: [
-                /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { children: "\u2B73" }),
-                " Export (",
-                selectedRecordIds.size > 0 ? selectedRecordIds.size : results.length,
-                ")"
-              ]
-            }
-          )
-        ] })
+        )
       ] }),
       copyFeedback && /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(
         "div",
@@ -22878,8 +22842,8 @@ function extensionLeadToResultDetailViewModel(lead) {
     relevanceMatchedTerms: lead.relevanceMatchedTerms || [],
     websiteUrl: row.websiteUrl,
     websiteVerificationStatus: lead.websiteState === "found" ? "FOUND" : "NOT_OBSERVED",
-    phones: lead.businessPhone ? [{ number: lead.businessPhone, type: "BUSINESS", observation: "Observed on Ad Card" }] : [],
-    emails: lead.businessEmail ? [{ address: lead.businessEmail, classification: "BUSINESS", observation: "Observed on Ad Card" }] : [],
+    phones: lead.businessPhone ? [{ number: lead.businessPhone, type: "BUSINESS", observation: lead.contactProfile?.observedPhones.some((item) => item.sourceSurface === "FACEBOOK_PAGE_ABOUT" && (item.normalizedValue || item.rawValue) === lead.businessPhone) ? "Observed on Facebook Page About" : "Observed on Ad Card" }] : [],
+    emails: lead.businessEmail ? [{ address: lead.businessEmail, classification: "BUSINESS", observation: lead.contactProfile?.observedEmails.some((item) => item.sourceSurface === "FACEBOOK_PAGE_ABOUT" && (item.normalizedValue || item.rawValue) === lead.businessEmail) ? "Observed on Facebook Page About" : "Observed on Ad Card" }] : [],
     addresses: lead.businessPageEvidence?.addressText ? [{ addressLine: lead.businessPageEvidence.addressText, isBranch: false }] : [],
     hasContactForm: Boolean((lead.destinationTypes || []).includes("INSTANT_FORM")),
     socialLinks: lead.facebookPageUrl ? [{ platform: "Facebook", url: lead.facebookPageUrl }] : [],
@@ -25293,7 +25257,7 @@ function aggregateContactObservations(observations) {
     if (distinctPhoneKeys.size > 1) {
       profile.phoneConflict = true;
       profile.phoneConflictState = "CONFLICT_DETECTED";
-      profile.diagnostics.push(`Observed ${distinctPhoneKeys.size} conflicting phone numbers across ads: ${Array.from(distinctPhoneKeys).join(", ")}`);
+      profile.diagnostics.push(`Observed ${distinctPhoneKeys.size} conflicting phone numbers across observed business sources: ${Array.from(distinctPhoneKeys).join(", ")}`);
     } else if (distinctPhoneKeys.size === 1) {
       profile.phoneConflict = false;
       profile.phoneConflictState = phoneObs.length > 1 ? "MULTIPLE_CONSISTENT" : "NO_CONFLICT";
@@ -25302,7 +25266,7 @@ function aggregateContactObservations(observations) {
       profile.phoneConflictState = "NOT_APPLICABLE";
     }
     const sortedPhones = [...validPhones].sort((a, b) => {
-      const surfaceRank = (s) => s === "TEL_LINK" ? 3 : s === "WHATSAPP_LINK" ? 2 : 1;
+      const surfaceRank = (s) => s === "FACEBOOK_PAGE_ABOUT" ? 4 : s === "TEL_LINK" ? 3 : s === "WHATSAPP_LINK" ? 2 : 1;
       return surfaceRank(b.sourceSurface) - surfaceRank(a.sourceSurface);
     });
     if (sortedPhones.length > 0) {
@@ -25319,7 +25283,7 @@ function aggregateContactObservations(observations) {
     if (distinctEmailKeys.size > 1) {
       profile.emailConflict = true;
       profile.emailConflictState = "CONFLICT_DETECTED";
-      profile.diagnostics.push(`Observed ${distinctEmailKeys.size} conflicting email addresses across ads: ${Array.from(distinctEmailKeys).join(", ")}`);
+      profile.diagnostics.push(`Observed ${distinctEmailKeys.size} conflicting email addresses across observed business sources: ${Array.from(distinctEmailKeys).join(", ")}`);
     } else if (distinctEmailKeys.size === 1) {
       profile.emailConflict = false;
       profile.emailConflictState = emailObs.length > 1 ? "MULTIPLE_CONSISTENT" : "NO_CONFLICT";
@@ -25328,7 +25292,7 @@ function aggregateContactObservations(observations) {
       profile.emailConflictState = "NOT_APPLICABLE";
     }
     const sortedEmails = [...validEmails].sort((a, b) => {
-      const surfaceRank = (s) => s === "MAILTO_LINK" ? 2 : 1;
+      const surfaceRank = (s) => s === "FACEBOOK_PAGE_ABOUT" ? 3 : s === "MAILTO_LINK" ? 2 : 1;
       return surfaceRank(b.sourceSurface) - surfaceRank(a.sourceSurface);
     });
     if (sortedEmails.length > 0) {
@@ -25863,6 +25827,12 @@ function parseUserSuppliedCsv(csvContent, defaultCountry = "BD") {
 init_relevanceEngine();
 
 // src/extension/publicPageEvidence.ts
+function applyPublicPageEvidence(candidate, evidence) {
+  candidate.businessPageEvidence = evidence;
+  if (evidence.status !== "CHECKED") return;
+  const contacts = [...candidate.contactObservations || [], ...candidate.observedPhones || [], ...candidate.observedEmails || [], ...evidence.contacts || []];
+  candidate.contactObservations = [...new Map(contacts.map((item) => [`${item.type}:${item.sourceSurface}:${item.normalizedValue || item.rawValue}`, item])).values()];
+}
 function businessPageAboutUrl(raw) {
   try {
     const url = new URL(raw || "");
@@ -25873,9 +25843,9 @@ function businessPageAboutUrl(raw) {
     }
     const parts = url.pathname.split("/").filter(Boolean);
     if (!parts.length || ["ads", "groups", "events", "watch", "reel", "reels", "login", "help", "settings", "l.php", "share", "sharer.php", "marketplace", "search", "photo.php", "photos", "stories"].includes(parts[0].toLowerCase())) return;
-    if (parts.length > 1 && !["about", "about_details"].includes(parts[1])) return;
+    if (parts.length > 1 && !["about", "about_details", "about_contact_and_basic_info"].includes(parts[1])) return;
     if (!/^[\w.\-]+$/.test(parts[0])) return;
-    return `https://www.facebook.com/${parts[0]}/about`;
+    return `https://www.facebook.com/${parts[0].toLowerCase()}/about`;
   } catch {
     return;
   }
@@ -27478,205 +27448,6 @@ function sanitizeAdLibraryIds(ids, options) {
   }
   return sanitized;
 }
-function sanitizeCsvField(val) {
-  if (val === null || val === void 0) return '""';
-  let str = String(val);
-  if (/^[=+\-@\t\r]/.test(str)) {
-    str = `'${str}`;
-  }
-  str = str.replace(/"/g, '""');
-  return `"${str}"`;
-}
-function exportLeadsToCsv(leads, runOrOptions, options) {
-  let run;
-  let opts = options;
-  if (runOrOptions && typeof runOrOptions === "object" && ("qualifiedOnly" in runOrOptions || "reviewOnly" in runOrOptions || "rejectedOnly" in runOrOptions)) {
-    opts = runOrOptions;
-  } else if (runOrOptions && typeof runOrOptions === "object") {
-    run = runOrOptions;
-  }
-  let exportLeads = leads;
-  if (opts?.qualifiedOnly) {
-    exportLeads = leads.filter((l) => {
-      const gateCriteria = run && "researchIntent" in run && run.researchIntent ? run.researchIntent : opts;
-      return evaluateLeadQualificationGates(l, gateCriteria).isQualified;
-    });
-  } else if (opts?.reviewOnly) {
-    exportLeads = leads.filter((l) => {
-      const gateCriteria = run && "researchIntent" in run && run.researchIntent ? run.researchIntent : opts;
-      const res = evaluateLeadQualificationGates(l, gateCriteria);
-      return !res.isQualified && res.canonicalOutcome === "REVIEW";
-    });
-  } else if (opts?.rejectedOnly) {
-    exportLeads = leads.filter((l) => {
-      const gateCriteria = run && "researchIntent" in run && run.researchIntent ? run.researchIntent : opts;
-      const res = evaluateLeadQualificationGates(l, gateCriteria);
-      return res.canonicalOutcome === "REJECTED";
-    });
-  }
-  let metaHeader = "";
-  if (run) {
-    const isAutoDiscovery = run.researchMode === "AUTO_DISCOVERY" || run.targetLeadCount === void 0;
-    const finalCount = run.leads ? run.leads.length : exportLeads.length;
-    if (isAutoDiscovery) {
-      metaHeader = `# Research Run: ${run.researchName} | Mode: Auto Discovery (${run.mode}) | Source: Meta Ad Library | Keywords: ${(run.keywords || []).join("; ")} | Location: ${run.locationName} | Final Relevant Leads: ${finalCount} | Status: ${run.status} | Stop Reason: ${run.stopReason || "N/A"} | Engine Version: ${run.engineVersion || "strict-v2"}\r
-`;
-    } else {
-      metaHeader = `# Research Run: ${run.researchName} | Mode: ${run.mode} | Requested Quota: ${run.targetLeadCount} | Final Relevant Leads: ${finalCount} | Status: ${run.status} | Stop Reason: ${run.stopReason || "N/A"} | Engine Version: ${run.engineVersion || "strict-v2"}\r
-`;
-    }
-  }
-  const headers = [
-    "Lead Name",
-    "Facebook Page Name",
-    "Facebook Page URL",
-    "Facebook Page Status",
-    "Website Domain",
-    "Destination URL",
-    "Website Status",
-    "Active Ads Count",
-    "Matched Keywords",
-    "Location Code",
-    "Location Name",
-    "Target Country Code",
-    "Business Country Code",
-    "Geographic Classification",
-    "Location Confidence",
-    "Location Evidence",
-    "Ad Library IDs",
-    "Meta Ad Library URL",
-    "Relevance Decision",
-    "Relevance Score",
-    "Relevance Confidence",
-    "Relevance Matched Terms",
-    "Relevance Explanation",
-    "Engine Version",
-    "Status",
-    "Discovered At",
-    "Sample Copy",
-    "Sample CTA",
-    "CTA Type",
-    "Destination Type",
-    "Destination Confidence",
-    "Destination Reason",
-    "Website Verified URL",
-    "Website Deep Verification Status",
-    "Website Identity Match",
-    "Website Category Match",
-    "Website Commercial Signals",
-    "Website Evidence Summary",
-    "Website Verified At",
-    "Canonical Page ID",
-    "Canonical Page Slug",
-    "Identity Confidence",
-    "Relationship Type",
-    "Aliases",
-    "Public Observed Phone",
-    "Public Observed Email",
-    "Phone Syntax Status",
-    "Email Syntax Status",
-    "Contact Evidence Source",
-    "Contact Conflict Status",
-    "Contact Quality State",
-    "Contact Verification State",
-    "Lead Priority Score",
-    "Prioritization Tier",
-    "Score Model Version",
-    "Score Explanation",
-    "Business Website (Page)",
-    "Page Check Status",
-    "Page Check Source",
-    "Page Checked At",
-    "Page Check Explanation"
-  ];
-  const rows = exportLeads.map((l) => {
-    const isCanonical = Boolean(l && typeof l === "object" && ("canonicalEntityId" in l || "canonicalBusinessName" in l));
-    const can = l;
-    const name = l.name || (isCanonical ? can.canonicalBusinessName?.preferredObservedValue || can.canonicalBusinessName?.value || can.displayName : "") || "Unknown Advertiser";
-    const fbName = l.facebookPageName || name;
-    const fbUrl = l.facebookPageUrl || (isCanonical ? can.digital?.socialProfiles?.facebook : "") || "";
-    const destDomain = l.destinationDomain || (isCanonical ? can.digital?.domains?.value?.[0] : "") || "";
-    const destUrl = l.destinationUrl || (isCanonical ? can.digital?.verifiedWebsite?.value || can.digital?.domains?.value?.[0] : "") || "";
-    const targetCountry = l.targetCountryCode || l.locationCode || (isCanonical ? can.business?.country?.value : "") || "";
-    const busCountry = l.businessCountryCode || (isCanonical ? can.business?.country?.value : "") || "";
-    let geo = l.geographicClassification;
-    if (!geo) {
-      if (busCountry && targetCountry && busCountry === targetCountry) {
-        geo = "LOCAL_PROBABLE";
-      } else if (busCountry && targetCountry && busCountry !== targetCountry) {
-        geo = "FOREIGN_VERIFIED";
-      } else {
-        geo = "LOCATION_UNKNOWN";
-      }
-    }
-    const phone = l.businessPhone || l.phones && l.phones[0] || (isCanonical ? can.contacts?.phones?.[0]?.value : "") || "";
-    const email = l.businessEmail || l.emails && l.emails[0] || (isCanonical ? can.contacts?.emails?.[0]?.value : "") || "";
-    return [
-      sanitizeCsvField(name),
-      sanitizeCsvField(fbName),
-      sanitizeCsvField(fbUrl),
-      sanitizeCsvField(l.facebookPageState || (fbUrl ? "found" : "not_found")),
-      sanitizeCsvField(destDomain),
-      sanitizeCsvField(destUrl),
-      sanitizeCsvField(l.websiteState || (destUrl ? "found" : "not_found")),
-      sanitizeCsvField(l.activeAdCount || (isCanonical ? can.evidence?.evidencePack?.observationCount || 1 : 1)),
-      sanitizeCsvField((l.matchedKeywords || []).join("; ")),
-      sanitizeCsvField(l.locationCode || ""),
-      sanitizeCsvField(l.locationName || ""),
-      sanitizeCsvField(targetCountry),
-      sanitizeCsvField(busCountry),
-      sanitizeCsvField(geo),
-      sanitizeCsvField(l.businessLocationConfidence || "NONE"),
-      sanitizeCsvField((l.businessLocationEvidence || []).join(" | ")),
-      sanitizeCsvField((l.adLibraryIds || []).join("; ")),
-      sanitizeCsvField(l.adLibraryUrl || ""),
-      sanitizeCsvField(l.relevanceDecision || "UNASSESSED"),
-      sanitizeCsvField(l.relevanceScore !== void 0 ? `${(l.relevanceScore * 100).toFixed(0)}%` : l.relevanceDecision === "RELEVANT" ? "100%" : "N/A"),
-      sanitizeCsvField(l.relevanceConfidence || (l.relevanceDecision ? "HIGH" : "NONE")),
-      sanitizeCsvField(l.relevanceMatchedTerms ? l.relevanceMatchedTerms.join("; ") : ""),
-      sanitizeCsvField(l.relevanceReasons ? l.relevanceReasons.slice(0, 2).join(" | ") : ""),
-      sanitizeCsvField(l.engineVersion || "strict-v2"),
-      sanitizeCsvField(l.status || (isCanonical ? can.qualification?.finalState || "QUALIFIED" : "REVIEW_REQUIRED")),
-      sanitizeCsvField(l.discoveredAt || ""),
-      sanitizeCsvField(l.sampleCopy || ""),
-      sanitizeCsvField(l.sampleCta || ""),
-      sanitizeCsvField(l.primaryCtaType || "UNKNOWN"),
-      sanitizeCsvField(l.primaryDestinationType || "UNKNOWN"),
-      sanitizeCsvField(l.destinationConfidence || "NONE"),
-      sanitizeCsvField(l.destinationReasonCode || "DESTINATION_NOT_OBSERVED"),
-      sanitizeCsvField(l.websiteVerification?.finalUrl || destUrl),
-      sanitizeCsvField(l.websiteVerificationStatus || l.websiteVerification?.status || (destUrl ? "NOT_VERIFIED" : "NOT_OBSERVED")),
-      sanitizeCsvField(l.websiteVerification?.identityMatch || "UNKNOWN"),
-      sanitizeCsvField(l.websiteVerification?.categoryMatch || "UNKNOWN"),
-      sanitizeCsvField((l.websiteVerification?.commercialSignals || []).join("; ")),
-      sanitizeCsvField((l.websiteVerification?.evidence || []).map((e) => e.reason).slice(0, 3).join(" | ")),
-      sanitizeCsvField(l.websiteVerification?.verifiedAt || ""),
-      sanitizeCsvField(l.canonicalPageId || ""),
-      sanitizeCsvField(l.canonicalPageSlug || ""),
-      sanitizeCsvField(l.identityConfidence || "UNRESOLVED"),
-      sanitizeCsvField(l.relationshipType || "INDEPENDENT_BUSINESS"),
-      sanitizeCsvField((l.aliases || []).join("; ")),
-      sanitizeCsvField(phone),
-      sanitizeCsvField(email),
-      sanitizeCsvField(l.contactProfile?.observedPhones?.[0]?.syntaxState || (phone ? "SYNTAX_VALID" : "NOT_OBSERVED")),
-      sanitizeCsvField(l.contactProfile?.observedEmails?.[0]?.syntaxState || (email ? "SYNTAX_VALID" : "NOT_OBSERVED")),
-      sanitizeCsvField(l.contactProfile?.observedPhones?.[0]?.sourceSurface || l.contactProfile?.observedEmails?.[0]?.sourceSurface || (phone || email ? "AD_BODY_TEXT" : "NOT_OBSERVED")),
-      sanitizeCsvField(l.contactProfile?.phoneConflictState || l.contactProfile?.emailConflictState || "NOT_APPLICABLE"),
-      sanitizeCsvField(l.contactQualityState || l.contactProfile?.overallQualityState || (phone || email ? "OBSERVED_VALID_SYNTAX" : "NOT_OBSERVED")),
-      sanitizeCsvField(l.contactProfile?.observedPhones?.[0]?.verificationStatus || l.contactProfile?.observedEmails?.[0]?.verificationStatus || (phone || email ? "UNPROBED_PUBLIC_CLAIM" : "NOT_OBSERVED")),
-      sanitizeCsvField(l.leadScore !== void 0 ? l.leadScore : "N/A"),
-      sanitizeCsvField(l.prioritizationTier || "UNRANKED"),
-      sanitizeCsvField(l.scoreModelVersion || "leadnoria-scoring-v1"),
-      sanitizeCsvField(l.scoreExplanation || ""),
-      sanitizeCsvField(l.businessWebsiteUrl || ""),
-      sanitizeCsvField(l.businessPageEvidence?.status || "NOT_CHECKED"),
-      sanitizeCsvField(l.businessPageEvidence?.sourceUrl || ""),
-      sanitizeCsvField(l.businessPageEvidence?.checkedAt || ""),
-      sanitizeCsvField(l.businessPageEvidence?.reason || "")
-    ];
-  });
-  return metaHeader + [headers.join(","), ...rows.map((r) => r.join(","))].join("\r\n");
-}
 
 // src/extension/entityResolver.ts
 var GENERIC_SHARED_DOMAINS = /* @__PURE__ */ new Set([
@@ -28854,6 +28625,7 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
   }
   for (const cand of candidates) {
     if (cand.businessPageEvidence && (!businessPageAboutUrl(cand.facebookPageUrl || cand.pageUrl) || businessPageAboutUrl(cand.businessPageEvidence.sourceUrl) !== businessPageAboutUrl(cand.facebookPageUrl || cand.pageUrl))) cand.businessPageEvidence = void 0;
+    if (cand.businessPageEvidence) applyPublicPageEvidence(cand, cand.businessPageEvidence);
     if (seenAdLibraryIds.has(cand.libraryId)) {
       counters.duplicatesRemoved++;
       counters.duplicateAdRecordsRemoved = (counters.duplicateAdRecordsRemoved || 0) + 1;
@@ -29687,6 +29459,31 @@ async function saveManualImportAtomically(run, payload) {
     });
   } finally {
     db.close();
+  }
+}
+async function getAllStoredLeads(runId) {
+  if (!hasIndexedDB()) {
+    return memoryFallback.getAllStoredLeads(runId);
+  }
+  try {
+    const db = await openDB();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction("entities", "readonly");
+      const store = tx.objectStore("entities");
+      const index = store.index("by_run");
+      const request = index.getAll(runId);
+      request.onsuccess = () => {
+        db.close();
+        const records = request.result || [];
+        resolve(records.map((r) => normalizeStoredLead(r)));
+      };
+      request.onerror = () => {
+        db.close();
+        reject(request.error);
+      };
+    });
+  } catch {
+    return memoryFallback.getAllStoredLeads(runId);
   }
 }
 
@@ -31332,6 +31129,35 @@ var ExtensionApp = () => {
   const [runStatusVM, setRunStatusVM] = (0, import_react13.useState)(null);
   const [elapsedSeconds, setElapsedSeconds] = (0, import_react13.useState)(0);
   const [rawLeads, setRawLeads] = (0, import_react13.useState)([]);
+  const fullLeadRunRef = (0, import_react13.useRef)(null);
+  const [isLoadingLeads, setIsLoadingLeads] = (0, import_react13.useState)(false);
+  const [leadLoadError, setLeadLoadError] = (0, import_react13.useState)("");
+  const [leadLoadRevision, setLeadLoadRevision] = (0, import_react13.useState)(0);
+  const expectedLeadCount = activeRun?.counters?.finalUniqueRelevantLeads ?? activeRun?.counters?.finalUniqueLeads ?? activeRun?.leads?.length ?? 0;
+  const exportUnavailable = isLoadingLeads || expectedLeadCount > rawLeads.length;
+  (0, import_react13.useEffect)(() => {
+    if (!activeRun) return;
+    const run = activeRun;
+    let cancelled = false;
+    setIsLoadingLeads(true);
+    setLeadLoadError("");
+    getAllStoredLeads(run.runId).then((leads) => {
+      if (cancelled) return;
+      const expected = run.counters?.finalUniqueRelevantLeads ?? run.counters?.finalUniqueLeads ?? run.leads?.length ?? 0;
+      if (leads.length >= (run.leads?.length || 0)) {
+        fullLeadRunRef.current = run.runId;
+        setRawLeads(leads);
+      }
+      if (Math.max(leads.length, run.leads?.length || 0) < expected) setLeadLoadError("The full saved list could not be loaded. Export is paused to avoid missing leads.");
+    }).catch(() => {
+      if (!cancelled) setLeadLoadError("Saved leads could not be read. Please retry.");
+    }).finally(() => {
+      if (!cancelled) setIsLoadingLeads(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRun?.runId, activeRun?.lastCheckpointBatch, activeRun?.status, leadLoadRevision]);
   const [selectedRecordIds, setSelectedRecordIds] = (0, import_react13.useState)(/* @__PURE__ */ new Set());
   const [inspectedLead, setInspectedLead] = (0, import_react13.useState)(null);
   const [isDetailDrawerOpen, setIsDetailDrawerOpen] = (0, import_react13.useState)(false);
@@ -31467,7 +31293,8 @@ var ExtensionApp = () => {
     if (!run || typeof run !== "object") return;
     setActiveRun(run);
     if (run.leads && Array.isArray(run.leads)) {
-      setRawLeads(run.leads.filter((l) => l && typeof l === "object"));
+      const preview = run.leads.filter((l) => l && typeof l === "object");
+      setRawLeads((previous) => fullLeadRunRef.current === run.runId && previous.length > preview.length ? previous : preview);
     }
     const stageStates = {};
     const warningMessages = [];
@@ -31804,17 +31631,15 @@ var ExtensionApp = () => {
       return null;
     }
   }, [rawLeads, historyRuns, activeRun]);
-  const handleConfirmExport = (qualifiedOnly = true, recordIds, columns) => {
-    if (isExporting) return;
+  const handleConfirmExport = (qualifiedOnly = true, recordIds) => {
+    if (isExporting || exportUnavailable) return;
     setIsExporting(true);
-    const eligibleLeads = rawLeads.filter((item, idx) => {
-      const row = resultsVM.find((result) => result.canonicalRecord === item) || resultsVM[idx];
-      if (!row) return false;
-      const isSelected = recordIds ? recordIds.includes(row.recordId) : selectedRecordIds.size === 0 || selectedRecordIds.has(row.entityId) || selectedRecordIds.has(row.recordId);
-      return isSelected && row.isExportable && !row.isRestricted;
+    const eligibleRows = resultsVM.filter((row) => {
+      const selected = recordIds ? recordIds.includes(row.recordId) : selectedRecordIds.size === 0 || selectedRecordIds.has(row.recordId) || selectedRecordIds.has(row.entityId);
+      return selected && row.isExportable && !row.isRestricted && (!qualifiedOnly || row.qualificationState === "QUALIFIED");
     });
-    if (eligibleLeads.length > 0) {
-      const csv = columns ? leadResultsToCsv(resultsVM.filter((row) => recordIds?.includes(row.recordId)), columns) : exportLeadsToCsv(eligibleLeads, { qualifiedOnly });
+    if (eligibleRows.length > 0) {
+      const csv = leadResultsToCsv(eligibleRows);
       const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -31939,29 +31764,37 @@ var ExtensionApp = () => {
           }
         }
       ) }),
-      activeTab === "RESULTS" && /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("div", { role: "tabpanel", id: "tabpanel-RESULTS", "aria-labelledby": "tab-RESULTS", children: /* @__PURE__ */ (0, import_jsx_runtime18.jsx)(
-        ResultsTableView,
-        {
-          initialWebsitePreference: activeRun?.websiteRequirement,
-          seenBusinessKeys,
-          results: resultsVM,
-          selectedRecordIds,
-          onToggleSelect: (id) => {
-            const updated = new Set(selectedRecordIds);
-            if (updated.has(id)) updated.delete(id);
-            else updated.add(id);
-            setSelectedRecordIds(updated);
+      activeTab === "RESULTS" && /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("div", { role: "tabpanel", id: "tabpanel-RESULTS", "aria-labelledby": "tab-RESULTS", children: [
+        leadLoadError && /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("div", { role: "alert", className: "mb-3 text-xs text-slate-300", children: [
+          leadLoadError,
+          " ",
+          /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("button", { type: "button", onClick: () => setLeadLoadRevision((value) => value + 1), className: "text-sky-300 underline", children: "Retry" })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime18.jsx)(
+          ResultsTableView,
+          {
+            exportUnavailable: exportUnavailable || Boolean(leadLoadError),
+            initialWebsitePreference: activeRun?.websiteRequirement,
+            seenBusinessKeys,
+            results: resultsVM,
+            selectedRecordIds,
+            onToggleSelect: (id) => {
+              const updated = new Set(selectedRecordIds);
+              if (updated.has(id)) updated.delete(id);
+              else updated.add(id);
+              setSelectedRecordIds(updated);
+            },
+            onSelectAll: (ids) => {
+              setSelectedRecordIds(/* @__PURE__ */ new Set([...selectedRecordIds, ...ids]));
+            },
+            onClearSelection: () => setSelectedRecordIds(/* @__PURE__ */ new Set()),
+            onInspectRecord: handleInspectRecord,
+            onDownloadCsv: (recordIds) => handleConfirmExport(false, recordIds),
+            onOpenExportModal: () => setIsExportModalOpen(true)
           },
-          onSelectAll: (ids) => {
-            setSelectedRecordIds(/* @__PURE__ */ new Set([...selectedRecordIds, ...ids]));
-          },
-          onClearSelection: () => setSelectedRecordIds(/* @__PURE__ */ new Set()),
-          onInspectRecord: handleInspectRecord,
-          onDownloadCsv: (recordIds, columns) => handleConfirmExport(false, recordIds, columns),
-          onOpenExportModal: () => setIsExportModalOpen(true)
-        },
-        activeRun?.runId || "current"
-      ) }),
+          activeRun?.runId || "current"
+        )
+      ] }),
       activeTab === "ANALYTICS" && /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("div", { role: "tabpanel", id: "tabpanel-ANALYTICS", "aria-labelledby": "tab-ANALYTICS", className: "flex-1 flex flex-col min-h-0", children: /* @__PURE__ */ (0, import_jsx_runtime18.jsx)(
         AnalyticsView,
         {

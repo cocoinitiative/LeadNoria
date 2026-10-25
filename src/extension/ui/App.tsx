@@ -21,7 +21,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { canStartExtensionCollection } from '../collectionAvailability.ts';
 import { previouslySeenBusinessKeys } from '../localBusinessHistory.ts';
-import { leadResultsToCsv, type LeadExportColumn } from '../clipboard/leadSheets.ts';
+import { leadResultsToCsv } from '../clipboard/leadSheets.ts';
 import {
   NavigationTab,
   ResultRowViewModel,
@@ -46,7 +46,7 @@ import { DiagnosticsDrawer } from './components/DiagnosticsDrawer.tsx';
 import { RecoveryBanner } from './components/RecoveryBanner.tsx';
 import { AnalyticsView } from './components/AnalyticsView.tsx';
 import { ManualImportView } from './components/ManualImportView.tsx';
-import { getManualImportRuns, clearManualImportRuns } from '../bulkStore.ts';
+import { getManualImportRuns, clearManualImportRuns, getAllStoredLeads } from '../bulkStore.ts';
 import { computeRunAnalytics } from '../analytics/analyticsEngine.ts';
 import { RunAnalyticsSnapshot } from '../analytics/types.ts';
 import { computeResearchOptimization } from '../optimization/optimizationEngine.ts';
@@ -59,7 +59,7 @@ import {
   isCanonicalLeadRecord,
   isExtensionLead
 } from './viewModelMappers.ts';
-import { exportLeadsToCsv } from '../metaAdapter.ts';
+
 import { ExtensionResearchRun, ExtensionLead, StartResearchPayload } from '../types.ts';
 import { PIPELINE_VERSION } from '../pipeline/pipelineTypes.ts';
 import { computeReliabilityMetrics, evaluateOperationalGuardrails, aggregateProductionIssues } from '../reliability/reliabilityEngine.ts';
@@ -87,6 +87,31 @@ export const ExtensionApp: React.FC = () => {
 
   // Results & Inspection State
   const [rawLeads, setRawLeads] = useState<any[]>([]);
+  const fullLeadRunRef = useRef<string | null>(null);
+  const [isLoadingLeads, setIsLoadingLeads] = useState(false);
+  const [leadLoadError, setLeadLoadError] = useState('');
+  const [leadLoadRevision, setLeadLoadRevision] = useState(0);
+  const expectedLeadCount = activeRun?.counters?.finalUniqueRelevantLeads ?? activeRun?.counters?.finalUniqueLeads ?? activeRun?.leads?.length ?? 0;
+  const exportUnavailable = isLoadingLeads || expectedLeadCount > rawLeads.length;
+  useEffect(() => {
+    if (!activeRun) return;
+    const run = activeRun;
+    let cancelled = false;
+    setIsLoadingLeads(true);
+    setLeadLoadError('');
+    getAllStoredLeads(run.runId).then(leads => {
+      if (cancelled) return;
+      const expected = run.counters?.finalUniqueRelevantLeads ?? run.counters?.finalUniqueLeads ?? run.leads?.length ?? 0;
+      if (leads.length >= (run.leads?.length || 0)) {
+        fullLeadRunRef.current = run.runId;
+        setRawLeads(leads);
+      }
+      if (Math.max(leads.length, run.leads?.length || 0) < expected) setLeadLoadError('The full saved list could not be loaded. Export is paused to avoid missing leads.');
+    }).catch(() => {
+      if (!cancelled) setLeadLoadError('Saved leads could not be read. Please retry.');
+    }).finally(() => { if (!cancelled) setIsLoadingLeads(false); });
+    return () => { cancelled = true; };
+  }, [activeRun?.runId, activeRun?.lastCheckpointBatch, activeRun?.status, leadLoadRevision]);
   const [selectedRecordIds, setSelectedRecordIds] = useState<Set<string>>(new Set());
   const [inspectedLead, setInspectedLead] = useState<ResultDetailViewModel | null>(null);
   const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
@@ -231,7 +256,8 @@ export const ExtensionApp: React.FC = () => {
     if (!run || typeof run !== 'object') return;
     setActiveRun(run);
     if (run.leads && Array.isArray(run.leads)) {
-      setRawLeads(run.leads.filter(l => l && typeof l === 'object'));
+      const preview = run.leads.filter(l => l && typeof l === 'object');
+      setRawLeads(previous => fullLeadRunRef.current === run.runId && previous.length > preview.length ? previous : preview);
     }
 
     // Map to RunStatusViewModel
@@ -630,22 +656,17 @@ export const ExtensionApp: React.FC = () => {
     }
   }, [rawLeads, historyRuns, activeRun]);
 
-  const handleConfirmExport = (qualifiedOnly: boolean = true, recordIds?: string[], columns?: LeadExportColumn[]) => {
-    if (isExporting) return;
+  const handleConfirmExport = (qualifiedOnly: boolean = true, recordIds?: string[]) => {
+    if (isExporting || exportUnavailable) return;
     setIsExporting(true);
 
-    const eligibleLeads = rawLeads.filter((item, idx) => {
-      const row = resultsVM.find(result => result.canonicalRecord === item) || resultsVM[idx];
-      if (!row) return false;
-      const isSelected = recordIds ? recordIds.includes(row.recordId) : (selectedRecordIds.size === 0 ||
-        selectedRecordIds.has(row.entityId) ||
-        selectedRecordIds.has(row.recordId));
-      // Strictly prevent export of restricted or non-exportable records
-      return isSelected && row.isExportable && !row.isRestricted;
+    const eligibleRows = resultsVM.filter(row => {
+      const selected = recordIds ? recordIds.includes(row.recordId) : (selectedRecordIds.size === 0 || selectedRecordIds.has(row.recordId) || selectedRecordIds.has(row.entityId));
+      return selected && row.isExportable && !row.isRestricted && (!qualifiedOnly || row.qualificationState === 'QUALIFIED');
     });
 
-    if (eligibleLeads.length > 0) {
-      const csv = columns ? leadResultsToCsv(resultsVM.filter(row => recordIds?.includes(row.recordId)), columns) : exportLeadsToCsv(eligibleLeads as ExtensionLead[], { qualifiedOnly });
+    if (eligibleRows.length > 0) {
+      const csv = leadResultsToCsv(eligibleRows);
       const blob = new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -792,7 +813,9 @@ export const ExtensionApp: React.FC = () => {
         {/* Tab 3: Results List */}
         {activeTab === 'RESULTS' && (
           <div role="tabpanel" id="tabpanel-RESULTS" aria-labelledby="tab-RESULTS">
+            {leadLoadError && <div role="alert" className="mb-3 text-xs text-slate-300">{leadLoadError} <button type="button" onClick={() => setLeadLoadRevision(value => value + 1)} className="text-sky-300 underline">Retry</button></div>}
             <ResultsTableView
+              exportUnavailable={exportUnavailable || Boolean(leadLoadError)}
               key={activeRun?.runId || 'current'}
               initialWebsitePreference={activeRun?.websiteRequirement}
               seenBusinessKeys={seenBusinessKeys}
@@ -809,7 +832,7 @@ export const ExtensionApp: React.FC = () => {
               }}
               onClearSelection={() => setSelectedRecordIds(new Set())}
               onInspectRecord={handleInspectRecord}
-              onDownloadCsv={(recordIds, columns) => handleConfirmExport(false, recordIds, columns)}
+              onDownloadCsv={(recordIds) => handleConfirmExport(false, recordIds)}
               onOpenExportModal={() => setIsExportModalOpen(true)}
             />
           </div>

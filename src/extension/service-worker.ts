@@ -485,8 +485,9 @@ export async function executeResearchPipeline(
 
       try {
         if (!currentTabId) {
-          const tab = await chrome.tabs.create({ url: searchUrl, active: false });
+          const tab = await chrome.tabs.create({ url: 'about:blank', active: false });
           currentTabId = tab.id || null;
+          if (currentTabId) await chrome.tabs.update(currentTabId, { url: searchUrl });
         } else {
           await chrome.tabs.update(currentTabId, { url: searchUrl });
         }

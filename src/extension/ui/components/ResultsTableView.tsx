@@ -17,7 +17,7 @@ import { StatusBadge } from './StatusBadge.tsx';
 import { toFriendlyStatus } from '../humanLabels.ts';
 import { getSafeExternalUrl } from '../security.ts';
 import { writeClipboardText } from '../../clipboard/index.ts';
-import { leadResultsToSheets, LEAD_EXPORT_COLUMNS, type LeadExportColumn } from '../../clipboard/leadSheets.ts';
+import { leadResultsToSheets } from '../../clipboard/leadSheets.ts';
 import { isNewToSavedLists } from '../../localBusinessHistory.ts';
 
 const EMPTY_BUSINESS_HISTORY: ReadonlySet<string> = new Set();
@@ -33,6 +33,7 @@ export type SortOption =
   | 'SOURCE';
 
 interface ResultsTableViewProps {
+  exportUnavailable?: boolean;
   results: ResultRowViewModel[];
   selectedRecordIds: Set<string>;
   onToggleSelect: (id: string) => void;
@@ -40,12 +41,13 @@ interface ResultsTableViewProps {
   onClearSelection: () => void;
   onInspectRecord: (recordId: string) => void;
   onOpenExportModal: () => void;
-  onDownloadCsv?: (recordIds: string[], columns?: LeadExportColumn[]) => void;
+  onDownloadCsv?: (recordIds: string[]) => void;
   initialWebsitePreference?: string;
   seenBusinessKeys?: ReadonlySet<string>;
 }
 
 export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
+  exportUnavailable = false,
   results,
   selectedRecordIds,
   onToggleSelect,
@@ -60,8 +62,8 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [websitePreference, setWebsitePreference] = useState(initialWebsitePreference);
   const [newBusinessesOnly, setNewBusinessesOnly] = useState(false);
-  const [customColumns, setCustomColumns] = useState(false);
-  const [exportColumns, setExportColumns] = useState<LeadExportColumn[]>([...LEAD_EXPORT_COLUMNS]);
+
+
   const [sourceFilter, setSourceFilter] = useState<string>('ALL');
   const [qualificationFilter, setQualificationFilter] = useState<string>('ALL');
   const [targetCountryFilter, setTargetCountryFilter] = useState<string>('ALL');
@@ -370,13 +372,13 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
 
   // Copy All Handler
   const handleCopyAll = async () => {
-    if (csvRows.length === 0 || isCopying) return;
+    if (csvRows.length === 0 || isCopying || exportUnavailable) return;
     setIsCopying(true);
     setCopyFeedback(null);
 
     try {
       // Consume active structured results through Meta clipboard projection
-      const tsv = leadResultsToSheets(csvRows, customColumns ? exportColumns : undefined);
+      const tsv = leadResultsToSheets(csvRows);
       const result = await writeClipboardText(tsv);
 
       if (result.success) {
@@ -434,7 +436,7 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
             type="button"
             id="meta-copy-all-btn"
             onClick={handleCopyAll}
-            disabled={csvRows.length === 0 || isCopying || (customColumns && exportColumns.length === 0)}
+            disabled={csvRows.length === 0 || isCopying || exportUnavailable}
             className={`px-3 py-1.5 text-xs font-semibold rounded transition-colors flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-sky-400 cursor-pointer ${
               csvRows.length > 0 && !isCopying
                 ? 'bg-slate-800 hover:bg-slate-700 text-sky-400 border border-slate-700'
@@ -445,28 +447,13 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
             <span>📋</span> {isCopying ? 'Copying...' : `Copy for Sheets (${csvRows.length})`}
           </button>
 
-          {onDownloadCsv && <button type="button" disabled={csvRows.length === 0 || (customColumns && exportColumns.length === 0)}
-            onClick={() => onDownloadCsv(csvRows.map(row => row.recordId), customColumns ? exportColumns : undefined)}
+          {onDownloadCsv && <button type="button" disabled={csvRows.length === 0 || exportUnavailable}
+            onClick={() => onDownloadCsv(csvRows.map(row => row.recordId))}
             className="px-3 py-2 text-xs font-semibold rounded-lg bg-sky-700 text-white disabled:opacity-50">
             Download CSV ({csvRows.length})
           </button>}
           {/* Export Button */}
-          <details className="text-xs text-slate-400"><summary className="cursor-pointer">Export options</summary>
-          <label className="flex items-center gap-2 my-2"><input type="checkbox" checked={customColumns} onChange={e => setCustomColumns(e.target.checked)} />Choose columns for CSV and Sheets</label>
-          {customColumns && <fieldset className="grid grid-cols-2 gap-2 my-2"><legend>Export columns</legend>{LEAD_EXPORT_COLUMNS.map(column => <label key={column} className="flex gap-2 items-center"><input type="checkbox" checked={exportColumns.includes(column)} onChange={e => setExportColumns(columns => e.target.checked ? LEAD_EXPORT_COLUMNS.filter(value => value === column || columns.includes(value)) : columns.filter(value => value !== column))} />{column}</label>)}{!exportColumns.length && <p role="alert">Choose at least one column.</p>}</fieldset>}
-          <button
-            type="button"
-            onClick={onOpenExportModal}
-            disabled={results.length === 0}
-            className={`px-3 py-1.5 text-xs font-semibold rounded transition-colors flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-sky-400 cursor-pointer ${
-              results.length > 0
-                ? 'bg-sky-600 hover:bg-sky-500 text-white'
-                : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
-            }`}
-          >
-            <span>⭳</span> Export ({selectedRecordIds.size > 0 ? selectedRecordIds.size : results.length})
-          </button>
-          </details>
+
         </div>
 
         {/* Copy All Feedback Notification */}

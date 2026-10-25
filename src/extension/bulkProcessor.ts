@@ -21,7 +21,7 @@ import type {
 import { LeadRelevanceEngine } from './relevanceEngine.ts';
 import type { ResearchIntent } from './relevanceEngine.ts';
 import { evaluateGeographicOrigin } from './geographicClassifier.ts';
-import { businessPageAboutUrl } from './publicPageEvidence.ts';
+import { applyPublicPageEvidence, businessPageAboutUrl } from './publicPageEvidence.ts';
 import { classifyCta, classifyDestination, aggregateAdEvidence, observedWebsiteState } from './destinationClassifier.ts';
 import {
   evaluateStrictRelevanceV3,
@@ -150,6 +150,7 @@ export async function processBatch(
 
   for (const cand of candidates) {
     if (cand.businessPageEvidence && (!businessPageAboutUrl(cand.facebookPageUrl || cand.pageUrl) || businessPageAboutUrl(cand.businessPageEvidence.sourceUrl) !== businessPageAboutUrl(cand.facebookPageUrl || cand.pageUrl))) cand.businessPageEvidence = undefined;
+    if (cand.businessPageEvidence) applyPublicPageEvidence(cand, cand.businessPageEvidence);
     // 1. Duplicate ad protection
     if (seenAdLibraryIds.has(cand.libraryId)) {
       counters.duplicatesRemoved++;

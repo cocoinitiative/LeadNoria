@@ -402,6 +402,7 @@ export interface AdLevelEvidence {
 }
 
 export interface BusinessPageEvidence {
+  contacts?: ContactObservation[];
   sourceUrl: string;
   checkedAt: string;
   status: 'CHECKED' | 'BLOCKED' | 'UNAVAILABLE' | 'IDENTITY_MISMATCH';

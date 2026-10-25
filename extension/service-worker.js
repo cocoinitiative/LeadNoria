@@ -3778,7 +3778,383 @@ var META_AD_LIBRARY_LOCATIONS = [
   { locationCode: "TZ", displayName: "Tanzania", region: "Africa", aliases: ["TZA"], status: "ACTIVE" }
 ];
 
+// src/extension/extraction/normalizer.ts
+var COMMON_COUNTRY_CODES = {
+  US: { code: "US", dial: "1", nationalDigits: [10] },
+  CA: { code: "CA", dial: "1", nationalDigits: [10] },
+  GB: { code: "GB", dial: "44", nationalDigits: [10, 11] },
+  UK: { code: "GB", dial: "44", nationalDigits: [10, 11] },
+  BD: { code: "BD", dial: "880", nationalDigits: [10, 11] },
+  DE: { code: "DE", dial: "49", nationalDigits: [9, 10, 11, 12] },
+  FR: { code: "FR", dial: "33", nationalDigits: [9, 10] },
+  ES: { code: "ES", dial: "34", nationalDigits: [9] },
+  AU: { code: "AU", dial: "61", nationalDigits: [9, 10] },
+  AE: { code: "AE", dial: "971", nationalDigits: [9] },
+  IN: { code: "IN", dial: "91", nationalDigits: [10] },
+  SG: { code: "SG", dial: "65", nationalDigits: [8] },
+  NZ: { code: "NZ", dial: "64", nationalDigits: [8, 9] },
+  IE: { code: "IE", dial: "353", nationalDigits: [9] },
+  NL: { code: "NL", dial: "31", nationalDigits: [9] },
+  IT: { code: "IT", dial: "39", nationalDigits: [9, 10] },
+  BR: { code: "BR", dial: "55", nationalDigits: [10, 11] },
+  JP: { code: "JP", dial: "81", nationalDigits: [10] }
+};
+function sanitizeText(raw, maxLength = 2e3) {
+  if (raw === null || raw === void 0) return "";
+  let text = String(raw);
+  text = text.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "");
+  text = text.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "");
+  text = text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u200B-\u200D\uFEFF]/g, "");
+  text = text.replace(/<[^>]*>/g, " ");
+  text = text.normalize("NFC");
+  text = text.replace(/[ \t\r\f\v]+/g, " ").trim();
+  if (text.length > maxLength) {
+    text = text.substring(0, maxLength).trim();
+  }
+  return text;
+}
+function normalizePhone(rawPhone, countryHint) {
+  const original = sanitizeText(rawPhone, 100);
+  if (!original) {
+    return {
+      rawPhone: "",
+      phoneState: "PHONE_INVALID",
+      countryInference: "COUNTRY_UNKNOWN",
+      isValid: false,
+      error: "EMPTY_PHONE"
+    };
+  }
+  let extension;
+  let cleanInput = original;
+  const extMatch = original.match(/(?:ext|ext\.|x|#)\s*([0-9]{1,6})/i);
+  if (extMatch) {
+    extension = extMatch[1];
+    cleanInput = original.substring(0, extMatch.index).trim();
+  }
+  const hasPlus = cleanInput.trim().startsWith("+");
+  const digits = cleanInput.replace(/[^0-9]/g, "");
+  if (digits.length < 5 || digits.length > 15) {
+    return {
+      rawPhone: original,
+      phoneState: "PHONE_INVALID",
+      countryInference: "COUNTRY_UNKNOWN",
+      isValid: false,
+      error: "INVALID_DIGIT_LENGTH"
+    };
+  }
+  let countryMeta = countryHint ? COMMON_COUNTRY_CODES[countryHint.toUpperCase()] : void 0;
+  let countryInference = countryHint ? "COUNTRY_EXPLICIT" : "COUNTRY_UNKNOWN";
+  let e164;
+  let dialCode;
+  let nationalNumber = digits;
+  if (hasPlus) {
+    for (const meta of Object.values(COMMON_COUNTRY_CODES)) {
+      if (digits.startsWith(meta.dial)) {
+        dialCode = meta.dial;
+        nationalNumber = digits.substring(meta.dial.length);
+        e164 = `+${digits}`;
+        if (!countryMeta) {
+          countryMeta = meta;
+          countryInference = "COUNTRY_INFERRED";
+        }
+        break;
+      }
+    }
+    if (!e164) {
+      e164 = `+${digits}`;
+      countryInference = "COUNTRY_INFERRED";
+    }
+  } else if (countryMeta) {
+    if (countryMeta.nationalDigits.includes(digits.length)) {
+      e164 = `+${countryMeta.dial}${digits}`;
+      dialCode = countryMeta.dial;
+      nationalNumber = digits;
+    } else if (digits.startsWith(countryMeta.dial)) {
+      e164 = `+${digits}`;
+      dialCode = countryMeta.dial;
+      nationalNumber = digits.substring(countryMeta.dial.length);
+    } else {
+      return {
+        rawPhone: original,
+        phoneState: "PHONE_AMBIGUOUS",
+        countryInference: "COUNTRY_EXPLICIT",
+        countryCode: countryMeta.code,
+        isValid: false,
+        error: "AMBIGUOUS_NATIONAL_NUMBER_FOR_COUNTRY"
+      };
+    }
+  } else {
+    return {
+      rawPhone: original,
+      phoneState: "PHONE_AMBIGUOUS",
+      countryInference: "COUNTRY_UNKNOWN",
+      isValid: false,
+      error: "AMBIGUOUS_WITHOUT_COUNTRY_CODE"
+    };
+  }
+  return {
+    rawPhone: original,
+    e164Format: e164,
+    internationalFormat: e164,
+    nationalFormat: nationalNumber,
+    countryCode: countryMeta?.code,
+    countryInference,
+    dialCode,
+    extension,
+    phoneState: "PHONE_NORMALIZED",
+    isValid: true
+  };
+}
+function normalizeEmail(rawEmail) {
+  if (!rawEmail) {
+    return {
+      rawEmail: "",
+      normalizedEmail: "",
+      localPart: "",
+      domainPart: "",
+      isValid: false,
+      error: "EMPTY_EMAIL"
+    };
+  }
+  const stripped = String(rawEmail).trim().replace(/^[<(\["']+|[>)\]"']+$/g, "").trim();
+  const original = sanitizeText(stripped, 254);
+  if (!original) {
+    return {
+      rawEmail: String(rawEmail),
+      normalizedEmail: "",
+      localPart: "",
+      domainPart: "",
+      isValid: false,
+      error: "EMPTY_EMAIL"
+    };
+  }
+  const emailRegex = /^([a-zA-Z0-9_\.\-\+]+)@([a-zA-Z0-9\-]+\.[a-zA-Z0-9\-\.]+)$/;
+  const match = original.match(emailRegex);
+  if (!match) {
+    return {
+      rawEmail: String(rawEmail),
+      normalizedEmail: "",
+      localPart: "",
+      domainPart: "",
+      isValid: false,
+      error: "INVALID_EMAIL_SYNTAX"
+    };
+  }
+  const localPart = match[1];
+  const domainPart = match[2].toLowerCase();
+  const normalizedEmail = `${localPart}@${domainPart}`;
+  return {
+    rawEmail: String(rawEmail),
+    normalizedEmail,
+    localPart,
+    domainPart,
+    isValid: true
+  };
+}
+
+// src/extension/contactQuality.ts
+var PLACEHOLDER_EMAIL_DOMAINS = /* @__PURE__ */ new Set([
+  "example.com",
+  "example.org",
+  "example.net",
+  "domain.com",
+  "email.com",
+  "sentry.io",
+  "wixpress.com",
+  "wordpress.org",
+  "shopify.com",
+  "myshopify.com",
+  "gravatar.com",
+  "schema.org",
+  "facebook.com",
+  "fb.com",
+  "meta.com",
+  "instagram.com"
+]);
+function normalizeContactPhone(rawPhone, countryHint) {
+  if (!rawPhone || !rawPhone.trim()) {
+    return {
+      syntaxState: "NOT_OBSERVED",
+      reason: "No phone number observed in ad creative or links."
+    };
+  }
+  const cleaned = sanitizeText(rawPhone, 100);
+  const digitsOnly = cleaned.replace(/[^0-9]/g, "");
+  if (digitsOnly.length < 7 || digitsOnly.length > 15) {
+    return {
+      syntaxState: "SYNTAX_INVALID",
+      reason: `Phone digits count (${digitsOnly.length}) is outside standard E.164 boundary (7-15 digits).`
+    };
+  }
+  const norm = normalizePhone(cleaned, countryHint);
+  if (!norm.isValid) {
+    if (norm.error === "AMBIGUOUS_WITHOUT_COUNTRY_CODE" || norm.phoneState === "PHONE_AMBIGUOUS") {
+      return {
+        normalized: digitsOnly,
+        e164: void 0,
+        syntaxState: "AMBIGUOUS",
+        reason: "Local phone number lacks explicit international country dial code.",
+        nationalFormat: digitsOnly
+      };
+    }
+    return {
+      syntaxState: "SYNTAX_INVALID",
+      reason: norm.error || "Failed standard phone validation."
+    };
+  }
+  return {
+    normalized: norm.e164Format || norm.nationalFormat || digitsOnly,
+    e164: norm.e164Format,
+    syntaxState: "SYNTAX_VALID",
+    reason: `Format validated via E.164/national standard (inferred: ${norm.countryInference}).`,
+    extension: norm.extension,
+    nationalFormat: norm.nationalFormat
+  };
+}
+function normalizeContactEmail(rawEmail) {
+  if (!rawEmail || !rawEmail.trim()) {
+    return {
+      syntaxState: "NOT_OBSERVED",
+      reason: "No email address observed in ad creative or links."
+    };
+  }
+  const stripped = String(rawEmail).trim().replace(/^[<(\["']+|[>)\]"']+$/g, "").trim();
+  const cleaned = sanitizeText(stripped, 254);
+  const norm = normalizeEmail(cleaned);
+  if (!norm.isValid) {
+    return {
+      syntaxState: "SYNTAX_INVALID",
+      reason: norm.error || "Invalid RFC 5322 email syntax."
+    };
+  }
+  const domain = norm.domainPart.toLowerCase();
+  if (PLACEHOLDER_EMAIL_DOMAINS.has(domain)) {
+    return {
+      normalized: norm.normalizedEmail,
+      syntaxState: "SYNTAX_INVALID",
+      reason: `Email domain "${domain}" is a known placeholder/vendor domain, not a private business contact.`,
+      localPart: norm.localPart,
+      domainPart: domain
+    };
+  }
+  if (!domain.includes(".") || domain.startsWith(".") || domain.endsWith(".")) {
+    return {
+      syntaxState: "SYNTAX_INVALID",
+      reason: "Email domain lacks valid top-level domain."
+    };
+  }
+  return {
+    normalized: norm.normalizedEmail,
+    syntaxState: "SYNTAX_VALID",
+    reason: "RFC 5322 compliant syntax validated.",
+    localPart: norm.localPart,
+    domainPart: domain
+  };
+}
+function aggregateContactObservations(observations) {
+  const profile = {
+    observedPhones: [],
+    observedEmails: [],
+    phoneConflict: false,
+    emailConflict: false,
+    phoneConflictState: "NOT_APPLICABLE",
+    emailConflictState: "NOT_APPLICABLE",
+    overallQualityState: "NOT_OBSERVED",
+    diagnostics: []
+  };
+  if (!observations || observations.length === 0) {
+    return profile;
+  }
+  const phoneObs = observations.filter((o) => o.type === "PHONE");
+  const emailObs = observations.filter((o) => o.type === "EMAIL");
+  profile.observedPhones = phoneObs;
+  profile.observedEmails = emailObs;
+  if (phoneObs.length > 0) {
+    const validPhones = phoneObs.filter((p) => p.syntaxState === "SYNTAX_VALID" || p.syntaxState === "AMBIGUOUS");
+    const distinctPhoneKeys = /* @__PURE__ */ new Set();
+    for (const p of validPhones) {
+      const key = p.e164Format || p.normalizedValue || p.rawValue.replace(/[^0-9]/g, "");
+      if (key) distinctPhoneKeys.add(key);
+    }
+    if (distinctPhoneKeys.size > 1) {
+      profile.phoneConflict = true;
+      profile.phoneConflictState = "CONFLICT_DETECTED";
+      profile.diagnostics.push(`Observed ${distinctPhoneKeys.size} conflicting phone numbers across observed business sources: ${Array.from(distinctPhoneKeys).join(", ")}`);
+    } else if (distinctPhoneKeys.size === 1) {
+      profile.phoneConflict = false;
+      profile.phoneConflictState = phoneObs.length > 1 ? "MULTIPLE_CONSISTENT" : "NO_CONFLICT";
+    } else {
+      profile.phoneConflict = false;
+      profile.phoneConflictState = "NOT_APPLICABLE";
+    }
+    const sortedPhones = [...validPhones].sort((a, b) => {
+      const surfaceRank = (s) => s === "FACEBOOK_PAGE_ABOUT" ? 4 : s === "TEL_LINK" ? 3 : s === "WHATSAPP_LINK" ? 2 : 1;
+      return surfaceRank(b.sourceSurface) - surfaceRank(a.sourceSurface);
+    });
+    if (sortedPhones.length > 0) {
+      profile.primaryPhone = sortedPhones[0].normalizedValue || sortedPhones[0].rawValue;
+    }
+  }
+  if (emailObs.length > 0) {
+    const validEmails = emailObs.filter((e) => e.syntaxState === "SYNTAX_VALID");
+    const distinctEmailKeys = /* @__PURE__ */ new Set();
+    for (const e of validEmails) {
+      const key = (e.normalizedValue || e.rawValue).toLowerCase();
+      if (key) distinctEmailKeys.add(key);
+    }
+    if (distinctEmailKeys.size > 1) {
+      profile.emailConflict = true;
+      profile.emailConflictState = "CONFLICT_DETECTED";
+      profile.diagnostics.push(`Observed ${distinctEmailKeys.size} conflicting email addresses across observed business sources: ${Array.from(distinctEmailKeys).join(", ")}`);
+    } else if (distinctEmailKeys.size === 1) {
+      profile.emailConflict = false;
+      profile.emailConflictState = emailObs.length > 1 ? "MULTIPLE_CONSISTENT" : "NO_CONFLICT";
+    } else {
+      profile.emailConflict = false;
+      profile.emailConflictState = "NOT_APPLICABLE";
+    }
+    const sortedEmails = [...validEmails].sort((a, b) => {
+      const surfaceRank = (s) => s === "FACEBOOK_PAGE_ABOUT" ? 3 : s === "MAILTO_LINK" ? 2 : 1;
+      return surfaceRank(b.sourceSurface) - surfaceRank(a.sourceSurface);
+    });
+    if (sortedEmails.length > 0) {
+      profile.primaryEmail = sortedEmails[0].normalizedValue || sortedEmails[0].rawValue;
+    }
+  }
+  if (profile.phoneConflict || profile.emailConflict) {
+    profile.overallQualityState = "CONFLICT_DETECTED";
+  } else if (profile.primaryPhone || profile.primaryEmail) {
+    profile.overallQualityState = "OBSERVED_VALID_SYNTAX";
+  } else if (phoneObs.some((p) => p.syntaxState === "AMBIGUOUS") || emailObs.some((e) => e.syntaxState === "AMBIGUOUS")) {
+    profile.overallQualityState = "OBSERVED_AMBIGUOUS";
+  } else if (phoneObs.some((p) => p.syntaxState === "SYNTAX_INVALID") || emailObs.some((e) => e.syntaxState === "SYNTAX_INVALID")) {
+    profile.overallQualityState = "OBSERVED_INVALID";
+  } else {
+    profile.overallQualityState = "NOT_OBSERVED";
+  }
+  return profile;
+}
+function mergeContactObservations(existingProfile, incoming) {
+  const existingObs = existingProfile ? [...existingProfile.observedPhones, ...existingProfile.observedEmails] : [];
+  const combined = [...existingObs];
+  const seenSignatures = new Set(existingObs.map((o) => `${o.type}_${o.sourceSurface}_${(o.normalizedValue || o.rawValue).toLowerCase()}`));
+  for (const obs of incoming) {
+    const sig = `${obs.type}_${obs.sourceSurface}_${(obs.normalizedValue || obs.rawValue).toLowerCase()}`;
+    if (!seenSignatures.has(sig)) {
+      seenSignatures.add(sig);
+      combined.push(obs);
+    }
+  }
+  return aggregateContactObservations(combined);
+}
+
 // src/extension/publicPageEvidence.ts
+function applyPublicPageEvidence(candidate, evidence) {
+  candidate.businessPageEvidence = evidence;
+  if (evidence.status !== "CHECKED") return;
+  const contacts = [...candidate.contactObservations || [], ...candidate.observedPhones || [], ...candidate.observedEmails || [], ...evidence.contacts || []];
+  candidate.contactObservations = [...new Map(contacts.map((item) => [`${item.type}:${item.sourceSurface}:${item.normalizedValue || item.rawValue}`, item])).values()];
+}
 function businessPageAboutUrl(raw) {
   try {
     const url = new URL(raw || "");
@@ -3789,9 +4165,9 @@ function businessPageAboutUrl(raw) {
     }
     const parts = url.pathname.split("/").filter(Boolean);
     if (!parts.length || ["ads", "groups", "events", "watch", "reel", "reels", "login", "help", "settings", "l.php", "share", "sharer.php", "marketplace", "search", "photo.php", "photos", "stories"].includes(parts[0].toLowerCase())) return;
-    if (parts.length > 1 && !["about", "about_details"].includes(parts[1])) return;
+    if (parts.length > 1 && !["about", "about_details", "about_contact_and_basic_info"].includes(parts[1])) return;
     if (!/^[\w.\-]+$/.test(parts[0])) return;
-    return `https://www.facebook.com/${parts[0]}/about`;
+    return `https://www.facebook.com/${parts[0].toLowerCase()}/about`;
   } catch {
     return;
   }
@@ -3808,7 +4184,7 @@ function interpretPublicPage(snapshot, expectedUrl, expectedName) {
   if (snapshot.blocked) return { ...base, status: "BLOCKED", reason: "A login or access restriction prevented Page checking." };
   if (businessPageAboutUrl(snapshot.url) !== businessPageAboutUrl(expectedUrl)) return { ...base, status: "IDENTITY_MISMATCH", reason: "The Page redirected to a different identity." };
   const observedUrl = new URL(snapshot.url);
-  if (!/\/about(?:_details)?\/?$/.test(observedUrl.pathname) && !/^about/.test(observedUrl.searchParams.get("sk") || "")) return { ...base, reason: "The public About section was not available; posts were not used as business evidence." };
+  if (!/\/about(?:_details|_contact_and_basic_info)?\/?$/.test(observedUrl.pathname) && !/^about/.test(observedUrl.searchParams.get("sk") || "")) return { ...base, reason: "The public About section was not available; posts were not used as business evidence." };
   const expected = normalizeName(expectedName), heading = normalizeName(snapshot.heading);
   if (!expected || !heading || expected !== heading) return { ...base, status: "IDENTITY_MISMATCH", reason: "The visible Page name did not match the advertiser; no Page evidence was applied." };
   const businesses = snapshot.businesses.filter((b) => normalizeName(b.name) === expected);
@@ -3818,18 +4194,41 @@ function interpretPublicPage(snapshot, expectedUrl, expectedName) {
   });
   const visibleAddresses = (snapshot.addressTexts || []).filter((address) => address.split(/[,\n]/).length > 1);
   const countries = [...new Set([...businesses.map((b) => countryCode(b.country)), ...visibleAddresses.flatMap((address) => address.split(/[,\n]/).map(countryCode))].filter((code) => Boolean(code)))];
-  return { ...base, status: "CHECKED", websiteUrls: [...new Set(websites)].slice(0, 5), addressCountryCodes: countries, addressText: [...businesses.map((b) => b.address), ...visibleAddresses].filter(Boolean).join(" | ").slice(0, 1e3) || void 0, reason: websites.length ? "External website link observed on the matched public Page. Reachability and ownership are unverified." : "No website link was observed in the checked Page details. This does not prove the business has no website." };
+  const items = [...snapshot.contactItems || [], ...businesses.flatMap((b) => [...b.telephone ? [{ type: "PHONE", value: b.telephone }] : [], ...b.email ? [{ type: "EMAIL", value: b.email }] : []])];
+  const seen = /* @__PURE__ */ new Set();
+  const contacts = [];
+  for (const item of items.slice(0, 100)) {
+    if (!item.value || item.value.length > 150) continue;
+    const normalized = item.type === "PHONE" ? normalizeContactPhone(item.value, countries.length === 1 ? countries[0] : void 0) : normalizeContactEmail(item.value);
+    if (normalized.syntaxState !== "SYNTAX_VALID" && normalized.syntaxState !== "AMBIGUOUS") continue;
+    const key = `${item.type}:${normalized.normalized || item.value}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    contacts.push({ id: `page_${item.type}_${contacts.length + 1}_${expectedUrl}`, type: item.type, rawValue: item.value, normalizedValue: normalized.normalized, sourceSurface: "FACEBOOK_PAGE_ABOUT", sourceUrl: expectedUrl, syntaxState: normalized.syntaxState, verificationStatus: "UNPROBED_PUBLIC_CLAIM", confidence: normalized.syntaxState === "SYNTAX_VALID" ? "HIGH" : "MEDIUM", contextSnippet: "Published in the matched business Page About details.", observedAt: base.checkedAt, evidenceReason: normalized.reason });
+  }
+  return { ...base, status: "CHECKED", contacts, websiteUrls: [...new Set(websites)].slice(0, 5), addressCountryCodes: countries, addressText: [...businesses.map((b) => b.address), ...visibleAddresses].filter(Boolean).join(" | ").slice(0, 1e3) || void 0, reason: websites.length ? "External website link observed on the matched public Page. Reachability and ownership are unverified." : "No website link was observed in the checked Page details. This does not prove the business has no website." };
 }
 function readPublicPageSnapshot() {
-  const main = document.querySelector("[role=main]") || document.querySelector("main");
+  const main = Array.from(document.querySelectorAll("[role=main],main")).find((element) => element.getClientRects().length > 0);
   const heading = main?.querySelector('h1,[role=heading][aria-level="1"]')?.textContent?.trim() || "";
   const text = (main?.textContent || "").slice(0, 12e3);
   const blocked = /\/login|checkpoint|challenge/i.test(location.pathname) || /^(log (?:in|into)|login|লগ ইন)/i.test(heading) || !heading && /log in|login|captcha|temporarily blocked|rate limit|লগ ইন/i.test(text);
   const links = [];
   const addressTexts = [];
+  const contactItems = [];
   if (main && !blocked) {
     for (const anchor of Array.from(main.querySelectorAll("a[href]"))) {
       const label = (anchor.textContent || "").trim();
+      if (anchor.closest("[role=article]") || !anchor.getClientRects().length) continue;
+      if (/^(tel:|mailto:)/i.test(anchor.href)) {
+        try {
+          const type = anchor.href.toLowerCase().startsWith("tel:") ? "PHONE" : "EMAIL";
+          const value = decodeURIComponent(anchor.href.slice(type === "PHONE" ? 4 : 7).split("?")[0]);
+          contactItems.push({ type, value });
+        } catch {
+        }
+        continue;
+      }
       let addressHref = anchor.href;
       try {
         const url = new URL(addressHref);
@@ -3841,6 +4240,13 @@ function readPublicPageSnapshot() {
         continue;
       }
       if (!anchor.closest("[role=article]") && anchor.getClientRects().length && (/^https?:|^www\.|\.[a-z]{2,}(?:\/|$)/i.test(label) || /website|visit site|ওয়েবসাইট/i.test(anchor.getAttribute("aria-label") || "") || /\/l\.php\?/.test(anchor.href))) links.push(anchor.href);
+    }
+    for (const element of Array.from(main.querySelectorAll("span,[dir=auto]"))) {
+      if (element.children.length || !element.getClientRects().length || element.closest("[role=article],nav,[role=navigation],form")) continue;
+      const value = (element.innerText || "").trim();
+      if (value.length > 150) continue;
+      if (/^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(value)) contactItems.push({ type: "EMAIL", value });
+      else if (/^(?:\+[\d ().-]{7,24}|0\d{8,12}|\(?\d{2,4}\)?[ -]\d[\d ().-]{5,22})$/.test(value)) contactItems.push({ type: "PHONE", value });
     }
   }
   const businesses = [];
@@ -3856,12 +4262,12 @@ function readPublicPageSnapshot() {
         if (!types.some((type) => typeof type === "string" && /^(LocalBusiness|Organization|Store|FurnitureStore|Restaurant|ProfessionalService|MedicalBusiness|LodgingBusiness)$/.test(type))) continue;
         const address = node.address;
         const country = typeof address?.addressCountry === "string" ? address.addressCountry : address?.addressCountry?.name;
-        businesses.push({ name: typeof node.name === "string" ? node.name : "", url: typeof node.url === "string" ? node.url : void 0, country: typeof country === "string" ? country : void 0, address: address && typeof address === "object" ? [address.streetAddress, address.addressLocality, address.addressRegion, address.postalCode, country].filter((v) => typeof v === "string").join(", ") : void 0 });
+        businesses.push({ name: typeof node.name === "string" ? node.name : "", url: typeof node.url === "string" ? node.url : void 0, country: typeof country === "string" ? country : void 0, address: address && typeof address === "object" ? [address.streetAddress, address.addressLocality, address.addressRegion, address.postalCode, country].filter((v) => typeof v === "string").join(", ") : void 0, telephone: typeof node.telephone === "string" ? node.telephone : void 0, email: typeof node.email === "string" ? node.email : void 0 });
       }
     } catch {
     }
   }
-  return { url: location.href, heading, blocked, links: links.slice(0, 50), businesses, addressTexts: addressTexts.slice(0, 5) };
+  return { url: location.href, heading, blocked, links: links.slice(0, 50), businesses, addressTexts: addressTexts.slice(0, 5), contactItems: contactItems.slice(0, 100) };
 }
 
 // src/extension/countryProfiles/profiles/bd.ts
@@ -5091,104 +5497,6 @@ function evaluateLeadQualificationGates(lead, criteria) {
     passedGates,
     reasons
   };
-}
-
-// src/extension/contactQuality.ts
-function aggregateContactObservations(observations) {
-  const profile = {
-    observedPhones: [],
-    observedEmails: [],
-    phoneConflict: false,
-    emailConflict: false,
-    phoneConflictState: "NOT_APPLICABLE",
-    emailConflictState: "NOT_APPLICABLE",
-    overallQualityState: "NOT_OBSERVED",
-    diagnostics: []
-  };
-  if (!observations || observations.length === 0) {
-    return profile;
-  }
-  const phoneObs = observations.filter((o) => o.type === "PHONE");
-  const emailObs = observations.filter((o) => o.type === "EMAIL");
-  profile.observedPhones = phoneObs;
-  profile.observedEmails = emailObs;
-  if (phoneObs.length > 0) {
-    const validPhones = phoneObs.filter((p) => p.syntaxState === "SYNTAX_VALID" || p.syntaxState === "AMBIGUOUS");
-    const distinctPhoneKeys = /* @__PURE__ */ new Set();
-    for (const p of validPhones) {
-      const key = p.e164Format || p.normalizedValue || p.rawValue.replace(/[^0-9]/g, "");
-      if (key) distinctPhoneKeys.add(key);
-    }
-    if (distinctPhoneKeys.size > 1) {
-      profile.phoneConflict = true;
-      profile.phoneConflictState = "CONFLICT_DETECTED";
-      profile.diagnostics.push(`Observed ${distinctPhoneKeys.size} conflicting phone numbers across ads: ${Array.from(distinctPhoneKeys).join(", ")}`);
-    } else if (distinctPhoneKeys.size === 1) {
-      profile.phoneConflict = false;
-      profile.phoneConflictState = phoneObs.length > 1 ? "MULTIPLE_CONSISTENT" : "NO_CONFLICT";
-    } else {
-      profile.phoneConflict = false;
-      profile.phoneConflictState = "NOT_APPLICABLE";
-    }
-    const sortedPhones = [...validPhones].sort((a, b) => {
-      const surfaceRank = (s) => s === "TEL_LINK" ? 3 : s === "WHATSAPP_LINK" ? 2 : 1;
-      return surfaceRank(b.sourceSurface) - surfaceRank(a.sourceSurface);
-    });
-    if (sortedPhones.length > 0) {
-      profile.primaryPhone = sortedPhones[0].normalizedValue || sortedPhones[0].rawValue;
-    }
-  }
-  if (emailObs.length > 0) {
-    const validEmails = emailObs.filter((e) => e.syntaxState === "SYNTAX_VALID");
-    const distinctEmailKeys = /* @__PURE__ */ new Set();
-    for (const e of validEmails) {
-      const key = (e.normalizedValue || e.rawValue).toLowerCase();
-      if (key) distinctEmailKeys.add(key);
-    }
-    if (distinctEmailKeys.size > 1) {
-      profile.emailConflict = true;
-      profile.emailConflictState = "CONFLICT_DETECTED";
-      profile.diagnostics.push(`Observed ${distinctEmailKeys.size} conflicting email addresses across ads: ${Array.from(distinctEmailKeys).join(", ")}`);
-    } else if (distinctEmailKeys.size === 1) {
-      profile.emailConflict = false;
-      profile.emailConflictState = emailObs.length > 1 ? "MULTIPLE_CONSISTENT" : "NO_CONFLICT";
-    } else {
-      profile.emailConflict = false;
-      profile.emailConflictState = "NOT_APPLICABLE";
-    }
-    const sortedEmails = [...validEmails].sort((a, b) => {
-      const surfaceRank = (s) => s === "MAILTO_LINK" ? 2 : 1;
-      return surfaceRank(b.sourceSurface) - surfaceRank(a.sourceSurface);
-    });
-    if (sortedEmails.length > 0) {
-      profile.primaryEmail = sortedEmails[0].normalizedValue || sortedEmails[0].rawValue;
-    }
-  }
-  if (profile.phoneConflict || profile.emailConflict) {
-    profile.overallQualityState = "CONFLICT_DETECTED";
-  } else if (profile.primaryPhone || profile.primaryEmail) {
-    profile.overallQualityState = "OBSERVED_VALID_SYNTAX";
-  } else if (phoneObs.some((p) => p.syntaxState === "AMBIGUOUS") || emailObs.some((e) => e.syntaxState === "AMBIGUOUS")) {
-    profile.overallQualityState = "OBSERVED_AMBIGUOUS";
-  } else if (phoneObs.some((p) => p.syntaxState === "SYNTAX_INVALID") || emailObs.some((e) => e.syntaxState === "SYNTAX_INVALID")) {
-    profile.overallQualityState = "OBSERVED_INVALID";
-  } else {
-    profile.overallQualityState = "NOT_OBSERVED";
-  }
-  return profile;
-}
-function mergeContactObservations(existingProfile, incoming) {
-  const existingObs = existingProfile ? [...existingProfile.observedPhones, ...existingProfile.observedEmails] : [];
-  const combined = [...existingObs];
-  const seenSignatures = new Set(existingObs.map((o) => `${o.type}_${o.sourceSurface}_${(o.normalizedValue || o.rawValue).toLowerCase()}`));
-  for (const obs of incoming) {
-    const sig = `${obs.type}_${obs.sourceSurface}_${(obs.normalizedValue || obs.rawValue).toLowerCase()}`;
-    if (!seenSignatures.has(sig)) {
-      seenSignatures.add(sig);
-      combined.push(obs);
-    }
-  }
-  return aggregateContactObservations(combined);
 }
 
 // src/extension/entityResolver.ts
@@ -7254,6 +7562,7 @@ async function processBatch(candidates, existingEntitiesMap, seenAdLibraryIds, s
   }
   for (const cand of candidates) {
     if (cand.businessPageEvidence && (!businessPageAboutUrl(cand.facebookPageUrl || cand.pageUrl) || businessPageAboutUrl(cand.businessPageEvidence.sourceUrl) !== businessPageAboutUrl(cand.facebookPageUrl || cand.pageUrl))) cand.businessPageEvidence = void 0;
+    if (cand.businessPageEvidence) applyPublicPageEvidence(cand, cand.businessPageEvidence);
     if (seenAdLibraryIds.has(cand.libraryId)) {
       counters.duplicatesRemoved++;
       counters.duplicateAdRecordsRemoved = (counters.duplicateAdRecordsRemoved || 0) + 1;
@@ -8127,61 +8436,105 @@ function canStartExtensionCollection() {
 
 // src/extension/publicPageResearch.ts
 var delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+function withDeadline(operation, ms = 8e3) {
+  let timer;
+  return Promise.race([operation, new Promise((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error("Page read timed out")), ms);
+  })]).finally(() => clearTimeout(timer));
+}
 var PublicPageResearch = class {
-  constructor(maxChecks = 40) {
-    this.maxChecks = maxChecks;
+  constructor() {
     this.cache = /* @__PURE__ */ new Map();
-    this.checks = 0;
     this.blocked = false;
+  }
+  apply(candidate, evidence) {
+    applyPublicPageEvidence(candidate, evidence);
+  }
+  async read(tabId, source, name, cancelled) {
+    const empty = { sourceUrl: source, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), status: "UNAVAILABLE", websiteUrls: [], addressCountryCodes: [], reason: "The public Page details could not be read. Missing contact fields remain empty." };
+    let loaded = false;
+    for (let attempt = 0; attempt < 16 && !cancelled(); attempt++) {
+      const tab = await chrome.tabs.get(tabId);
+      if (tab.status === "complete" && tab.url !== "about:blank") {
+        loaded = true;
+        break;
+      }
+      await delay(500);
+    }
+    if (!loaded || cancelled()) return empty;
+    await delay(800);
+    let best = empty, signature = "", stable = 0;
+    for (let attempt = 0; attempt < 8 && !cancelled(); attempt++) {
+      const result = await withDeadline(chrome.scripting.executeScript({ target: { tabId }, func: readPublicPageSnapshot }));
+      const snapshot = result[0]?.result;
+      if (snapshot?.blocked) return interpretPublicPage(snapshot, source, name);
+      if (snapshot?.heading) {
+        const evidence = interpretPublicPage(snapshot, source, name);
+        if (evidence.status === "IDENTITY_MISMATCH") return evidence;
+        best = evidence;
+        const next = JSON.stringify([evidence.websiteUrls, evidence.contacts?.map((item) => [item.type, item.normalizedValue || item.rawValue]), evidence.addressCountryCodes, evidence.addressText]);
+        stable = next === signature ? stable + 1 : 0;
+        signature = next;
+        const complete = evidence.websiteUrls.length && evidence.contacts?.some((item) => item.type === "PHONE") && evidence.contacts?.some((item) => item.type === "EMAIL");
+        if (complete && stable >= 1 || attempt >= 3 && stable >= 2 && (evidence.websiteUrls.length || evidence.contacts?.length)) return evidence;
+      }
+      await delay(500);
+    }
+    return best;
   }
   async enrich(candidates, cancelled) {
     if (typeof chrome === "undefined" || !chrome.scripting?.executeScript) return;
     for (const candidate of candidates) {
-      if (cancelled() || this.blocked) break;
-      const source = businessPageAboutUrl(candidate.facebookPageUrl || candidate.pageUrl);
-      if (!source) continue;
+      if (cancelled()) break;
+      const id = candidate.facebookPageId || candidate.pageId;
+      const raw = candidate.facebookPageUrl || candidate.pageUrl || (id && /^\d+$/.test(id) ? `https://www.facebook.com/profile.php?id=${id}` : void 0);
+      const source = businessPageAboutUrl(raw);
+      if (!source) {
+        candidate.businessPageEvidence = { sourceUrl: "", checkedAt: (/* @__PURE__ */ new Date()).toISOString(), status: "UNAVAILABLE", websiteUrls: [], addressCountryCodes: [], reason: "No usable advertiser Page URL or numeric Page ID was observed. No Page data was invented." };
+        continue;
+      }
+      if (!candidate.facebookPageUrl) candidate.facebookPageUrl = raw;
       const cached = this.cache.get(source);
       if (cached) {
-        candidate.businessPageEvidence = cached;
+        this.apply(candidate, cached);
         continue;
       }
-      if (this.checks >= this.maxChecks) {
-        candidate.businessPageEvidence = { sourceUrl: source, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), status: "UNAVAILABLE", websiteUrls: [], addressCountryCodes: [], reason: "The bounded Page-check budget was reached. This Page was not checked; website presence remains unknown." };
+      if (this.blocked) {
+        this.apply(candidate, { sourceUrl: source, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), status: "BLOCKED", websiteUrls: [], addressCountryCodes: [], reason: "Page checking stopped after an access restriction. This Page was not read." });
         continue;
       }
-      this.checks++;
       let tabId;
-      let evidence = { sourceUrl: source, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), status: "UNAVAILABLE", websiteUrls: [], addressCountryCodes: [], reason: "The public Page could not be read; website presence remains unknown." };
+      let evidence = { sourceUrl: source, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), status: "UNAVAILABLE", websiteUrls: [], addressCountryCodes: [], reason: "The public Page could not be read; missing contact fields remain empty." };
       try {
-        const tab = await chrome.tabs.create({ url: source, active: false });
+        const tab = await chrome.tabs.create({ url: "about:blank", active: false });
         tabId = tab.id;
         if (tabId === void 0) throw new Error("No Page tab");
-        let loaded = false;
-        for (let attempt = 0; attempt < 12 && !cancelled(); attempt++) {
-          const current = await chrome.tabs.get(tabId);
-          if (current.status === "complete") {
-            loaded = true;
-            break;
+        await chrome.tabs.update(tabId, { url: source });
+        const name = candidate.pageName || candidate.advertiserName || "";
+        evidence = await this.read(tabId, source, name, cancelled);
+        const hasPhone = evidence.contacts?.some((item) => item.type === "PHONE");
+        const hasEmail = evidence.contacts?.some((item) => item.type === "EMAIL");
+        if (!cancelled() && evidence.status !== "BLOCKED" && evidence.status !== "IDENTITY_MISMATCH" && (!hasPhone || !hasEmail || !evidence.websiteUrls.length) && typeof chrome.tabs.update === "function") {
+          const contactUrl = new URL(source);
+          if (contactUrl.pathname === "/profile.php") contactUrl.searchParams.set("sk", "about_contact_and_basic_info");
+          else contactUrl.pathname = contactUrl.pathname.replace(/\/about\/?$/, "/about_contact_and_basic_info");
+          await chrome.tabs.update(tabId, { url: contactUrl.toString() });
+          const extra = await this.read(tabId, contactUrl.toString(), name, cancelled);
+          if (extra.status === "CHECKED") {
+            if (evidence.status !== "CHECKED") evidence = extra;
+            else evidence = { ...evidence, websiteUrls: [.../* @__PURE__ */ new Set([...evidence.websiteUrls, ...extra.websiteUrls])], addressCountryCodes: [.../* @__PURE__ */ new Set([...evidence.addressCountryCodes, ...extra.addressCountryCodes])], addressText: [evidence.addressText, extra.addressText].filter(Boolean).join(" | ") || void 0, contacts: [...evidence.contacts || [], ...extra.contacts || []], reason: "Public About and contact sections checked. Only observed business fields were retained; missing fields remain unknown." };
+          } else if (extra.status === "BLOCKED") {
+            this.blocked = true;
+            evidence.reason += " The additional contact section was blocked; observed fields were preserved.";
           }
-          await delay(500);
         }
-        if (!loaded || cancelled()) throw new Error("Page not ready");
-        await delay(800);
-        let snapshot;
-        for (let attempt = 0; attempt < 3 && !cancelled(); attempt++) {
-          const result = await chrome.scripting.executeScript({ target: { tabId }, func: readPublicPageSnapshot });
-          snapshot = result[0]?.result;
-          if (snapshot?.blocked || snapshot?.heading) break;
-          await delay(500);
-        }
-        if (snapshot) evidence = interpretPublicPage(snapshot, source, candidate.pageName || candidate.advertiserName || "");
       } catch {
       } finally {
         if (tabId !== void 0) await chrome.tabs.remove(tabId).catch(() => {
         });
       }
       this.cache.set(source, evidence);
-      candidate.businessPageEvidence = evidence;
+      this.apply(candidate, evidence);
       if (evidence.status === "BLOCKED") this.blocked = true;
       if (!cancelled() && !this.blocked) await delay(700);
     }
@@ -12239,8 +12592,9 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
       broadcastProgress(initialRun, "NAVIGATING", `[${qi + 1}/${queriesToRun.length} ${queryTypeLabel}] Opening Meta Ad Library for "${currentKeyword}" in ${countryCode2}...`);
       try {
         if (!currentTabId) {
-          const tab = await chrome.tabs.create({ url: searchUrl, active: false });
+          const tab = await chrome.tabs.create({ url: "about:blank", active: false });
           currentTabId = tab.id || null;
+          if (currentTabId) await chrome.tabs.update(currentTabId, { url: searchUrl });
         } else {
           await chrome.tabs.update(currentTabId, { url: searchUrl });
         }
