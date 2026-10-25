@@ -37,6 +37,7 @@ export type { LeadResultRowViewModel };
 import { sanitizePassiveText, getSafeExternalUrl } from './security.ts';
 import { CanonicalLeadRecord } from '../leadIntelligence/types.ts';
 import { toFriendlyStatus, getSourceBadgeInfo } from './humanLabels.ts';
+import { observedWebsiteState } from '../destinationClassifier.ts';
 
 /**
  * Type guard for CanonicalLeadRecord (Phase 24 schema).
@@ -66,16 +67,16 @@ export function isExtensionLead(record: any): record is ExtensionLead {
  * Maps an ExtensionLead directly into a ResultRowViewModel preserving Phase 0.6 qualification.
  */
 export function extensionLeadToResultRowViewModel(lead: ExtensionLead): ResultRowViewModel {
-  const recordId = lead.leadId || (lead as any).entityId || `rec_${Date.now()}`;
+  const recordId = lead.id || lead.leadId || (lead as any).entityId || `rec_${lead.adLibraryIds?.join('_') || 'unknown'}`;
   const entityId = (lead as any).pageId || lead.leadId || recordId;
   const displayName = lead.name || lead.advertiserName || 'Unknown Business';
   const category = (lead as any).category || (lead.matchedKeywords && lead.matchedKeywords[0]) || undefined;
 
   const rawUrl = lead.destinationUrl || (lead as any).websiteUrl;
-  const safeWeb = getSafeExternalUrl(rawUrl);
+  const safeWeb = observedWebsiteState(rawUrl, lead.destinationDomain) === 'found' ? getSafeExternalUrl(rawUrl) : undefined;
 
-  const phone = (lead as any).businessPhone || (lead as any).phone || ((lead as any).phones && (lead as any).phones[0]);
-  const email = (lead as any).businessEmail || (lead as any).email || ((lead as any).emails && (lead as any).emails[0]);
+  const phone = (lead as any).businessPhone || (lead as any).phone || lead.phones?.[0] || lead.contactProfile?.observedPhones?.[0]?.normalizedValue || lead.contactProfile?.observedPhones?.[0]?.rawValue;
+  const email = (lead as any).businessEmail || (lead as any).email || lead.emails?.[0] || lead.contactProfile?.observedEmails?.[0]?.normalizedValue || lead.contactProfile?.observedEmails?.[0]?.rawValue;
 
   const hasPhone = Boolean(phone);
   const hasEmail = Boolean(email);
@@ -100,7 +101,7 @@ export function extensionLeadToResultRowViewModel(lead: ExtensionLead): ResultRo
     provenance: 'META_DERIVED',
     isMixedProvenance: false,
     relevanceDecision: (lead.relevanceDecision as any) || 'UNASSESSED',
-    websiteState: lead.websiteState === 'found' ? 'found' : (lead.destinationUrl ? 'WEBSITE_PRESENT_UNVERIFIED' : 'NOT_OBSERVED'),
+    websiteState: safeWeb ? 'WEBSITE_PRESENT_UNVERIFIED' : 'NOT_OBSERVED',
     websiteUrl: safeWeb,
     contactSummary: {
       hasPhone,
@@ -130,7 +131,7 @@ export function extensionLeadToResultRowViewModel(lead: ExtensionLead): ResultRo
     category,
     sourceBadges: [{ sourceType: 'META', label: 'Meta', isRestricted: false }],
     dataSignals: {
-      websiteVerified: Boolean(lead.destinationUrl && lead.websiteState === 'found'),
+      websiteVerified: false, // An observed ad URL is not a live website verification.
       contactAvailable: hasPhone || hasEmail,
       publicPersonAvailable: false,
       advertisingEvidence: true,

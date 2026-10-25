@@ -1,5 +1,7 @@
 # LeadNoria
 
+> **Current review status:** See [CURRENT-STATUS.md](CURRENT-STATUS.md) for the latest implementation, tests and remaining limits. Older release claims below are historical. Live automated collection is disabled; Chrome MV3 runtime testing is incomplete.
+
 > **Discover. Verify. Connect.**  
 > Business lead research from real public signals — built as a Manifest V3 Chrome Extension.
 

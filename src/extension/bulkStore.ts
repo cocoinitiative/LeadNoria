@@ -24,7 +24,7 @@ import type {
   RelevanceDecision,
   CheckpointRecord
 } from './types.ts';
-import { classifyCta, classifyDestination, aggregateAdEvidence } from './destinationClassifier.ts';
+import { classifyCta, classifyDestination, aggregateAdEvidence, observedWebsiteState } from './destinationClassifier.ts';
 import { evaluateLeadQualificationGates } from './qualificationGate.ts';
 import { normalizeFacebookPage } from './entityResolver.ts';
 
@@ -106,11 +106,7 @@ export function normalizeStoredLead(raw: any): ExtensionLead {
   }
 
   // 4. Website state normalization
-  let webState: 'found' | 'not_found' | 'unknown' = raw.websiteState;
-  if (!webState || (webState === 'not_found' && !raw.destinationUrl && ctaSummary.primaryDestinationType !== 'NO_VISIBLE_DESTINATION')) {
-    // Missing destination URL alone is not proof that website does not exist
-    webState = raw.destinationUrl ? 'found' : 'unknown';
-  }
+  const webState = observedWebsiteState(raw.destinationUrl, raw.destinationDomain);
 
   const adIds: string[] = Array.isArray(raw.adLibraryIds)
     ? Array.from(new Set(raw.adLibraryIds.filter((id: any): id is string => typeof id === 'string' && /^[0-9]{5,25}$/.test(id))))
@@ -509,6 +505,87 @@ function openDB(): Promise<IDBDatabase> {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
+}
+
+/** Manual imports must fail visibly instead of falling back to volatile memory. */
+export async function getManualImportRuns(): Promise<ExtensionResearchRun[]> {
+  if (!hasIndexedDB()) {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) throw new Error('Durable storage is unavailable. Import was not saved.');
+    return Array.from(memoryFallback.runs.values()).filter(r => r.mode === 'MANUAL').map(r => structuredClone(r));
+  }
+  const db = await openDB();
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction('runs', 'readonly');
+      const request = tx.objectStore('runs').getAll();
+      tx.oncomplete = () => resolve((request.result as ExtensionResearchRun[]).filter(r => r.mode === 'MANUAL'));
+      tx.onerror = tx.onabort = () => reject(tx.error || new Error('Could not read saved imports.'));
+    });
+  } finally { db.close(); }
+}
+
+/** Remove manual history entries without resurrecting them from IndexedDB on reload. */
+export async function clearManualImportRuns(): Promise<void> {
+  if (!hasIndexedDB()) {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) throw new Error('Durable storage is unavailable.');
+    for (const [id, run] of memoryFallback.runs) if (run.mode === 'MANUAL') memoryFallback.runs.delete(id);
+    return;
+  }
+  const db = await openDB();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('runs', 'readwrite');
+      const request = tx.objectStore('runs').openCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return;
+        if (cursor.value.mode === 'MANUAL') cursor.delete();
+        cursor.continue();
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror = tx.onabort = () => reject(tx.error || new Error('History could not be cleared.'));
+    });
+  } finally { db.close(); }
+}
+
+/** Commit records, history and checkpoint together; an abort leaves no partial import. */
+export async function saveManualImportAtomically(run: ExtensionResearchRun, payload: BulkBatchPayload): Promise<void> {
+  if (!hasIndexedDB()) {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) throw new Error('Durable storage is unavailable. Import was not saved.');
+    await memoryFallback.saveBatch(run.runId, payload);
+    await memoryFallback.saveRun(run);
+    return;
+  }
+  const db = await openDB();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const names = ['runs', 'ads', 'entities', 'checkpoints', 'dedupIndex'];
+      if (db.objectStoreNames.contains('uncertain_entities')) names.push('uncertain_entities');
+      const tx = db.transaction(names, 'readwrite');
+      tx.oncomplete = () => resolve();
+      tx.onerror = tx.onabort = () => reject(tx.error || new Error('Import save was interrupted. Please retry.'));
+      try {
+        const runId = run.runId;
+        tx.objectStore('runs').put(run);
+        for (const ad of payload.ads) {
+          tx.objectStore('ads').put({ ...ad, runId });
+          tx.objectStore('dedupIndex').put({ runId, idType: 'AD_ID', idVal: ad.libraryId });
+        }
+        for (const entity of payload.entities) {
+          const canonicalKey = entity.canonicalKey || `import_${entity.id}`;
+          tx.objectStore('entities').put({ ...entity, runId, canonicalKey });
+          tx.objectStore('dedupIndex').put({ runId, idType: 'ENTITY_KEY', idVal: canonicalKey });
+        }
+        for (const entity of payload.uncertainEntities || []) {
+          if (names.includes('uncertain_entities')) tx.objectStore('uncertain_entities').put({ ...entity, runId });
+        }
+        tx.objectStore('checkpoints').put({ ...payload.checkpoint, runId, batchIndex: payload.batchIndex });
+      } catch (error) {
+        tx.abort();
+        reject(error);
+      }
+    });
+  } finally { db.close(); }
 }
 
 /**

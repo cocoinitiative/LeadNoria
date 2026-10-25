@@ -194,7 +194,18 @@ function detectSignalsForProfile(
 
   // High Quality Physical Address:
   // Requires city or state AND address keyword, or postal code
-  const hasExplicitPhysicalAddress = (hasCity || hasStateOrProvince || hasPostalCode) && (hasAddressKeyword || hasPostalCode);
+  // Address words elsewhere in the ad must not turn a delivery destination
+  // into the advertiser's address (e.g. Mumbai office + delivery to Dhaka).
+  const addressClauses = body.split(/[\n;]|\.(?:\s|$)/);
+  const hasExplicitPhysicalAddress = addressClauses.some(clause => {
+    const cities = profile.majorCities.some(city => new RegExp(`\\b${city}\\b`, 'i').test(clause));
+    const regions = profile.regions?.statesOrProvinces?.some(state => new RegExp(`\\b${state}\\b`, 'i').test(clause));
+    const postal = Boolean(profile.regions?.postalCodeRegex?.test(clause));
+    const address = profile.addressKeywords.some(word => new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(clause));
+    const deliveryOnly = /\b(?:deliver(?:y|ies|ing)?|ship(?:ping|ped)?|target(?:ing)?)\s+(?:to|across|throughout|in)\b/i.test(clause)
+      && !/\b(?:office|headquarters|showroom|located|address|visit us|based in)\b/i.test(clause);
+    return !deliveryOnly && Boolean((cities || regions || postal) && (address || postal));
+  });
 
   return {
     profile,

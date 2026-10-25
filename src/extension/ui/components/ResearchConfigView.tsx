@@ -258,8 +258,8 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
               className="w-full px-2 py-1 text-xs bg-slate-950 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-1 focus:ring-sky-400"
             >
               <option value="ANY">Any Website Status</option>
-              <option value="WITH_WEBSITE">Must Have Website</option>
-              <option value="WITHOUT_WEBSITE">Without Website (Social Only)</option>
+              <option value="WITH_WEBSITE">External Website Observed</option>
+              <option value="WITHOUT_WEBSITE">No Website Destination Observed (Not Proof of Absence)</option>
             </select>
           </div>
         </div>

@@ -36,6 +36,7 @@ interface ResultsTableViewProps {
   onClearSelection: () => void;
   onInspectRecord: (recordId: string) => void;
   onOpenExportModal: () => void;
+  onDownloadCsv?: (recordIds: string[]) => void;
 }
 
 export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
@@ -45,7 +46,8 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
   onSelectAll,
   onClearSelection,
   onInspectRecord,
-  onOpenExportModal
+  onOpenExportModal,
+  onDownloadCsv
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [sourceFilter, setSourceFilter] = useState<string>('ALL');
@@ -335,6 +337,8 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
     const start = (currentPage - 1) * PAGE_SIZE;
     return sortedResults.slice(start, start + PAGE_SIZE);
   }, [sortedResults, currentPage]);
+  const csvRows = sortedResults.filter(row => row.isExportable && !row.isRestricted &&
+    (selectedRecordIds.size === 0 || selectedRecordIds.has(row.recordId) || selectedRecordIds.has(row.entityId)));
 
   const allFilteredSelected = paginatedResults.length > 0 &&
     paginatedResults.every(r => selectedRecordIds.has(r.entityId) || selectedRecordIds.has(r.recordId));
@@ -417,6 +421,11 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
             <span>📋</span> {isCopying ? 'Copying...' : `Copy All (${filteredResults.length})`}
           </button>
 
+          {onDownloadCsv && <button type="button" disabled={csvRows.length === 0}
+            onClick={() => onDownloadCsv(csvRows.map(row => row.recordId))}
+            className="px-3 py-2 text-xs font-semibold rounded-lg bg-emerald-700 text-white disabled:opacity-50">
+            Download CSV ({csvRows.length})
+          </button>}
           {/* Export Button */}
           <button
             type="button"
@@ -916,7 +925,7 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
                       )}
                     </span>
                   ) : (
-                    <span className="text-slate-600">No website</span>
+                    <span className="text-slate-600">Website not observed</span>
                   )}
 
                   {/* Public person signal */}

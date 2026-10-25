@@ -39,6 +39,7 @@ export const ManualImportView: React.FC<ManualImportViewProps> = ({
   const [csvFileName, setCsvFileName] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [importSummary, setImportSummary] = useState<ManualImportSummary | null>(null);
+  const [importError, setImportError] = useState<string>('');
 
   // Live parsing preview based on selected mode
   const parseResult: ParseResult = useMemo(() => {
@@ -81,6 +82,8 @@ export const ManualImportView: React.FC<ManualImportViewProps> = ({
     if (parseResult.candidates.length === 0 || isProcessing) return;
     console.log('[ManualImportUI] Executing import for', parseResult.candidates.length, 'candidates...');
     setIsProcessing(true);
+    setImportError('');
+    setImportSummary(null);
 
     try {
       const parsedKeywords = targetKeywords
@@ -102,7 +105,7 @@ export const ManualImportView: React.FC<ManualImportViewProps> = ({
       onImportComplete(summary);
     } catch (err: any) {
       console.error('[ManualImportUI] Import error:', err);
-      alert(`Import error: ${err.message || 'Unknown processing error'}`);
+      setImportError(`Import was not saved: ${err.message || 'Storage failed. Please retry.'}`);
     } finally {
       setIsProcessing(false);
     }
@@ -112,6 +115,7 @@ export const ManualImportView: React.FC<ManualImportViewProps> = ({
     setRawText('');
     setCsvFileName('');
     setImportSummary(null);
+    setImportError('');
   };
 
   return (
@@ -364,6 +368,7 @@ export const ManualImportView: React.FC<ManualImportViewProps> = ({
         </div>
       )}
 
+      {importError && <div role="alert" className="p-3 rounded-lg border border-rose-700 bg-rose-950 text-rose-200 text-sm">{importError}</div>}
       {/* Post-Import Summary Banner / Modal */}
       {importSummary && (
         <div className="p-4 bg-slate-900 border border-sky-800/80 rounded-xl flex flex-col gap-3 shadow-lg">
@@ -374,6 +379,7 @@ export const ManualImportView: React.FC<ManualImportViewProps> = ({
             <span className="text-[11px] font-mono text-slate-400">Run ID: {importSummary.runId}</span>
           </div>
 
+          {importSummary.warnings.map((warning, index) => <p key={index} role="status" className="text-xs text-amber-300">{warning}</p>)}
           {/* Metric Counts */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
             <div className="p-2 bg-emerald-950/40 border border-emerald-800/60 rounded-lg">

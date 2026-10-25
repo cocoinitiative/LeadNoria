@@ -21,7 +21,7 @@ import type {
 import { LeadRelevanceEngine } from './relevanceEngine.ts';
 import type { ResearchIntent } from './relevanceEngine.ts';
 import { evaluateGeographicOrigin } from './geographicClassifier.ts';
-import { classifyCta, classifyDestination, aggregateAdEvidence } from './destinationClassifier.ts';
+import { classifyCta, classifyDestination, aggregateAdEvidence, observedWebsiteState } from './destinationClassifier.ts';
 import {
   evaluateStrictRelevanceV3,
   recordCandidateEvidenceInProfile,
@@ -405,9 +405,7 @@ export async function processBatch(
       }
 
       // Construct unified ExtensionLead with identity metadata and evidence coverage
-      const webState = (domainNorm.cleanUrl || cand.destinationUrl)
-        ? 'found'
-        : (candDestRes.destinationType === 'NO_VISIBLE_DESTINATION' ? 'not_found' : 'unknown');
+      const webState = observedWebsiteState(domainNorm.cleanUrl || cand.destinationUrl, domainNorm.canonicalDomain || cand.destinationDomain);
       const fbState = (pageNorm.canonicalUrl || cand.facebookPageUrl) ? 'found' : 'not_found';
 
       const candAdEvidenceItem: AdLevelEvidence = {

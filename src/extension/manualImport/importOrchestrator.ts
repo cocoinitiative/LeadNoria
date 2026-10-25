@@ -24,9 +24,10 @@ import type {
 } from '../types.ts';
 import { processBatch } from '../bulkProcessor.ts';
 import { compileResearchIntent } from '../relevanceEngine.ts';
-import { saveRunRecord, saveBatch } from '../bulkStore.ts';
+import { getManualImportRuns, saveManualImportAtomically } from '../bulkStore.ts';
 import { evaluateLeadQualificationGates } from '../qualificationGate.ts';
 import { evaluateGeographicOrigin } from '../geographicClassifier.ts';
+import { observedWebsiteState, classifyCta, classifyDestination } from '../destinationClassifier.ts';
 
 export interface ManualImportOptions {
   countryCode?: string;
@@ -50,23 +51,68 @@ export interface ManualImportSummary {
   leads: ExtensionLead[];
   rejectedDetails: Array<{ id: string; name: string; reason: string }>;
   warnings: string[];
+  run?: ExtensionResearchRun;
+}
+
+let importQueue: Promise<unknown> = Promise.resolve();
+
+function sameImportScope(run: ExtensionResearchRun, options: ManualImportOptions, keywords: string[], countryCode: string): boolean {
+  const normalize = (values: string[]) => [...new Set(values.map(v => v.trim().toLowerCase()))].sort().join('\n');
+  return run.countryCode === countryCode && normalize(run.keywords || []) === normalize(keywords)
+    && (run.presetId || '') === (options.presetId || '')
+    && (run.strictLocalMode !== false) === (options.strictLocalMode !== false)
+    && (run.allowProbableLocal === true) === (options.allowProbableLocal === true);
+}
+
+function chromeStorageCall<T>(operation: (done: (result: T) => void) => void): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Browser workspace save timed out.')), 5000);
+    try {
+      operation(result => {
+        clearTimeout(timer);
+        const error = chrome.runtime?.lastError;
+        if (error) reject(new Error(error.message || 'Browser storage failed.'));
+        else resolve(result);
+      });
+    } catch (error) { clearTimeout(timer); reject(error); }
+  });
+}
+
+/** Serialize read/dedup/commit across popup and sidepanel contexts. */
+export function executeManualImport(candidates: ScrapedAdCandidate[], options: ManualImportOptions = {}): Promise<ManualImportSummary> {
+  const execute = () => typeof navigator !== 'undefined' && navigator.locks
+    ? navigator.locks.request('leadnoria-manual-import', () => executeImport(candidates, options))
+    : executeImport(candidates, options);
+  const result = importQueue.then(execute, execute);
+  importQueue = result.catch(() => undefined);
+  return result;
 }
 
 /**
  * Executes offline import and qualification on user-supplied candidates.
  */
-export async function executeManualImport(
+async function executeImport(
   candidates: ScrapedAdCandidate[],
   options: ManualImportOptions = {}
 ): Promise<ManualImportSummary> {
-  const countryCode = options.countryCode || 'BD';
+  const countryCode = (options.countryCode || 'BD').trim().toUpperCase();
   const locationName = options.locationName || (countryCode === 'BD' ? 'Bangladesh' : countryCode);
   const strictLocalMode = options.strictLocalMode !== false;
-  const allowProbableLocal = options.allowProbableLocal !== false;
+  const allowProbableLocal = options.allowProbableLocal === true;
   const keywords = options.keywords && options.keywords.length > 0 ? options.keywords : ['Commercial', 'Business'];
 
-  const runId = options.runId || `manual_${Date.now()}`;
+  const runId = options.runId || `manual_${crypto.randomUUID()}`;
   const runName = options.runName || `Manual Meta Import (${locationName})`;
+  const previousRuns = (await getManualImportRuns()).filter(run => sameImportScope(run, options, keywords, countryCode));
+  const savedIds = new Set(previousRuns.flatMap(run => run.leads.flatMap(lead => lead.adLibraryIds || [])));
+  const newCandidates = candidates.filter(candidate => !savedIds.has(candidate.libraryId));
+  const previousDuplicateCount = candidates.length - newCandidates.length;
+  if (candidates.length > 0 && newCandidates.length === 0) {
+    return { runId: previousRuns[0]?.runId || runId, totalSupplied: candidates.length, acceptedCount: 0,
+      duplicateCount: previousDuplicateCount, rejectedCount: 0, incompleteCount: 0, leads: [], rejectedDetails: [],
+      warnings: ['These ads were already imported for the same country and research criteria. No duplicate records were saved.'],
+      run: previousRuns[0] };
+  }
 
   // 1. Compile research intent with strict local requirements
   const intent = compileResearchIntent(
@@ -106,7 +152,7 @@ export async function executeManualImport(
   };
 
   // Ensure candidate observedKeyword aligns with active keywords
-  const preparedCandidates = candidates.map(c => ({
+  const preparedCandidates = newCandidates.map(c => ({
     ...c,
     observedKeyword: (c.observedKeyword && c.observedKeyword !== 'MANUAL_IMPORT' && c.observedKeyword !== 'USER_CSV_IMPORT' && c.observedKeyword !== 'MANUAL_URL_REFERENCE')
       ? c.observedKeyword
@@ -129,6 +175,9 @@ export async function executeManualImport(
       effectiveCeiling: 5000
     }
   );
+  batchResult.counters.duplicatesRemoved += previousDuplicateCount;
+  batchResult.counters.rawAds += previousDuplicateCount;
+  batchResult.counters.duplicateAdRecordsRemoved = (batchResult.counters.duplicateAdRecordsRemoved || 0) + previousDuplicateCount;
 
   // 4. Assemble final lead list and mark provenance
   const now = new Date().toISOString();
@@ -161,6 +210,9 @@ export async function executeManualImport(
     }, countryCode);
 
     const isForeign = geoEval.classification === 'FOREIGN_VERIFIED';
+    const cta = classifyCta(cand.ctaText);
+    const destination = classifyDestination({ destinationUrl: cand.destinationUrl,
+      destinationDomain: cand.destinationDomain, ctaType: cta.ctaType, bodyCopy: cand.bodyCopy });
 
     const unrankedLead: ExtensionLead = {
       id: `lead_${runId}_${cand.libraryId}`,
@@ -171,15 +223,30 @@ export async function executeManualImport(
       facebookPageState: cand.facebookPageUrl ? 'found' : 'not_found',
       destinationUrl: cand.destinationUrl,
       destinationDomain: cand.destinationDomain,
-      websiteState: cand.destinationUrl ? 'found' : 'unknown',
-      activeAdCount: 1,
+      websiteState: observedWebsiteState(cand.destinationUrl, cand.destinationDomain),
+      primaryCtaType: cta.ctaType,
+      primaryDestinationType: destination.destinationType,
+      observedCtaTypes: [cta.ctaType],
+      observedDestinationTypes: [destination.destinationType],
+      destinationConfidence: destination.confidence,
+      destinationReasonCode: destination.reasonCode,
+      activeAdCount: cand.isActive === false ? 0 : 1,
+      activeAdLibraryIds: cand.isActive === false ? [] : [cand.libraryId],
       adLibraryIds: [cand.libraryId],
+      adLibraryUrl: `https://www.facebook.com/ads/library/?id=${encodeURIComponent(cand.libraryId)}`,
+      sampleCopy: cand.bodyCopy || cand.rawText,
+      sampleCta: cand.ctaText,
+      adEvidence: [{ libraryId: cand.libraryId, ctaText: cand.ctaText, normalizedCtaText: cta.normalizedText,
+        ctaType: cta.ctaType, ctaStatus: cta.status, ctaConfidence: cta.confidence,
+        destinationType: destination.destinationType, destinationUrl: cand.destinationUrl,
+        destinationDomain: cand.destinationDomain, confidence: destination.confidence,
+        reasonCode: destination.reasonCode, observedAt: now }],
       matchedKeywords: [keywords[0] || 'Commercial'],
       locationCode: countryCode,
       locationName,
       discoveredAt: now,
       targetCountryCode: countryCode,
-      businessCountryCode: geoEval.businessCountryCode || (isForeign ? 'US' : countryCode),
+      businessCountryCode: geoEval.businessCountryCode,
       geographicClassification: geoEval.classification,
       businessLocationConfidence: geoEval.confidence,
       businessLocationEvidence: geoEval.evidence,
@@ -214,6 +281,8 @@ export async function executeManualImport(
 
   for (const lead of leads) {
     const gateRes = evaluateLeadQualificationGates(lead, intent);
+    lead.qualificationFailedGates = gateRes.failedGates;
+    lead.qualificationReasons = gateRes.reasons;
     const gateReason = (gateRes.reasons && gateRes.reasons.length > 0)
       ? gateRes.reasons.join('; ')
       : (gateRes.failedGates && gateRes.failedGates.length > 0)
@@ -244,6 +313,8 @@ export async function executeManualImport(
     runId,
     researchName: runName,
     mode: 'MANUAL',
+    presetId: options.presetId,
+    presetName: options.presetName,
     keywords,
     countryCode,
     locationName,
@@ -266,7 +337,7 @@ export async function executeManualImport(
     lastUpdatedAt: now,
     schemaVersion: 2,
     totalAdsInspected: candidates.length,
-    allCandidates: candidates
+    allCandidates: newCandidates
   };
 
   // 7. Persist to bulkStore (IndexedDB / Memory fallback)
@@ -288,43 +359,20 @@ export async function executeManualImport(
     seenEntityKeysCount: existingEntitiesMap.size
   };
 
-  try {
-    await Promise.race([
-      (async () => {
-        await saveBatch(runId, {
-          batchIndex: 1,
-          ads: batchResult.processedAds,
-          entities: leads,
-          uncertainEntities: batchResult.uncertainEntities,
-          checkpoint
-        });
-        await saveRunRecord(researchRun);
-      })(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('IndexedDB save timed out')), 2000))
-    ]);
-  } catch (err) {
-    console.warn('[ManualImport] Error persisting to bulkStore:', err);
-  }
+  await saveManualImportAtomically(researchRun, { batchIndex: 1, ads: preparedCandidates,
+    entities: leads, uncertainEntities: batchResult.uncertainEntities, checkpoint });
+  const warnings: string[] = [];
 
   // 8. Persist to chrome.storage.local for UI hydration
   if (typeof chrome !== 'undefined' && chrome.storage?.local) {
     try {
-      await Promise.race([
-        new Promise<void>((resolve) => {
-          chrome.storage.local.get(['researchHistory'], (data) => {
-            const history = Array.isArray(data.researchHistory) ? data.researchHistory : [];
-            const updatedHistory = [researchRun, ...history.filter((r: any) => r && r.runId !== runId)].slice(0, 50);
-
-            chrome.storage.local.set({
-              activeResearchRun: researchRun,
-              researchHistory: updatedHistory
-            }, () => resolve());
-          });
-        }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('chrome.storage save timed out')), 2000))
-      ]);
+      const data = await chromeStorageCall<Record<string, any>>(done => chrome.storage.local.get(['researchHistory'], done));
+      const history = Array.isArray(data.researchHistory) ? data.researchHistory : [];
+      await chromeStorageCall<void>(done => chrome.storage.local.set({ activeResearchRun: researchRun,
+        researchHistory: [researchRun, ...history.filter((r: any) => r && r.runId !== runId)].slice(0, 50)
+      }, done));
     } catch (err) {
-      console.warn('[ManualImport] Error saving to chrome.storage.local:', err);
+      warnings.push('Leads were saved in the research database, but the browser workspace snapshot could not be updated. Your saved import remains available in History.');
     }
   }
 
@@ -337,6 +385,7 @@ export async function executeManualImport(
     incompleteCount,
     leads,
     rejectedDetails,
-    warnings: []
+    warnings,
+    run: researchRun
   };
 }

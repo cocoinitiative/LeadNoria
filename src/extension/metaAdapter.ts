@@ -18,7 +18,7 @@ import type {
 import { LeadRelevanceEngine } from './relevanceEngine.ts';
 import type { ResearchIntent } from './relevanceEngine.ts';
 import { evaluateGeographicOrigin } from './geographicClassifier.ts';
-import { classifyCta, classifyDestination, aggregateAdEvidence } from './destinationClassifier.ts';
+import { classifyCta, classifyDestination, aggregateAdEvidence, observedWebsiteState } from './destinationClassifier.ts';
 import { evaluateLeadQualificationGates } from './qualificationGate.ts';
 import { calculateLeadScore } from './leadPrioritizer.ts';
 import {
@@ -44,6 +44,15 @@ import {
 /**
  * Checks whether a given URL is a Meta Ad Library search or listing page.
  */
+export function buildMetaAdLibrarySearchUrl(countryCode: string, keyword: string): string {
+  const country = countryCode.trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(country) || !keyword.trim()) throw new Error('Country and keyword are required.');
+  const url = new URL('https://www.facebook.com/ads/library/');
+  url.search = new URLSearchParams({ active_status: 'all', ad_type: 'all', country,
+    q: keyword.trim(), search_type: 'keyword_unordered', media_type: 'all' }).toString();
+  return url.toString();
+}
+
 export function isMetaAdLibraryUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
@@ -1225,7 +1234,7 @@ export function aggregateCandidatesToLeads(
         if (!existing.destinationUrl && cand.destinationUrl) {
           existing.destinationUrl = cand.destinationUrl;
           existing.destinationDomain = cand.destinationDomain;
-          existing.websiteState = 'found';
+          existing.websiteState = observedWebsiteState(cand.destinationUrl, cand.destinationDomain);
         }
         if (!existing.sampleCopy || (cand.bodyCopy && cand.bodyCopy.length > (existing.sampleCopy?.length || 0))) {
           existing.sampleCopy = cand.bodyCopy;
@@ -1354,7 +1363,7 @@ export function aggregateCandidatesToLeads(
       const matchedKws = Array.from(new Set(cands.map(c => c.observedKeyword).filter(Boolean) as string[]));
 
       const fbState = bestFbUrl ? 'found' : 'not_found';
-      const webState = bestDestUrl ? 'found' : (candSummary.primaryDestinationType === 'NO_VISIBLE_DESTINATION' ? 'not_found' : 'unknown');
+      const webState = observedWebsiteState(bestDestUrl, bestDestDomain);
 
       const pageNorm = normalizeFacebookPage(bestFbUrl, cands.find(c => c.facebookPageId || (c as any).pageId)?.facebookPageId || (cands.find(c => (c as any).pageId) as any)?.pageId);
       const canonicalPageId = pageNorm.pageId;

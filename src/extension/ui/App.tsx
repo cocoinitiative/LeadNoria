@@ -43,6 +43,7 @@ import { DiagnosticsDrawer } from './components/DiagnosticsDrawer.tsx';
 import { RecoveryBanner } from './components/RecoveryBanner.tsx';
 import { AnalyticsView } from './components/AnalyticsView.tsx';
 import { ManualImportView } from './components/ManualImportView.tsx';
+import { getManualImportRuns, clearManualImportRuns } from '../bulkStore.ts';
 import { computeRunAnalytics } from '../analytics/analyticsEngine.ts';
 import { RunAnalyticsSnapshot } from '../analytics/types.ts';
 import { computeResearchOptimization } from '../optimization/optimizationEngine.ts';
@@ -183,7 +184,7 @@ export const ExtensionApp: React.FC = () => {
 
   const loadHistoryState = () => {
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      chrome.storage.local.get(['researchHistory', 'meta_scraper_history'], (res: Record<string, any>) => {
+      chrome.storage.local.get(['researchHistory', 'meta_scraper_history', 'activeResearchRun', 'meta_scraper_active_run'], async (res: Record<string, any>) => {
         try {
           const rawHist = (res.researchHistory || res.meta_scraper_history) as ExtensionResearchRun[] | undefined;
           if (Array.isArray(rawHist)) {
@@ -194,6 +195,18 @@ export const ExtensionApp: React.FC = () => {
             const alerts = evaluateOperationalGuardrails(metrics);
             setReliabilityMetrics(metrics);
             setGuardrailAlerts(alerts);
+          }
+          const manualRuns = await getManualImportRuns();
+          if (manualRuns.length > 0) {
+            const history = Array.isArray(rawHist) ? rawHist.filter(r => r && typeof r === 'object') : [];
+            const merged = [...new Map([...history, ...manualRuns].map(r => [r.runId, r])).values()]
+              .sort((a, b) => Date.parse(b.lastUpdatedAt || b.startedAt) - Date.parse(a.lastUpdatedAt || a.startedAt));
+            setHistoryRuns(merged);
+            const latest = [...manualRuns].sort((a, b) => Date.parse(b.lastUpdatedAt || b.startedAt) - Date.parse(a.lastUpdatedAt || a.startedAt))[0];
+            const snapshot = res.activeResearchRun || res.meta_scraper_active_run;
+            if (!snapshot || Date.parse(latest.lastUpdatedAt || latest.startedAt) >= Date.parse(snapshot.lastUpdatedAt || snapshot.startedAt)) {
+              handleRunUpdate(latest);
+            }
           }
         } catch (err) {
           console.warn('[App] Error loading research history from storage:', err);
@@ -441,9 +454,9 @@ export const ExtensionApp: React.FC = () => {
   // Inspect Row in Detail Drawer
   const handleInspectRecord = (recordId: string) => {
     const raw = rawLeads.find(l =>
-      (l.canonicalEntityId || l.entityId || l.leadId || l.pageId) === recordId ||
+      (l.id || l.canonicalEntityId || l.entityId || l.leadId || l.pageId) === recordId ||
       (`rec_${l.canonicalEntityId}`) === recordId
-    ) || rawLeads[0];
+    );
 
     if (raw) {
       if (isCanonicalLeadRecord(raw) || isExtensionLead(raw)) {
@@ -582,23 +595,23 @@ export const ExtensionApp: React.FC = () => {
     }
   }, [rawLeads, historyRuns, activeRun]);
 
-  const handleConfirmExport = (qualifiedOnly: boolean = true) => {
+  const handleConfirmExport = (qualifiedOnly: boolean = true, recordIds?: string[]) => {
     if (isExporting) return;
     setIsExporting(true);
 
     const eligibleLeads = rawLeads.filter((_, idx) => {
       const row = resultsVM[idx];
       if (!row) return false;
-      const isSelected = selectedRecordIds.size === 0 ||
+      const isSelected = recordIds ? recordIds.includes(row.recordId) : (selectedRecordIds.size === 0 ||
         selectedRecordIds.has(row.entityId) ||
-        selectedRecordIds.has(row.recordId);
+        selectedRecordIds.has(row.recordId));
       // Strictly prevent export of restricted or non-exportable records
       return isSelected && row.isExportable && !row.isRestricted;
     });
 
     if (eligibleLeads.length > 0) {
       const csv = exportLeadsToCsv(eligibleLeads as ExtensionLead[], { qualifiedOnly });
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const blob = new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -606,14 +619,16 @@ export const ExtensionApp: React.FC = () => {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
 
     setIsExporting(false);
     setIsExportModalOpen(false);
   };
 
-  const handleClearHistory = () => {
+  const handleClearHistory = async () => {
+    try { await clearManualImportRuns(); }
+    catch { alert('History could not be cleared. Please retry.'); return; }
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       chrome.storage.local.set({ researchHistory: [] }, () => {
         setHistoryRuns([]);
@@ -687,12 +702,11 @@ export const ExtensionApp: React.FC = () => {
           <div role="tabpanel" id="tabpanel-IMPORT" aria-labelledby="tab-IMPORT" className="flex flex-col gap-3">
             <ManualImportView
               onImportComplete={(summary) => {
-                if (summary.leads && summary.leads.length > 0) {
-                  setRawLeads(summary.leads);
-                }
+                if (summary.run) handleRunUpdate(summary.run);
+                else setRawLeads(summary.leads);
+                loadHistoryState();
               }}
               onNavigateToResults={() => {
-                loadStorageState();
                 setActiveTab('RESULTS');
               }}
               disabled={isSubmitting || isJobRunning(activeRun?.status)}
@@ -742,6 +756,7 @@ export const ExtensionApp: React.FC = () => {
               }}
               onClearSelection={() => setSelectedRecordIds(new Set())}
               onInspectRecord={handleInspectRecord}
+              onDownloadCsv={(recordIds) => handleConfirmExport(false, recordIds)}
               onOpenExportModal={() => setIsExportModalOpen(true)}
             />
           </div>

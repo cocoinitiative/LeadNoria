@@ -63,6 +63,12 @@ export interface AggregatedDestinationSummary {
   destinationReasonCode: string;
 }
 
+/** Website presence requires an observed external URL, never CTA wording alone. */
+export function observedWebsiteState(destinationUrl?: string, destinationDomain?: string): 'found' | 'unknown' {
+  return classifyDestination({ destinationUrl, destinationDomain }).destinationType === 'EXTERNAL_WEBSITE'
+    && Boolean(destinationUrl || destinationDomain) ? 'found' : 'unknown';
+}
+
 /**
  * Classifies visible Call-to-Action (CTA) text into normalized CtaType.
  */

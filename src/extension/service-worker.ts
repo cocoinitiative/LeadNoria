@@ -14,7 +14,7 @@ import type {
   ScrapedAdCandidate,
   RunCounters
 } from './types.ts';
-import { aggregateCandidatesToLeads } from './metaAdapter.ts';
+import { aggregateCandidatesToLeads, buildMetaAdLibrarySearchUrl } from './metaAdapter.ts';
 import { compileResearchIntent, RELEVANCE_STRATEGY_VERSION, RELEVANCE_ENGINE_VERSION } from './relevanceEngine.ts';
 import {
   initBulkStore,
@@ -474,7 +474,7 @@ export async function executeResearchPipeline(
       let queryNewEntities = 0;
       let queryDuplicateEntities = 0;
 
-      const searchUrl = `https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=${encodeURIComponent(countryCode)}&q=${encodeURIComponent(currentKeyword)}&search_type=keyword_unordered&media_type=all`;
+      const searchUrl = buildMetaAdLibrarySearchUrl(countryCode, currentKeyword);
       const queryTypeLabel = currentPlannedQuery.variantType === 'SEED' ? 'Primary Seed' : `Expansion: ${currentPlannedQuery.variantType}`;
       broadcastProgress(initialRun, 'NAVIGATING', `[${qi + 1}/${queriesToRun.length} ${queryTypeLabel}] Opening Meta Ad Library for "${currentKeyword}" in ${countryCode}...`);
 
