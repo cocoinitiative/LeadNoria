@@ -18160,7 +18160,8 @@ var ResearchConfigView = ({
   onSelectSource,
   onOpenPlanReview,
   onNavigateToImport,
-  disabled = false
+  disabled = false,
+  children
 }) => {
   const [modeType, setModeType] = (0, import_react.useState)("CUSTOM");
   const [presetId, setPresetId] = (0, import_react.useState)(RESEARCH_PRESETS[0]?.preset_id || "");
@@ -18422,19 +18423,17 @@ var ResearchConfigView = ({
         ] })
       ] })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
       "button",
       {
         type: "button",
         disabled: disabled || !(modeType === "PRESET" ? presetKeywords : customKeywords).split(/[,;\n]/).some((k) => k.trim()),
         onClick: handleReviewClick,
         className: "w-full py-2.5 px-4 bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-sm shadow-sky-600/20 focus:outline-none focus:ring-2 focus:ring-sky-400 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed",
-        children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { children: "\u{1F4CB}" }),
-          " Review Research Plan \u2192"
-        ]
+        children: "Start collecting"
       }
     ),
+    children,
     onNavigateToImport && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "pt-1 text-center", children: /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
       "button",
       {
@@ -18772,147 +18771,64 @@ var PlanReviewModal = ({
 var import_jsx_runtime5 = __toESM(require_jsx_runtime(), 1);
 var RunStatusView = ({
   runStatus,
-  onPause,
-  onResume,
+  leads = [],
+  leadCount = leads.length,
+  collectionState,
   onStop,
   onViewResults,
-  onInspectDiagnostics
+  onInspectDiagnostics,
+  onInspectLead
 }) => {
-  if (!runStatus) {
-    return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "flex flex-col items-center justify-center p-8 text-center text-slate-400", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "text-3xl mb-2", children: "\u23F1" }),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("h3", { className: "text-sm font-semibold text-slate-200 mb-1", children: "No Active Run" }),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "text-xs text-slate-500 max-w-xs", children: "Active run data not available. Select a source and launch a research plan to observe live pipeline execution." })
-    ] });
-  }
-  const isRunning = runStatus.globalStatus === "RUNNING";
-  const isCompleted = runStatus.globalStatus === "COMPLETED" || runStatus.globalStatus === "COMPLETED_WITH_WARNINGS";
-  const isPartial = runStatus.globalStatus === "PARTIAL";
-  return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "flex flex-col gap-4 p-4 bg-slate-900 border border-slate-800 rounded-xl", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "sr-only", role: "status", "aria-live": "polite", children: [
-      "Current run status: ",
-      runStatus.globalStatusText,
-      ". Active source: ",
-      runStatus.activeSource,
-      "."
-    ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "flex items-center justify-between p-3 bg-slate-950/80 rounded-lg border border-slate-800", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "flex items-center gap-2.5", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(StatusBadge, { status: runStatus.globalStatus }),
+  const running = runStatus?.globalStatus === "RUNNING";
+  const paused = collectionState === "PAUSED";
+  const failed = runStatus?.globalStatus === "FAILED" || runStatus?.globalStatus === "BLOCKED";
+  const title = !runStatus ? "Getting ready\u2026" : running ? "Collecting leads\u2026" : paused ? "Collection paused" : failed ? "Collection needs attention" : collectionState === "CANCELLED" ? "Collection stopped" : "Collection finished";
+  const button = "rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-medium text-slate-100 hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-400";
+  return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("section", { className: "flex flex-col gap-4 rounded-xl border border-slate-800 bg-slate-900 p-4", "aria-label": "Lead collection", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "flex items-center justify-between gap-3", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "flex items-center gap-3", children: [
+        running && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { role: "img", "aria-label": "Collection in progress", className: "h-6 w-6 shrink-0 animate-spin rounded-full border-2 border-slate-700 border-t-sky-400 motion-reduce:animate-none" }),
         /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("span", { className: "text-xs font-semibold text-slate-200 block", children: [
-            "Run: ",
-            runStatus.runId
-          ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("span", { className: "text-[11px] text-slate-400", children: [
-            "Source: ",
-            /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("strong", { className: "text-slate-300", children: runStatus.activeSource }),
-            " (",
-            runStatus.sourceStatus,
-            ")"
-          ] })
+          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("h2", { className: "text-sm font-semibold text-slate-100", children: title }),
+          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "mt-1 text-xs text-slate-400", children: running ? "New businesses appear below as they are found." : "Your collected leads are listed below." })
         ] })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "flex items-center gap-1.5", children: [
-        isRunning && onPause && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
-          "button",
-          {
-            type: "button",
-            onClick: onPause,
-            disabled: !runStatus.isPausable,
-            className: "px-2.5 py-1 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 rounded border border-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-400",
-            "aria-label": "Pause active research run",
-            children: "\u23F8 Pause"
-          }
-        ),
-        isPartial && onResume && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
-          "button",
-          {
-            type: "button",
-            onClick: onResume,
-            disabled: !runStatus.isResumable,
-            className: "px-2.5 py-1 text-xs font-semibold text-sky-300 bg-sky-950/60 hover:bg-sky-900/60 rounded border border-sky-500/40 focus:outline-none focus:ring-2 focus:ring-sky-400",
-            "aria-label": "Resume partial research run",
-            children: "\u25B6 Resume"
-          }
-        ),
-        (isRunning || isPartial) && onStop && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
-          "button",
-          {
-            type: "button",
-            onClick: onStop,
-            disabled: !runStatus.isStoppable,
-            className: "px-2.5 py-1 text-xs font-medium text-sky-300 bg-sky-950/40 hover:bg-sky-900/40 rounded border border-sky-500/40 focus:outline-none focus:ring-2 focus:ring-sky-400",
-            "aria-label": "Stop research run",
-            children: "\u23F9 Stop"
-          }
-        ),
-        isCompleted && onViewResults && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
-          "button",
-          {
-            type: "button",
-            onClick: onViewResults,
-            className: "px-3 py-1 text-xs font-semibold text-sky-300 bg-sky-950/60 hover:bg-sky-900/60 rounded border border-sky-500/40 focus:outline-none focus:ring-2 focus:ring-sky-400",
-            "aria-label": "View research results",
-            children: "View Results \u2192"
-          }
-        )
-      ] })
+      running && onStop && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("button", { type: "button", onClick: onStop, className: button, children: "Stop" })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "grid grid-cols-3 gap-2 text-center", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "p-2.5 bg-slate-950/40 rounded border border-slate-800", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "text-[10px] uppercase text-slate-500 block mb-0.5", children: "Candidates" }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "text-base font-bold text-slate-100", children: runStatus.candidatesProcessed })
-      ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "p-2.5 bg-slate-950/40 rounded border border-slate-800", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "text-[10px] uppercase text-slate-500 block mb-0.5", children: "Elapsed Time" }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("span", { className: "text-base font-bold text-slate-100", children: [
-          (runStatus.elapsedMs / 1e3).toFixed(1),
-          "s"
-        ] })
-      ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "p-2.5 bg-slate-950/40 rounded border border-slate-800", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "text-[10px] uppercase text-slate-500 block mb-0.5", children: "Checkpoint" }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "text-xs font-mono text-slate-300 truncate block", children: runStatus.checkpointId ? runStatus.checkpointId.substring(0, 10) : "None" })
-      ] })
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { role: "status", "aria-live": "polite", "aria-atomic": "true", className: "rounded-xl bg-slate-950 p-4 text-center", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "block text-4xl font-bold text-slate-100 tabular-nums", children: leadCount.toLocaleString() }),
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "mt-1 block text-xs text-slate-400", children: "leads collected" })
     ] }),
-    runStatus.hasWarnings && /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "p-2.5 bg-sky-950/30 border border-sky-500/30 rounded text-xs text-sky-200", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("strong", { className: "block font-semibold mb-0.5", children: "Run Completed With Warnings:" }),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("ul", { className: "list-disc list-inside text-[11px] text-sky-300/90 space-y-0.5", children: runStatus.warningMessages.map((msg, i) => /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("li", { children: msg }, i)) })
-    ] }),
+    runStatus?.errorMessage && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { role: "alert", className: "rounded-lg border border-slate-700 p-3 text-xs text-slate-200", children: runStatus.errorMessage }),
+    !running && runStatus?.hasWarnings && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { role: "alert", className: "text-xs text-slate-300", children: runStatus.warningMessages[0] || "Collection ended with a warning. Your saved leads are still available." }),
     /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "flex items-center justify-between mb-2", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "text-xs font-semibold uppercase tracking-wider text-slate-400", children: "Pipeline Stage Graph (12 Stages)" }),
-        onInspectDiagnostics && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
-          "button",
-          {
-            type: "button",
-            onClick: onInspectDiagnostics,
-            className: "text-[11px] text-sky-400 hover:text-sky-300 underline focus:outline-none",
-            children: "Inspect Diagnostics"
-          }
-        )
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "mb-2 flex items-center justify-between", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("h3", { className: "text-xs font-semibold text-slate-300", children: "Latest leads" }),
+        onViewResults && leadCount > 0 && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("button", { type: "button", onClick: onViewResults, className: "text-xs font-medium text-sky-300 underline", children: "View all & export" })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "grid grid-cols-2 sm:grid-cols-3 gap-2", children: runStatus.stages.map((stage) => /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(
-        "div",
-        {
-          className: `p-2 rounded border text-xs flex flex-col justify-between transition-colors ${stage.isActive ? "bg-sky-950/40 border-sky-500/60 text-sky-200" : stage.isCompleted ? "bg-slate-950/50 border-slate-800 text-slate-300" : stage.isBlocked ? "bg-sky-950/30 border-sky-500/40 text-sky-300" : stage.isSkipped ? "bg-slate-950/30 border-slate-800/80 text-slate-500" : stage.isFailed ? "bg-sky-950/30 border-sky-500/40 text-sky-300" : "bg-slate-950/20 border-slate-900 text-slate-600"}`,
-          children: [
-            /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "flex items-center justify-between mb-1", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "font-mono text-[10px] truncate max-w-[130px] font-medium", title: stage.label, children: stage.label }),
-              /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("span", { className: "text-[10px] font-bold", children: [
-                stage.isCompleted && "\u2713",
-                stage.isActive && "\u27F3",
-                stage.isBlocked && "\u2298",
-                stage.isSkipped && "\u2014",
-                stage.isFailed && "\u2715"
-              ] })
-            ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "text-[10px] uppercase tracking-wider font-semibold opacity-80", children: stage.stateText })
-          ]
-        },
-        stage.stageId
-      )) })
+      leads.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "rounded-lg border border-slate-800 p-5 text-center text-xs text-slate-400", children: running ? "Looking for the first lead\u2026" : "No leads collected yet." }) : /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("ol", { className: "max-h-80 divide-y divide-slate-800 overflow-y-auto rounded-lg border border-slate-800", "aria-label": "Collected leads", children: leads.slice(-50).map((lead, index) => /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("li", { children: /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("button", { type: "button", onClick: () => onInspectLead?.(lead.recordId), className: "flex w-full items-center gap-3 p-3 text-left hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-sky-400", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "text-xs text-slate-500", children: index + 1 }),
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("span", { className: "min-w-0 flex-1", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "block truncate text-xs font-medium text-slate-100", children: lead.displayName }),
+          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "mt-1 block truncate text-xs text-slate-400", children: lead.websiteUrl || "Website not seen" })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { "aria-hidden": "true", className: "text-sky-300", children: "\u2713" })
+      ] }) }, lead.recordId)) })
+    ] }),
+    onInspectDiagnostics && /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("details", { className: "border-t border-slate-800 pt-3 text-xs text-slate-400", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("summary", { className: "cursor-pointer", children: "Search details" }),
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "mt-3 flex flex-col gap-2", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("span", { children: [
+          "Ads checked: ",
+          runStatus?.candidatesProcessed || 0
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("span", { children: [
+          "Time: ",
+          Math.floor((runStatus?.elapsedMs || 0) / 1e3),
+          " seconds"
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("button", { type: "button", onClick: onInspectDiagnostics, className: "self-start underline", children: "Troubleshooting" })
+      ] })
     ] })
   ] });
 };
@@ -31344,8 +31260,13 @@ var ExtensionApp = () => {
   const [selectedSource, setSelectedSource] = (0, import_react13.useState)("META");
   const [pendingPlan, setPendingPlan] = (0, import_react13.useState)(null);
   const [isPlanReviewOpen, setIsPlanReviewOpen] = (0, import_react13.useState)(false);
+  const [collectionStarted, setCollectionStarted] = (0, import_react13.useState)(false);
+  const collectionProgressRef = (0, import_react13.useRef)(null);
   const [isSubmitting, setIsSubmitting] = (0, import_react13.useState)(false);
   const [activeRun, setActiveRun] = (0, import_react13.useState)(null);
+  (0, import_react13.useEffect)(() => {
+    if (collectionStarted) collectionProgressRef.current?.scrollIntoView({ block: "end" });
+  }, [collectionStarted, activeRun?.runId]);
   const [runStatusVM, setRunStatusVM] = (0, import_react13.useState)(null);
   const [elapsedSeconds, setElapsedSeconds] = (0, import_react13.useState)(0);
   const [rawLeads, setRawLeads] = (0, import_react13.useState)([]);
@@ -31636,30 +31557,37 @@ var ExtensionApp = () => {
       exclusions: config.exclusions
     };
     setPendingPlan(planVM);
-    setIsPlanReviewOpen(true);
+    handleConfirmStart(planVM);
   };
-  const handleConfirmStart = () => {
-    if (!pendingPlan || isSubmitting) return;
+  const handleConfirmStart = (plan = pendingPlan) => {
+    if (!plan || isSubmitting) return;
+    if (!plan.canExecuteLive) {
+      alert(plan.blockedReason || "Open the installed extension to start collecting.");
+      return;
+    }
     setIsPlanReviewOpen(false);
     setIsSubmitting(true);
-    setActiveTab("RUN_STATUS");
-    const userKeywords = pendingPlan.keywords && pendingPlan.keywords.length > 0 ? pendingPlan.keywords : ["Furniture"];
-    const userCountry = pendingPlan.countryCode || "BD";
-    const userLocation = pendingPlan.locationName || userCountry;
+    setActiveTab("RESEARCH");
+    setCollectionStarted(true);
+    setActiveRun(null);
+    setRawLeads([]);
+    const userKeywords = plan.keywords && plan.keywords.length > 0 ? plan.keywords : ["Furniture"];
+    const userCountry = plan.countryCode || "BD";
+    const userLocation = plan.locationName || userCountry;
     const payload = {
-      mode: pendingPlan.mode || "CUSTOM",
-      presetId: pendingPlan.presetId,
-      presetName: pendingPlan.presetName,
+      mode: plan.mode || "CUSTOM",
+      presetId: plan.presetId,
+      presetName: plan.presetName,
       researchMode: "AUTO_DISCOVERY",
       keywords: userKeywords,
       countryCode: userCountry,
       locationName: userLocation,
-      maxFinalUniqueRelevantLeads: pendingPlan.maxCandidatesLimit,
-      strictLocalMode: pendingPlan.strictLocal !== false,
-      requiredCtaTypes: pendingPlan.requiredCta ? [pendingPlan.requiredCta] : void 0,
-      requiredDestinationTypes: pendingPlan.requiredDestination ? [pendingPlan.requiredDestination] : void 0,
-      websiteRequirement: pendingPlan.websiteRequirement || void 0,
-      exclusions: pendingPlan.exclusions
+      maxFinalUniqueRelevantLeads: plan.maxCandidatesLimit,
+      strictLocalMode: plan.strictLocal !== false,
+      requiredCtaTypes: plan.requiredCta ? [plan.requiredCta] : void 0,
+      requiredDestinationTypes: plan.requiredDestination ? [plan.requiredDestination] : void 0,
+      websiteRequirement: plan.websiteRequirement || void 0,
+      exclusions: plan.exclusions
     };
     if (typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
       chrome.runtime.sendMessage({ type: "START_RESEARCH", payload }, (res) => {
@@ -31897,8 +31825,16 @@ var ExtensionApp = () => {
           selectedSource,
           onSelectSource: setSelectedSource,
           onOpenPlanReview: handleOpenPlanReview,
-          onNavigateToImport: () => setActiveTab("IMPORT"),
-          disabled: isSubmitting || isJobRunning(activeRun?.status)
+          disabled: isSubmitting || isJobRunning(activeRun?.status),
+          children: (collectionStarted || isJobRunning(activeRun?.status)) && /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("div", { ref: collectionProgressRef, className: "flex flex-col items-center gap-3 py-4", role: "status", "aria-live": "polite", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("div", { className: "relative flex h-28 w-28 items-center justify-center", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("span", { "aria-hidden": "true", className: `absolute inset-0 rounded-full border-4 border-slate-700 border-t-sky-400 ${isSubmitting || isJobRunning(activeRun?.status) ? "animate-spin motion-reduce:animate-none" : ""}` }),
+              /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("strong", { className: "text-3xl text-slate-100 tabular-nums", children: (activeRun?.counters?.finalUniqueRelevantLeads ?? activeRun?.counters?.finalUniqueLeads ?? resultsVM.length).toLocaleString() })
+            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("span", { className: "text-xs text-slate-400", children: isSubmitting || isJobRunning(activeRun?.status) ? "Collecting leads\u2026" : activeRun?.status === "FAILED" || activeRun?.status === "CHALLENGED" || activeRun?.status === "RATE_LIMITED" ? "Collection stopped \u2014 check the message below" : "Leads collected" }),
+            isJobRunning(activeRun?.status) ? /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("button", { type: "button", onClick: handleStopRun, className: "rounded-lg border border-slate-700 px-4 py-2 text-xs text-slate-200", children: "Stop" }) : /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("button", { type: "button", onClick: () => setActiveTab("RESULTS"), className: "text-xs text-sky-300 underline", children: "View leads & export" }),
+            !isJobRunning(activeRun?.status) && activeRun?.challengeReason && /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("p", { role: "alert", className: "text-xs text-slate-300", children: activeRun.challengeReason })
+          ] })
         }
       ) }),
       activeTab === "IMPORT" && /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("div", { role: "tabpanel", id: "tabpanel-IMPORT", "aria-labelledby": "tab-IMPORT", className: "flex flex-col gap-3", children: /* @__PURE__ */ (0, import_jsx_runtime18.jsx)(
@@ -31919,6 +31855,10 @@ var ExtensionApp = () => {
         RunStatusView,
         {
           runStatus: runStatusVM,
+          leads: resultsVM,
+          leadCount: activeRun?.counters?.finalUniqueRelevantLeads ?? activeRun?.counters?.finalUniqueLeads ?? resultsVM.length,
+          collectionState: activeRun?.status,
+          onInspectLead: handleInspectRecord,
           onStop: handleStopRun,
           onViewResults: () => setActiveTab("RESULTS"),
           onInspectDiagnostics: () => {

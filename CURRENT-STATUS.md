@@ -2,6 +2,8 @@
 
 ## Current extension
 
+- Simplified collection: Start runs directly on Search, with a spinning lead counter and Stop underneath. No review popup or separate progress page is required. See [UI checks](docs/current-review/simple-collection-ui.md).
+
 - User-requested Meta Ad Library collection now checks installed Chrome extension capabilities instead of the permanently false server gate. UI and background worker use the same check. Hosted previews cannot start collection.
 - Search uses country and All Ads URL parameters. Preset identity survives plan review. Empty scans terminate; pause remains paused. Startup failures are visible rather than silently leaving a running screen.
 - Existing login/challenge and rate-limit stops remain. No challenge bypass, paid API, external website crawling, or server collection was added.

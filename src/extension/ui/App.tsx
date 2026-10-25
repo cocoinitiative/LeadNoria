@@ -18,7 +18,7 @@
  * - Zero remote telemetry, zero external AI/scraping API dependencies
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { canStartExtensionCollection } from '../collectionAvailability.ts';
 import { previouslySeenBusinessKeys } from '../localBusinessHistory.ts';
 import { leadResultsToCsv, type LeadExportColumn } from '../clipboard/leadSheets.ts';
@@ -73,10 +73,15 @@ export const ExtensionApp: React.FC = () => {
   const [selectedSource, setSelectedSource] = useState<SourceType>('META');
   const [pendingPlan, setPendingPlan] = useState<PlanReviewViewModel | null>(null);
   const [isPlanReviewOpen, setIsPlanReviewOpen] = useState(false);
+  const [collectionStarted, setCollectionStarted] = useState(false);
+  const collectionProgressRef = useRef<HTMLDivElement>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Active Run State
   const [activeRun, setActiveRun] = useState<ExtensionResearchRun | null>(null);
+  useEffect(() => {
+    if (collectionStarted) collectionProgressRef.current?.scrollIntoView({ block: 'end' });
+  }, [collectionStarted, activeRun?.runId]);
   const [runStatusVM, setRunStatusVM] = useState<RunStatusViewModel | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
@@ -411,37 +416,44 @@ export const ExtensionApp: React.FC = () => {
     };
 
     setPendingPlan(planVM);
-    setIsPlanReviewOpen(true);
+    handleConfirmStart(planVM);
   };
 
   // Confirm and Start Research Execution
-  const handleConfirmStart = () => {
-    if (!pendingPlan || isSubmitting) return;
+  const handleConfirmStart = (plan: PlanReviewViewModel | null = pendingPlan) => {
+    if (!plan || isSubmitting) return;
+    if (!plan.canExecuteLive) {
+      alert(plan.blockedReason || 'Open the installed extension to start collecting.');
+      return;
+    }
     setIsPlanReviewOpen(false);
     setIsSubmitting(true);
-    setActiveTab('RUN_STATUS');
+    setActiveTab('RESEARCH');
+    setCollectionStarted(true);
+    setActiveRun(null);
+    setRawLeads([]);
 
     // Standard Meta Ad Library research start with configured parameters
-    const userKeywords = (pendingPlan.keywords && pendingPlan.keywords.length > 0)
-      ? pendingPlan.keywords
+    const userKeywords = (plan.keywords && plan.keywords.length > 0)
+      ? plan.keywords
       : ['Furniture'];
-    const userCountry = pendingPlan.countryCode || 'BD';
-    const userLocation = pendingPlan.locationName || userCountry;
+    const userCountry = plan.countryCode || 'BD';
+    const userLocation = plan.locationName || userCountry;
 
     const payload: StartResearchPayload = {
-      mode: pendingPlan.mode || 'CUSTOM',
-      presetId: pendingPlan.presetId,
-      presetName: pendingPlan.presetName,
+      mode: plan.mode || 'CUSTOM',
+      presetId: plan.presetId,
+      presetName: plan.presetName,
       researchMode: 'AUTO_DISCOVERY',
       keywords: userKeywords,
       countryCode: userCountry,
       locationName: userLocation,
-      maxFinalUniqueRelevantLeads: pendingPlan.maxCandidatesLimit,
-      strictLocalMode: pendingPlan.strictLocal !== false,
-      requiredCtaTypes: pendingPlan.requiredCta ? [pendingPlan.requiredCta] : undefined,
-      requiredDestinationTypes: pendingPlan.requiredDestination ? [pendingPlan.requiredDestination] : undefined,
-      websiteRequirement: (pendingPlan.websiteRequirement as any) || undefined,
-      exclusions: pendingPlan.exclusions
+      maxFinalUniqueRelevantLeads: plan.maxCandidatesLimit,
+      strictLocalMode: plan.strictLocal !== false,
+      requiredCtaTypes: plan.requiredCta ? [plan.requiredCta] : undefined,
+      requiredDestinationTypes: plan.requiredDestination ? [plan.requiredDestination] : undefined,
+      websiteRequirement: (plan.websiteRequirement as any) || undefined,
+      exclusions: plan.exclusions
     };
 
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
@@ -714,9 +726,20 @@ export const ExtensionApp: React.FC = () => {
               selectedSource={selectedSource}
               onSelectSource={setSelectedSource}
               onOpenPlanReview={handleOpenPlanReview}
-              onNavigateToImport={() => setActiveTab('IMPORT')}
               disabled={isSubmitting || isJobRunning(activeRun?.status)}
-            />
+            >
+              {(collectionStarted || isJobRunning(activeRun?.status)) && (
+                <div ref={collectionProgressRef} className="flex flex-col items-center gap-3 py-4" role="status" aria-live="polite">
+                  <div className="relative flex h-28 w-28 items-center justify-center">
+                    <span aria-hidden="true" className={`absolute inset-0 rounded-full border-4 border-slate-700 border-t-sky-400 ${isSubmitting || isJobRunning(activeRun?.status) ? 'animate-spin motion-reduce:animate-none' : ''}`} />
+                    <strong className="text-3xl text-slate-100 tabular-nums">{(activeRun?.counters?.finalUniqueRelevantLeads ?? activeRun?.counters?.finalUniqueLeads ?? resultsVM.length).toLocaleString()}</strong>
+                  </div>
+                  <span className="text-xs text-slate-400">{isSubmitting || isJobRunning(activeRun?.status) ? 'Collecting leads…' : activeRun?.status === 'FAILED' || activeRun?.status === 'CHALLENGED' || activeRun?.status === 'RATE_LIMITED' ? 'Collection stopped — check the message below' : 'Leads collected'}</span>
+                  {isJobRunning(activeRun?.status) ? <button type="button" onClick={handleStopRun} className="rounded-lg border border-slate-700 px-4 py-2 text-xs text-slate-200">Stop</button> : <button type="button" onClick={() => setActiveTab('RESULTS')} className="text-xs text-sky-300 underline">View leads & export</button>}
+                  {!isJobRunning(activeRun?.status) && activeRun?.challengeReason && <p role="alert" className="text-xs text-slate-300">{activeRun.challengeReason}</p>}
+                </div>
+              )}
+            </ResearchConfigView>
           </div>
         )}
 
@@ -742,6 +765,10 @@ export const ExtensionApp: React.FC = () => {
           <div role="tabpanel" id="tabpanel-RUN_STATUS" aria-labelledby="tab-RUN_STATUS">
             <RunStatusView
               runStatus={runStatusVM}
+              leads={resultsVM}
+              leadCount={activeRun?.counters?.finalUniqueRelevantLeads ?? activeRun?.counters?.finalUniqueLeads ?? resultsVM.length}
+              collectionState={activeRun?.status}
+              onInspectLead={handleInspectRecord}
               onStop={handleStopRun}
               onViewResults={() => setActiveTab('RESULTS')}
               onInspectDiagnostics={() => {

@@ -38,6 +38,7 @@ interface ResearchConfigViewProps {
   }) => void;
   onNavigateToImport?: () => void;
   disabled?: boolean;
+  children?: React.ReactNode;
 }
 
 export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
@@ -45,7 +46,8 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
   onSelectSource,
   onOpenPlanReview,
   onNavigateToImport,
-  disabled = false
+  disabled = false,
+  children
 }) => {
   const [modeType, setModeType] = useState<'PRESET' | 'CUSTOM'>('CUSTOM');
   const [presetId, setPresetId] = useState<string>(RESEARCH_PRESETS[0]?.preset_id || '');
@@ -306,8 +308,9 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
         onClick={handleReviewClick}
         className="w-full py-2.5 px-4 bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-sm shadow-sky-600/20 focus:outline-none focus:ring-2 focus:ring-sky-400 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        <span>📋</span> Review Research Plan →
+        Start collecting
       </button>
+      {children}
 
       {/* Manual Import Signals Shortcut */}
       {onNavigateToImport && (
