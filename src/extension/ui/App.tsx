@@ -19,6 +19,7 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { isLiveCollectionPermitted } from '../../config/collectionGate.ts';
 import {
   NavigationTab,
   ResultRowViewModel,
@@ -158,9 +159,6 @@ export const ExtensionApp: React.FC = () => {
         const run = (res.activeResearchRun || res.meta_scraper_active_run) as ExtensionResearchRun | undefined;
         if (run) {
           handleRunUpdate(run);
-          if (run.leads && run.leads.length > 0) {
-            setActiveTab('RESULTS');
-          }
         }
 
         // Checkpoint detection
@@ -178,8 +176,8 @@ export const ExtensionApp: React.FC = () => {
           });
         }
       });
-      loadHistoryState();
     }
+    loadHistoryState();
   };
 
   const loadHistoryState = () => {
@@ -212,6 +210,12 @@ export const ExtensionApp: React.FC = () => {
           console.warn('[App] Error loading research history from storage:', err);
         }
       });
+    } else {
+      getManualImportRuns().then(runs => {
+        const sorted = [...runs].sort((a, b) => Date.parse(b.lastUpdatedAt || b.startedAt) - Date.parse(a.lastUpdatedAt || a.startedAt));
+        setHistoryRuns(sorted);
+        if (sorted[0]) handleRunUpdate(sorted[0]);
+      }).catch(err => console.warn('[App] Could not read saved lead lists:', err));
     }
   };
 
@@ -385,7 +389,7 @@ export const ExtensionApp: React.FC = () => {
       timeoutSeconds: 30,
       checkpointEnabled: true,
       safetyWarnings: [],
-      canExecuteLive: true,
+      canExecuteLive: isLiveCollectionPermitted(),
       keywords: config.keywords,
       countryCode: config.countryCode,
       locationName: config.locationName,
@@ -599,8 +603,8 @@ export const ExtensionApp: React.FC = () => {
     if (isExporting) return;
     setIsExporting(true);
 
-    const eligibleLeads = rawLeads.filter((_, idx) => {
-      const row = resultsVM[idx];
+    const eligibleLeads = rawLeads.filter((item, idx) => {
+      const row = resultsVM.find(result => result.canonicalRecord === item) || resultsVM[idx];
       if (!row) return false;
       const isSelected = recordIds ? recordIds.includes(row.recordId) : (selectedRecordIds.size === 0 ||
         selectedRecordIds.has(row.entityId) ||
@@ -743,6 +747,8 @@ export const ExtensionApp: React.FC = () => {
         {activeTab === 'RESULTS' && (
           <div role="tabpanel" id="tabpanel-RESULTS" aria-labelledby="tab-RESULTS">
             <ResultsTableView
+              key={activeRun?.runId || 'current'}
+              initialWebsitePreference={activeRun?.websiteRequirement}
               results={resultsVM}
               selectedRecordIds={selectedRecordIds}
               onToggleSelect={id => {

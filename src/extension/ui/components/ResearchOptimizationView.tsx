@@ -57,7 +57,7 @@ export const ResearchOptimizationView: React.FC<ResearchOptimizationViewProps> =
   if (!snapshot || snapshot.searchUnitPerformances.length === 0) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-6 text-center text-slate-400 min-h-[300px]" role="region" aria-label="Research Optimization and Saturation Intelligence">
-        <div className="w-12 h-12 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-amber-400 mb-3 text-xl">
+        <div className="w-12 h-12 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-sky-400 mb-3 text-xl">
           🧭
         </div>
         <h2 className="text-base font-semibold text-slate-200">No Research Optimization Data</h2>
@@ -86,11 +86,11 @@ export const ResearchOptimizationView: React.FC<ResearchOptimizationViewProps> =
   const getDuplicateBadge = (level: string) => {
     switch (level) {
       case 'CRITICAL':
-        return <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-950/80 text-rose-300 border border-rose-700">CRITICAL DUPES</span>;
+        return <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-950/80 text-sky-300 border border-sky-700">CRITICAL DUPES</span>;
       case 'HIGH':
-        return <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-orange-950/80 text-orange-400 border border-orange-800">HIGH DUPES</span>;
+        return <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-950/80 text-sky-400 border border-sky-800">HIGH DUPES</span>;
       case 'MODERATE':
-        return <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-950/80 text-amber-400 border border-amber-800">MODERATE DUPES</span>;
+        return <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-950/80 text-sky-400 border border-sky-800">MODERATE DUPES</span>;
       default:
         return <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-400">LOW DUPES</span>;
     }
@@ -124,11 +124,11 @@ export const ResearchOptimizationView: React.FC<ResearchOptimizationViewProps> =
         </div>
         <div className="p-2 rounded bg-slate-900 border border-slate-800">
           <span className="text-[10px] uppercase text-slate-400">Unique Entities</span>
-          <p className="text-base font-bold text-emerald-400 mt-0.5">{overallCoverage?.uniqueCanonicalEntities ?? snapshot.totalCanonicalLeadsObserved} entities</p>
+          <p className="text-base font-bold text-sky-400 mt-0.5">{overallCoverage?.uniqueCanonicalEntities ?? snapshot.totalCanonicalLeadsObserved} entities</p>
         </div>
         <div className="p-2 rounded bg-slate-900 border border-slate-800">
           <span className="text-[10px] uppercase text-slate-400">Duplicate Candidate Ratio</span>
-          <p className="text-base font-bold text-amber-400 mt-0.5">
+          <p className="text-base font-bold text-sky-400 mt-0.5">
             {overallCoverage?.totalObservedRecords
               ? Math.round(((overallCoverage.duplicateCandidateCount || 0) / overallCoverage.totalObservedRecords) * 100)
               : 0}%
@@ -144,7 +144,7 @@ export const ResearchOptimizationView: React.FC<ResearchOptimizationViewProps> =
           onClick={() => setActiveTab('RECOMMENDATIONS')}
           className={`py-2 px-3 border-b-2 text-[11px] font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${
             activeTab === 'RECOMMENDATIONS'
-              ? 'border-amber-400 text-amber-300 font-semibold bg-amber-950/20'
+              ? 'border-sky-400 text-sky-300 font-semibold bg-sky-950/20'
               : 'border-transparent text-slate-400 hover:text-slate-200'
           }`}
         >
@@ -157,7 +157,7 @@ export const ResearchOptimizationView: React.FC<ResearchOptimizationViewProps> =
           onClick={() => setActiveTab('PERFORMANCE')}
           className={`py-2 px-3 border-b-2 text-[11px] font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${
             activeTab === 'PERFORMANCE'
-              ? 'border-amber-400 text-amber-300 font-semibold bg-amber-950/20'
+              ? 'border-sky-400 text-sky-300 font-semibold bg-sky-950/20'
               : 'border-transparent text-slate-400 hover:text-slate-200'
           }`}
         >
@@ -170,7 +170,7 @@ export const ResearchOptimizationView: React.FC<ResearchOptimizationViewProps> =
           onClick={() => setActiveTab('SATURATION')}
           className={`py-2 px-3 border-b-2 text-[11px] font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${
             activeTab === 'SATURATION'
-              ? 'border-amber-400 text-amber-300 font-semibold bg-amber-950/20'
+              ? 'border-sky-400 text-sky-300 font-semibold bg-sky-950/20'
               : 'border-transparent text-slate-400 hover:text-slate-200'
           }`}
         >
@@ -183,7 +183,7 @@ export const ResearchOptimizationView: React.FC<ResearchOptimizationViewProps> =
           onClick={() => setActiveTab('YIELD_PRESSURE')}
           className={`py-2 px-3 border-b-2 text-[11px] font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${
             activeTab === 'YIELD_PRESSURE'
-              ? 'border-amber-400 text-amber-300 font-semibold bg-amber-950/20'
+              ? 'border-sky-400 text-sky-300 font-semibold bg-sky-950/20'
               : 'border-transparent text-slate-400 hover:text-slate-200'
           }`}
         >
@@ -196,7 +196,7 @@ export const ResearchOptimizationView: React.FC<ResearchOptimizationViewProps> =
           onClick={() => setActiveTab('COMPARISON')}
           className={`py-2 px-3 border-b-2 text-[11px] font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${
             activeTab === 'COMPARISON'
-              ? 'border-amber-400 text-amber-300 font-semibold bg-amber-950/20'
+              ? 'border-sky-400 text-sky-300 font-semibold bg-sky-950/20'
               : 'border-transparent text-slate-400 hover:text-slate-200'
           }`}
         >
@@ -216,15 +216,15 @@ export const ResearchOptimizationView: React.FC<ResearchOptimizationViewProps> =
             ) : (
               <div className="space-y-2">
                 {warnings.map(w => (
-                  <div key={w.id} role="alert" className="p-2.5 rounded border border-rose-800/60 bg-rose-950/30 flex items-start gap-2.5">
+                  <div key={w.id} role="alert" className="p-2.5 rounded border border-sky-800/60 bg-sky-950/30 flex items-start gap-2.5">
                     <span className="text-base">⚠️</span>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between">
-                        <strong className="text-rose-200 text-xs font-semibold">{w.title}</strong>
-                        <span className="text-[10px] px-1.5 py-0.2 bg-rose-900/60 text-rose-300 rounded uppercase font-semibold">{w.severity}</span>
+                        <strong className="text-sky-200 text-xs font-semibold">{w.title}</strong>
+                        <span className="text-[10px] px-1.5 py-0.2 bg-sky-900/60 text-sky-300 rounded uppercase font-semibold">{w.severity}</span>
                       </div>
                       <p className="text-[11px] text-slate-300 mt-0.5">{w.message}</p>
-                      <p className="text-[10px] text-rose-300/80 mt-1 font-mono">Action: {w.remedy}</p>
+                      <p className="text-[10px] text-sky-300/80 mt-1 font-mono">Action: {w.remedy}</p>
                     </div>
                   </div>
                 ))}
@@ -242,7 +242,7 @@ export const ResearchOptimizationView: React.FC<ResearchOptimizationViewProps> =
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-xs font-bold text-amber-300">{rec.headline}</span>
+                          <span className="text-xs font-bold text-sky-300">{rec.headline}</span>
                           <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-slate-800 text-slate-400">
                             Confidence: {rec.sampleSufficiency}
                           </span>
@@ -275,7 +275,7 @@ export const ResearchOptimizationView: React.FC<ResearchOptimizationViewProps> =
                               category: rec.actionableNextQuery?.category,
                               query: rec.actionableNextQuery?.queryVariant
                             })}
-                            className="px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[10px] font-semibold transition-colors"
+                            className="px-2 py-1 rounded bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/40 text-[10px] font-semibold transition-colors"
                             aria-label="Prefill Config"
                           >
                             Prefill Config
@@ -331,7 +331,7 @@ export const ResearchOptimizationView: React.FC<ResearchOptimizationViewProps> =
                       <td className="p-2 text-slate-200 font-medium">{p.areaName}</td>
                       <td className="p-2 text-slate-300">{p.attempts}</td>
                       <td className="p-2 text-slate-300">{p.uniqueEntitiesCount || p.uniqueCanonicalEntities} / {p.rawCandidatesCount || p.rawCandidateCount}</td>
-                      <td className="p-2 text-amber-300 font-mono">
+                      <td className="p-2 text-sky-300 font-mono">
                         {typeof p.marginalYield === 'number' ? p.marginalYield : p.marginalYieldResult?.marginalEntityYield}
                       </td>
                       <td className="p-2">{getDuplicateBadge(p.duplicatePressure.level)}</td>
@@ -357,7 +357,7 @@ export const ResearchOptimizationView: React.FC<ResearchOptimizationViewProps> =
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
                   <div className="p-2 rounded bg-slate-900/60 border border-slate-800">
                     <span className="text-slate-400 text-[10px]">Marginal Entity Yield</span>
-                    <p className="text-sm font-bold text-amber-400 mt-0.5">{selectedUnit.marginalYieldResult.marginalEntityYield} / attempt</p>
+                    <p className="text-sm font-bold text-sky-400 mt-0.5">{selectedUnit.marginalYieldResult.marginalEntityYield} / attempt</p>
                   </div>
                   <div className="p-2 rounded bg-slate-900/60 border border-slate-800">
                     <span className="text-slate-400 text-[10px]">Website Coverage</span>
@@ -365,11 +365,11 @@ export const ResearchOptimizationView: React.FC<ResearchOptimizationViewProps> =
                   </div>
                   <div className="p-2 rounded bg-slate-900/60 border border-slate-800">
                     <span className="text-slate-400 text-[10px]">Direct Contactability</span>
-                    <p className="text-sm font-bold text-emerald-400 mt-0.5">{selectedUnit.contactCoverage}%</p>
+                    <p className="text-sm font-bold text-sky-400 mt-0.5">{selectedUnit.contactCoverage}%</p>
                   </div>
                   <div className="p-2 rounded bg-slate-900/60 border border-slate-800">
                     <span className="text-slate-400 text-[10px]">Contradiction Conflict Rate</span>
-                    <p className="text-sm font-bold text-rose-400 mt-0.5">{selectedUnit.conflictRate}%</p>
+                    <p className="text-sm font-bold text-sky-400 mt-0.5">{selectedUnit.conflictRate}%</p>
                   </div>
                 </div>
 
@@ -407,7 +407,7 @@ export const ResearchOptimizationView: React.FC<ResearchOptimizationViewProps> =
 
                   <div className="flex items-center justify-between text-[11px] text-slate-400">
                     <span>Average Marginal Yield:</span>
-                    <strong className="text-amber-400">{geo.marginalYield} / run</strong>
+                    <strong className="text-sky-400">{geo.marginalYield} / run</strong>
                   </div>
                 </div>
               ))}
@@ -436,7 +436,7 @@ export const ResearchOptimizationView: React.FC<ResearchOptimizationViewProps> =
 
                   <h3 className="text-xs font-semibold text-slate-300">Duplicate Candidate Pressure</h3>
                   {p.duplicatePressure.level === 'HIGH' && (
-                    <div className="text-rose-400 text-xs font-bold">HIGH DUPLICATE PRESSURE</div>
+                    <div className="text-sky-400 text-xs font-bold">HIGH DUPLICATE PRESSURE</div>
                   )}
 
                   <p className="text-[11px] text-slate-300">{p.duplicatePressure.explanation}</p>
@@ -449,7 +449,7 @@ export const ResearchOptimizationView: React.FC<ResearchOptimizationViewProps> =
                       <span>New Websites</span>: <strong className="text-slate-200">{p.marginalYieldResult.newWebsitesDiscovered ?? 0}</strong>
                     </div>
                     <div>
-                      <span>Marginal Yield:</span> <strong className="text-amber-400">{p.marginalYieldResult.marginalEntityYield}</strong>
+                      <span>Marginal Yield:</span> <strong className="text-sky-400">{p.marginalYieldResult.marginalEntityYield}</strong>
                     </div>
                   </div>
                 </div>

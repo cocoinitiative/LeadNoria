@@ -179,11 +179,11 @@ export const PersistentLeadWorkspaceView: React.FC<PersistentLeadWorkspaceViewPr
       {/* Header Bar */}
       <header className="flex items-center justify-between px-4 py-3 bg-slate-800 border-b border-slate-700">
         <div className="flex items-center space-x-3">
-          <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/50" />
+          <div className="w-3 h-3 rounded-full bg-sky-500 shadow-sm shadow-sky-500/50" />
           <h1 className="text-base font-semibold tracking-wide text-white">
             Persistent Lead Workspace &amp; Saved Research
           </h1>
-          <span className="text-xs px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 font-mono">
+          <span className="text-xs px-2 py-0.5 rounded bg-sky-950/80 text-sky-300 border border-sky-700/60 font-mono">
             PERSISTENCE VERIFIED
           </span>
         </div>
@@ -230,19 +230,19 @@ export const PersistentLeadWorkspaceView: React.FC<PersistentLeadWorkspaceViewPr
         </div>
         <div className="flex flex-col">
           <span className="text-slate-400">Active</span>
-          <span className="text-base font-bold text-emerald-400">{analytics.activeLeads}</span>
+          <span className="text-base font-bold text-sky-400">{analytics.activeLeads}</span>
         </div>
         <div className="flex flex-col">
           <span className="text-slate-400">Qualified</span>
-          <span className="text-base font-bold text-cyan-400">{analytics.qualifiedLeads}</span>
+          <span className="text-base font-bold text-sky-400">{analytics.qualifiedLeads}</span>
         </div>
         <div className="flex flex-col">
           <span className="text-slate-400">Follow-Ups Pending</span>
-          <span className="text-base font-bold text-amber-400">{analytics.followUpsPending}</span>
+          <span className="text-base font-bold text-sky-400">{analytics.followUpsPending}</span>
         </div>
         <div className="flex flex-col">
           <span className="text-slate-400">Tags Count</span>
-          <span className="text-base font-bold text-indigo-400">{analytics.tagsCount}</span>
+          <span className="text-base font-bold text-sky-400">{analytics.tagsCount}</span>
         </div>
         <div className="flex flex-col">
           <span className="text-slate-400">Archived</span>
@@ -252,9 +252,9 @@ export const PersistentLeadWorkspaceView: React.FC<PersistentLeadWorkspaceViewPr
 
       {/* Notification toast */}
       {notification && (
-        <div role="status" aria-live="polite" className="px-4 py-1.5 bg-emerald-900/90 text-emerald-200 text-xs flex justify-between items-center">
+        <div role="status" aria-live="polite" className="px-4 py-1.5 bg-sky-900/90 text-sky-200 text-xs flex justify-between items-center">
           <span>{notification}</span>
-          <button onClick={() => setNotification(null)} className="text-emerald-400 hover:text-white text-xs">✕</button>
+          <button onClick={() => setNotification(null)} className="text-sky-400 hover:text-white text-xs">✕</button>
         </div>
       )}
 
@@ -269,7 +269,7 @@ export const PersistentLeadWorkspaceView: React.FC<PersistentLeadWorkspaceViewPr
             onChange={e => { setSearchQuery(e.target.value); setPage(1); }}
             placeholder="Search business, website, email, phone, tags..."
             aria-label="Search leads"
-            className="w-full px-3 py-1.5 text-xs bg-slate-900 border border-slate-700 rounded text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            className="w-full px-3 py-1.5 text-xs bg-slate-900 border border-slate-700 rounded text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
           />
         </div>
 
@@ -332,7 +332,7 @@ export const PersistentLeadWorkspaceView: React.FC<PersistentLeadWorkspaceViewPr
             type="checkbox"
             checked={showArchived}
             onChange={e => { setShowArchived(e.target.checked); setPage(1); }}
-            className="rounded border-slate-700 bg-slate-900 text-emerald-600 focus:ring-emerald-500"
+            className="rounded border-slate-700 bg-slate-900 text-sky-600 focus:ring-sky-500"
           />
           <span>Show Archived</span>
         </label>
@@ -392,7 +392,7 @@ export const PersistentLeadWorkspaceView: React.FC<PersistentLeadWorkspaceViewPr
                     <tr
                       key={lead.leadId}
                       onClick={() => setSelectedLeadId(lead.leadId)}
-                      className={`hover:bg-slate-800/60 cursor-pointer transition ${isSelected ? 'bg-slate-800 border-l-2 border-emerald-500' : ''}`}
+                      className={`hover:bg-slate-800/60 cursor-pointer transition ${isSelected ? 'bg-slate-800 border-l-2 border-sky-500' : ''}`}
                     >
                       {/* Business Info */}
                       <td className="py-2.5 px-2">
@@ -403,11 +403,11 @@ export const PersistentLeadWorkspaceView: React.FC<PersistentLeadWorkspaceViewPr
                       {/* Lifecycle Pill */}
                       <td className="py-2.5 px-2">
                         <span className={`px-2 py-0.5 rounded text-[11px] font-mono font-medium ${
-                          lead.lifecycle.state === 'QUALIFIED' ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' :
-                          lead.lifecycle.state === 'CONTACTED' ? 'bg-cyan-950 text-cyan-300 border border-cyan-800' :
-                          lead.lifecycle.state === 'ACTIVE' ? 'bg-blue-950 text-blue-300 border border-blue-800' :
-                          lead.lifecycle.state === 'ON_HOLD' ? 'bg-amber-950 text-amber-300 border border-amber-800' :
-                          lead.lifecycle.state === 'DISQUALIFIED' ? 'bg-rose-950 text-rose-300 border border-rose-800' :
+                          lead.lifecycle.state === 'QUALIFIED' ? 'bg-sky-950 text-sky-300 border border-sky-800' :
+                          lead.lifecycle.state === 'CONTACTED' ? 'bg-sky-950 text-sky-300 border border-sky-800' :
+                          lead.lifecycle.state === 'ACTIVE' ? 'bg-sky-950 text-sky-300 border border-sky-800' :
+                          lead.lifecycle.state === 'ON_HOLD' ? 'bg-sky-950 text-sky-300 border border-sky-800' :
+                          lead.lifecycle.state === 'DISQUALIFIED' ? 'bg-sky-950 text-sky-300 border border-sky-800' :
                           lead.lifecycle.state === 'ARCHIVED' ? 'bg-slate-800 text-slate-400 border border-slate-700' :
                           'bg-slate-800 text-slate-300 border border-slate-700'
                         }`}>
@@ -418,8 +418,8 @@ export const PersistentLeadWorkspaceView: React.FC<PersistentLeadWorkspaceViewPr
                       {/* Priority */}
                       <td className="py-2.5 px-2">
                         <span className={`text-[11px] font-medium ${
-                          lead.userMetadata.priority === 'HIGH' ? 'text-rose-400' :
-                          lead.userMetadata.priority === 'MEDIUM' ? 'text-amber-400' : 'text-slate-400'
+                          lead.userMetadata.priority === 'HIGH' ? 'text-sky-400' :
+                          lead.userMetadata.priority === 'MEDIUM' ? 'text-sky-400' : 'text-slate-400'
                         }`}>
                           {lead.userMetadata.priority}
                         </span>
@@ -455,7 +455,7 @@ export const PersistentLeadWorkspaceView: React.FC<PersistentLeadWorkspaceViewPr
                         {isArchived ? (
                           <button
                             onClick={e => { e.stopPropagation(); onRestoreLead?.(lead.leadId); }}
-                            className="px-2 py-0.5 text-[11px] bg-slate-800 hover:bg-slate-700 text-emerald-400 rounded border border-slate-700"
+                            className="px-2 py-0.5 text-[11px] bg-slate-800 hover:bg-slate-700 text-sky-400 rounded border border-slate-700"
                           >
                             Restore
                           </button>
@@ -469,13 +469,13 @@ export const PersistentLeadWorkspaceView: React.FC<PersistentLeadWorkspaceViewPr
                         )}
                         <button
                           onClick={e => { e.stopPropagation(); setHistoryDrawerLeadId(lead.leadId); }}
-                          className="px-2 py-0.5 text-[11px] bg-slate-800 hover:bg-slate-700 text-indigo-300 rounded border border-slate-700"
+                          className="px-2 py-0.5 text-[11px] bg-slate-800 hover:bg-slate-700 text-sky-300 rounded border border-slate-700"
                         >
                           History
                         </button>
                         <button
                           onClick={e => { e.stopPropagation(); setConfirmDeleteLeadId(lead.leadId); }}
-                          className="px-1.5 py-0.5 text-[11px] bg-slate-800 hover:bg-rose-900/60 text-rose-400 rounded border border-slate-700"
+                          className="px-1.5 py-0.5 text-[11px] bg-slate-800 hover:bg-sky-900/60 text-sky-400 rounded border border-slate-700"
                         >
                           🗑
                         </button>
@@ -518,7 +518,7 @@ export const PersistentLeadWorkspaceView: React.FC<PersistentLeadWorkspaceViewPr
             <div>
               <div className="flex justify-between items-start">
                 <h2 className="text-sm font-semibold text-white">{selectedLead.businessIdentity.businessName}</h2>
-                <span className="text-[10px] font-mono px-1.5 py-0.5 bg-emerald-950 text-emerald-300 rounded border border-emerald-800">
+                <span className="text-[10px] font-mono px-1.5 py-0.5 bg-sky-950 text-sky-300 rounded border border-sky-800">
                   {selectedLead.sourceClass}
                 </span>
               </div>
@@ -526,7 +526,7 @@ export const PersistentLeadWorkspaceView: React.FC<PersistentLeadWorkspaceViewPr
                 href={selectedLead.businessIdentity.canonicalUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="text-xs text-indigo-400 hover:underline font-mono"
+                className="text-xs text-sky-400 hover:underline font-mono"
               >
                 {selectedLead.businessIdentity.domain}
               </a>
@@ -542,7 +542,7 @@ export const PersistentLeadWorkspaceView: React.FC<PersistentLeadWorkspaceViewPr
                     onClick={() => onTransitionLifecycle?.(selectedLead.leadId, st)}
                     className={`px-2 py-1 text-[11px] rounded font-mono transition border ${
                       selectedLead.lifecycle.state === st
-                        ? 'bg-emerald-600 text-white border-emerald-500 font-semibold'
+                        ? 'bg-sky-600 text-white border-sky-500 font-semibold'
                         : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
                     }`}
                   >
@@ -561,7 +561,7 @@ export const PersistentLeadWorkspaceView: React.FC<PersistentLeadWorkspaceViewPr
                     setIsEditingNotes(!isEditingNotes);
                     setEditNotesText(selectedLead.userMetadata.notes || '');
                   }}
-                  className="text-xs text-emerald-400 hover:underline"
+                  className="text-xs text-sky-400 hover:underline"
                 >
                   {isEditingNotes ? 'Cancel' : 'Edit'}
                 </button>
@@ -586,7 +586,7 @@ export const PersistentLeadWorkspaceView: React.FC<PersistentLeadWorkspaceViewPr
                       );
                       setIsEditingNotes(false);
                     }}
-                    className="px-2.5 py-1 text-xs bg-emerald-600 hover:bg-emerald-500 text-white rounded"
+                    className="px-2.5 py-1 text-xs bg-sky-600 hover:bg-sky-500 text-white rounded"
                   >
                     Save Notes
                   </button>
@@ -607,7 +607,7 @@ export const PersistentLeadWorkspaceView: React.FC<PersistentLeadWorkspaceViewPr
                     <span>{tag}</span>
                     <button
                       onClick={() => onRemoveTag?.(selectedLead.leadId, tag)}
-                      className="text-slate-400 hover:text-rose-400 ml-1"
+                      className="text-slate-400 hover:text-sky-400 ml-1"
                     >
                       ×
                     </button>
@@ -629,7 +629,7 @@ export const PersistentLeadWorkspaceView: React.FC<PersistentLeadWorkspaceViewPr
                       setNewTagInput('');
                     }
                   }}
-                  className="px-2.5 py-1 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded"
+                  className="px-2.5 py-1 text-xs bg-sky-600 hover:bg-sky-500 text-white rounded"
                 >
                   Add
                 </button>
@@ -659,7 +659,7 @@ export const PersistentLeadWorkspaceView: React.FC<PersistentLeadWorkspaceViewPr
       {confirmDeleteLeadId && (
         <div role="dialog" aria-modal="true" className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-slate-800 border border-slate-700 rounded-lg p-5 max-w-sm w-full space-y-4">
-            <h3 className="text-sm font-semibold text-rose-400">Confirm Lead Deletion</h3>
+            <h3 className="text-sm font-semibold text-sky-400">Confirm Lead Deletion</h3>
             <p className="text-xs text-slate-300">
               Are you sure you want to delete lead <code className="text-white">{confirmDeleteLeadId}</code>? This action will permanently remove the lead, its metadata, and history.
             </p>
@@ -675,7 +675,7 @@ export const PersistentLeadWorkspaceView: React.FC<PersistentLeadWorkspaceViewPr
                   onDeleteLead?.(confirmDeleteLeadId);
                   setConfirmDeleteLeadId(null);
                 }}
-                className="px-3 py-1.5 text-xs bg-rose-600 hover:bg-rose-500 text-white rounded font-medium"
+                className="px-3 py-1.5 text-xs bg-sky-600 hover:bg-sky-500 text-white rounded font-medium"
               >
                 Delete Permanently
               </button>
@@ -703,8 +703,8 @@ export const PersistentLeadWorkspaceView: React.FC<PersistentLeadWorkspaceViewPr
                       <span>{evt.eventType}</span>
                       <span>{new Date(evt.timestamp).toLocaleTimeString()}</span>
                     </div>
-                    {evt.oldSafeValue && <div className="text-rose-400 text-[11px]">Old: {evt.oldSafeValue}</div>}
-                    {evt.newSafeValue && <div className="text-emerald-400 text-[11px]">New: {evt.newSafeValue}</div>}
+                    {evt.oldSafeValue && <div className="text-sky-400 text-[11px]">Old: {evt.oldSafeValue}</div>}
+                    {evt.newSafeValue && <div className="text-sky-400 text-[11px]">New: {evt.newSafeValue}</div>}
                   </div>
                 ))
               )}

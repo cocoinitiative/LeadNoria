@@ -175,9 +175,9 @@ export const ResultDetailDrawer: React.FC<ResultDetailDrawerProps> = ({
                     key={idx}
                     className={`px-1.5 py-0.5 text-[10px] font-semibold rounded border ${
                       badge.isRestricted
-                        ? 'text-purple-300 bg-purple-950/60 border-purple-500/40'
+                        ? 'text-sky-300 bg-sky-950/60 border-sky-500/40'
                         : (badge.sourceType === 'WEBSITE'
-                            ? 'text-emerald-300 bg-emerald-950/60 border-emerald-500/40'
+                            ? 'text-sky-300 bg-sky-950/60 border-sky-500/40'
                             : 'text-sky-300 bg-sky-950/60 border-sky-500/40')
                     }`}
                   >
@@ -191,7 +191,7 @@ export const ResultDetailDrawer: React.FC<ResultDetailDrawerProps> = ({
               )}
 
               {lead.isRestricted && (
-                <span className="px-1.5 py-0.5 text-[10px] font-semibold text-purple-300 bg-purple-950/60 border border-purple-500/40 rounded">
+                <span className="px-1.5 py-0.5 text-[10px] font-semibold text-sky-300 bg-sky-950/60 border border-sky-500/40 rounded">
                   ⊘ RESTRICTED SOURCE
                 </span>
               )}
@@ -244,7 +244,7 @@ export const ResultDetailDrawer: React.FC<ResultDetailDrawerProps> = ({
           </div>
           <div>
             <span className="text-[10px] text-slate-500 block">Contradictions</span>
-            <strong className={`text-xs ${quality.contradictionCount > 0 ? 'text-amber-400' : 'text-slate-400'}`}>
+            <strong className={`text-xs ${quality.contradictionCount > 0 ? 'text-sky-400' : 'text-slate-400'}`}>
               {quality.contradictionCount}
             </strong>
           </div>
@@ -409,7 +409,7 @@ export const ResultDetailDrawer: React.FC<ResultDetailDrawerProps> = ({
                     {safeWebsiteUrl} ↗
                   </a>
                   {lead.dataSignals?.websiteVerified && (
-                    <span className="px-1.5 py-0.2 text-[9px] bg-emerald-950/60 text-emerald-400 border border-emerald-500/40 rounded font-semibold ml-auto">
+                    <span className="px-1.5 py-0.2 text-[9px] bg-sky-950/60 text-sky-400 border border-sky-500/40 rounded font-semibold ml-auto">
                       ✓ VERIFIED
                     </span>
                   )}
@@ -448,12 +448,12 @@ export const ResultDetailDrawer: React.FC<ResultDetailDrawerProps> = ({
                   </span>
                 )}
                 {digital.booking && (
-                  <span className="px-1.5 py-0.5 bg-purple-950/50 text-purple-300 rounded border border-purple-500/30 text-[10px]">
+                  <span className="px-1.5 py-0.5 bg-sky-950/50 text-sky-300 rounded border border-sky-500/30 text-[10px]">
                     📅 Booking Available
                   </span>
                 )}
                 {digital.chat && (
-                  <span className="px-1.5 py-0.5 bg-emerald-950/50 text-emerald-300 rounded border border-emerald-500/30 text-[10px]">
+                  <span className="px-1.5 py-0.5 bg-sky-950/50 text-sky-300 rounded border border-sky-500/30 text-[10px]">
                     💬 Live Chat
                   </span>
                 )}
@@ -512,7 +512,7 @@ export const ResultDetailDrawer: React.FC<ResultDetailDrawerProps> = ({
                         <div className="mt-1.5 p-1.5 bg-slate-950/80 rounded border border-slate-800 text-[10px] text-slate-400 flex flex-col gap-0.5">
                           <div>Source Attribution: <strong className="text-slate-300">{p.source || 'Public Web Observation'}</strong></div>
                           {p.observedAt && <div>Observed: {p.observedAt}</div>}
-                          {p.hasConflict && <div className="text-amber-400">⚠️ Multiple phone numbers observed across sources</div>}
+                          {p.hasConflict && <div className="text-sky-400">⚠️ Multiple phone numbers observed across sources</div>}
                         </div>
                       )}
                     </li>
@@ -547,7 +547,7 @@ export const ResultDetailDrawer: React.FC<ResultDetailDrawerProps> = ({
                         <div className="mt-1.5 p-1.5 bg-slate-950/80 rounded border border-slate-800 text-[10px] text-slate-400 flex flex-col gap-0.5">
                           <div>Source Attribution: <strong className="text-slate-300">{e.source || 'Public Web Observation'}</strong></div>
                           {e.observedAt && <div>Observed: {e.observedAt}</div>}
-                          {e.hasConflict && <div className="text-amber-400">⚠️ Conflicting email observed</div>}
+                          {e.hasConflict && <div className="text-sky-400">⚠️ Conflicting email observed</div>}
                         </div>
                       )}
                     </li>
@@ -639,15 +639,15 @@ export const ResultDetailDrawer: React.FC<ResultDetailDrawerProps> = ({
 
             {/* Failed Qualification Gates (Actionable Diagnostic Breakdown) */}
             {lead.qualificationFailedGates && lead.qualificationFailedGates.length > 0 && (
-              <div className="p-2 bg-rose-950/40 border border-rose-500/40 rounded text-[11px] text-rose-200 flex flex-col gap-1">
-                <span className="text-[10px] font-semibold uppercase text-rose-300 flex items-center gap-1">
+              <div className="p-2 bg-sky-950/40 border border-sky-500/40 rounded text-[11px] text-sky-200 flex flex-col gap-1">
+                <span className="text-[10px] font-semibold uppercase text-sky-300 flex items-center gap-1">
                   <span>✕</span> Failed Qualification Gates ({lead.qualificationFailedGates.length}):
                 </span>
-                <ul className="list-disc list-inside space-y-0.5 text-[10px] text-rose-200">
+                <ul className="list-disc list-inside space-y-0.5 text-[10px] text-sky-200">
                   {lead.qualificationFailedGates.map((gate, gIdx) => (
                     <li key={gIdx}>
                       <strong>{toFriendlyStatus(gate)}</strong>
-                      <span className="font-mono text-[9px] text-rose-400 ml-1">[{gate}]</span>
+                      <span className="font-mono text-[9px] text-sky-400 ml-1">[{gate}]</span>
                     </li>
                   ))}
                 </ul>
@@ -657,13 +657,13 @@ export const ResultDetailDrawer: React.FC<ResultDetailDrawerProps> = ({
             {/* Why Reasons (Phase 23 Graph) */}
             {qualification.whyReasons && qualification.whyReasons.length > 0 && (
               <div>
-                <span className="text-[10px] font-semibold uppercase text-emerald-400 block mb-1">
+                <span className="text-[10px] font-semibold uppercase text-sky-400 block mb-1">
                   Why Qualified:
                 </span>
                 <ul className="space-y-1 text-[11px]">
                   {qualification.whyReasons.map((r, i) => (
                     <li key={i} className="flex items-start gap-1.5 text-slate-200">
-                      <span className="text-emerald-400 font-bold">✓</span>
+                      <span className="text-sky-400 font-bold">✓</span>
                       <span>{r.label}{r.explanation ? ` — ${r.explanation}` : ''}</span>
                     </li>
                   ))}
@@ -674,13 +674,13 @@ export const ResultDetailDrawer: React.FC<ResultDetailDrawerProps> = ({
             {/* Potential Issues */}
             {qualification.potentialIssues && qualification.potentialIssues.length > 0 && (
               <div>
-                <span className="text-[10px] font-semibold uppercase text-amber-400 block mb-1">
+                <span className="text-[10px] font-semibold uppercase text-sky-400 block mb-1">
                   Potential Issues / Observations:
                 </span>
                 <ul className="space-y-1 text-[11px]">
                   {qualification.potentialIssues.map((issue, i) => (
-                    <li key={i} className="flex items-start gap-1.5 text-amber-200">
-                      <span className="text-amber-400 font-bold">!</span>
+                    <li key={i} className="flex items-start gap-1.5 text-sky-200">
+                      <span className="text-sky-400 font-bold">!</span>
                       <span>{issue.label}{issue.explanation ? ` — ${issue.explanation}` : ''}</span>
                     </li>
                   ))}
@@ -713,18 +713,18 @@ export const ResultDetailDrawer: React.FC<ResultDetailDrawerProps> = ({
 
             {/* Conflicts Warning & Detailed Comparison */}
             {evidence.conflicts && evidence.conflicts.length > 0 ? (
-              <div className="p-2.5 rounded bg-amber-950/30 border border-amber-500/40 flex flex-col gap-2">
-                <span className="text-xs font-semibold text-amber-300 flex items-center gap-1.5">
+              <div className="p-2.5 rounded bg-sky-950/30 border border-sky-500/40 flex flex-col gap-2">
+                <span className="text-xs font-semibold text-sky-300 flex items-center gap-1.5">
                   <span>⚠️</span> Conflicting Information Found ({evidence.conflicts.length})
                 </span>
                 {evidence.conflicts.map((conf, cIdx) => (
-                  <div key={cIdx} className="p-2 bg-slate-900/90 rounded border border-amber-500/30 flex flex-col gap-1 text-[11px]">
+                  <div key={cIdx} className="p-2 bg-slate-900/90 rounded border border-sky-500/30 flex flex-col gap-1 text-[11px]">
                     <div className="flex items-center justify-between">
                       <strong className="text-slate-100">{conf.field} differs between sources</strong>
                       <button
                         type="button"
                         onClick={() => toggleConflict(cIdx)}
-                        className="text-[10px] text-amber-400 hover:underline cursor-pointer"
+                        className="text-[10px] text-sky-400 hover:underline cursor-pointer"
                       >
                         {expandedConflicts.has(cIdx) ? 'Collapse' : 'Expand Details'}
                       </button>
@@ -760,7 +760,7 @@ export const ResultDetailDrawer: React.FC<ResultDetailDrawerProps> = ({
                     <li key={ev.id} className="p-2 bg-slate-900 rounded border border-slate-800 flex flex-col gap-0.5">
                       <div className="flex items-center justify-between text-[10px] text-slate-400">
                         <span className="font-semibold text-slate-300">{toFriendlyStatus(ev.source)}</span>
-                        {ev.isRestricted && <span className="text-purple-400 font-semibold">RESTRICTED</span>}
+                        {ev.isRestricted && <span className="text-sky-400 font-semibold">RESTRICTED</span>}
                       </div>
                       <span className="text-slate-200">{ev.fact}</span>
                     </li>
@@ -776,8 +776,8 @@ export const ResultDetailDrawer: React.FC<ResultDetailDrawerProps> = ({
               <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">9. Data Freshness</h3>
               <span className={`px-2 py-0.5 text-[10px] font-semibold rounded border ${
                 freshness.overallState === 'CURRENT'
-                  ? 'text-emerald-400 bg-emerald-950/50 border-emerald-500/40'
-                  : 'text-amber-400 bg-amber-950/50 border-amber-500/40'
+                  ? 'text-sky-400 bg-sky-950/50 border-sky-500/40'
+                  : 'text-sky-400 bg-sky-950/50 border-sky-500/40'
               }`}>
                 {freshness.friendlyLabel}
               </span>
@@ -817,19 +817,19 @@ export const ResultDetailDrawer: React.FC<ResultDetailDrawerProps> = ({
             <div className="grid grid-cols-2 gap-2 text-[11px]">
               <div className="p-2 bg-slate-900 rounded border border-slate-800 text-center">
                 <span className="text-slate-500 block mb-0.5 text-[10px] uppercase">Export Eligibility</span>
-                <span className={`font-semibold ${lead.isExportable ? 'text-emerald-400' : 'text-rose-400'}`}>
+                <span className={`font-semibold ${lead.isExportable ? 'text-sky-400' : 'text-sky-400'}`}>
                   {lead.isExportable ? '✓ Eligible for Export' : '⊘ Not Exportable'}
                 </span>
               </div>
               <div className="p-2 bg-slate-900 rounded border border-slate-800 text-center">
                 <span className="text-slate-500 block mb-0.5 text-[10px] uppercase">Storage Eligibility</span>
-                <span className={`font-semibold ${lead.isPersistable ? 'text-emerald-400' : 'text-rose-400'}`}>
+                <span className={`font-semibold ${lead.isPersistable ? 'text-sky-400' : 'text-sky-400'}`}>
                   {lead.isPersistable ? '✓ Persistable' : '⊘ Not Persistable'}
                 </span>
               </div>
             </div>
             {lead.isRestricted && (
-              <p className="text-[11px] text-purple-300 bg-purple-950/40 p-2.5 rounded border border-purple-500/30 mt-1 leading-relaxed">
+              <p className="text-[11px] text-sky-300 bg-sky-950/40 p-2.5 rounded border border-sky-500/30 mt-1 leading-relaxed">
                 <strong>Policy Notice:</strong> {lead.restrictionExplanation || 'Protected by source compliance policy. Consumer-web records cannot be exported or stored persistently.'}
               </p>
             )}

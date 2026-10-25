@@ -1,5 +1,44 @@
 @import "tailwindcss";
 
+/* Shared palette for the popup, saved lists, and result details. */
+@theme {
+  --color-slate-50: #f7f5f8;
+  --color-slate-100: #eeebf0;
+  --color-slate-200: #ded9e2;
+  --color-slate-300: #c6bfcc;
+  --color-slate-400: #aaa1b2;
+  --color-slate-500: #8b8293;
+  --color-slate-600: #68606f;
+  --color-slate-700: #49424f;
+  --color-slate-800: #332e39;
+  --color-slate-900: #242127;
+  --color-slate-950: #19171c;
+  --color-sky-50: #f5f1f8;
+  --color-sky-100: #eee6f4;
+  --color-sky-200: #ddcfe6;
+  --color-sky-300: #c4aed2;
+  --color-sky-400: #b69bc7;
+  --color-sky-500: #9678aa;
+  --color-sky-600: #74578a;
+  --color-sky-700: #624974;
+  --color-sky-800: #503d5e;
+  --color-sky-900: #3b2e45;
+  --color-sky-950: #291f31;
+  --color-indigo-500: #9678aa;
+  --color-indigo-600: #74578a;
+  --color-white: #f7f5f8;
+  --color-black: #19171c;
+}
+
+:root { color-scheme: dark; }
+body { background: #19171c; color: #eeebf0; }
+input[type="checkbox"], input[type="radio"] { accent-color: #9678aa; }
+button, input, select, textarea { font: inherit; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid #b69bc7;
+  outline-offset: 3px;
+}
+
 html,
 body,
 #root {

@@ -99,9 +99,9 @@ export const DiagnosticsView: React.FC<DiagnosticsViewProps> = ({
 
   const getSeverityBadgeClass = (sev: string) => {
     switch (sev) {
-      case 'P0': return 'bg-rose-950/80 text-rose-300 border-rose-600/50';
-      case 'P1': return 'bg-amber-950/80 text-amber-300 border-amber-600/50';
-      case 'P2': return 'bg-yellow-950/80 text-yellow-300 border-yellow-600/50';
+      case 'P0': return 'bg-sky-950/80 text-sky-300 border-sky-600/50';
+      case 'P1': return 'bg-sky-950/80 text-sky-300 border-sky-600/50';
+      case 'P2': return 'bg-sky-950/80 text-sky-300 border-sky-600/50';
       default: return 'bg-slate-800 text-slate-300 border-slate-700';
     }
   };
@@ -128,7 +128,7 @@ export const DiagnosticsView: React.FC<DiagnosticsViewProps> = ({
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-600/40">
+          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-sky-950/80 text-sky-300 border border-sky-600/40">
             LOCAL-FIRST (0 TELEMETRY)
           </span>
           <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-sky-950/80 text-sky-300 border border-sky-600/40">
@@ -188,7 +188,7 @@ export const DiagnosticsView: React.FC<DiagnosticsViewProps> = ({
         </h4>
 
         {guardrailAlerts.length === 0 ? (
-          <div className="flex items-center gap-2 p-2 bg-emerald-950/30 rounded border border-emerald-800/40 text-emerald-300 text-[11px]">
+          <div className="flex items-center gap-2 p-2 bg-sky-950/30 rounded border border-sky-800/40 text-sky-300 text-[11px]">
             <span>✓</span>
             <span>All internal reliability thresholds normal. No operational alerts active.</span>
           </div>
@@ -297,7 +297,7 @@ export const DiagnosticsView: React.FC<DiagnosticsViewProps> = ({
                           )}
                           className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
                             issue.resolutionState === 'RESOLVED'
-                              ? 'bg-emerald-950/60 text-emerald-300 border-emerald-600/40 hover:bg-emerald-900/60'
+                              ? 'bg-sky-950/60 text-sky-300 border-sky-600/40 hover:bg-sky-900/60'
                               : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
                           }`}
                         >
@@ -322,13 +322,13 @@ export const DiagnosticsView: React.FC<DiagnosticsViewProps> = ({
         </h4>
         <div className="flex items-center justify-between text-[11px] mb-1">
           <span>Capacity Usage ({Math.round(storageHealth.estimatedBytes / 1024)} KB of {Math.round(storageHealth.quotaLimitBytes / (1024 * 1024))} MB)</span>
-          <span className={`font-semibold ${storageHealth.isPressureHigh ? 'text-amber-400' : 'text-emerald-400'}`}>
+          <span className={`font-semibold ${storageHealth.isPressureHigh ? 'text-sky-400' : 'text-sky-400'}`}>
             {storageHealth.quotaUsagePercent}%
           </span>
         </div>
         <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-slate-800">
           <div
-            className={`h-full transition-all duration-300 ${storageHealth.isPressureHigh ? 'bg-amber-500' : 'bg-sky-500'}`}
+            className={`h-full transition-all duration-300 ${storageHealth.isPressureHigh ? 'bg-sky-500' : 'bg-sky-500'}`}
             style={{ width: `${Math.min(100, storageHealth.quotaUsagePercent)}%` }}
           />
         </div>
@@ -359,7 +359,7 @@ export const DiagnosticsView: React.FC<DiagnosticsViewProps> = ({
             Copy Summary
           </button>
           {copyFeedback && (
-            <span role="status" className="text-[11px] text-emerald-400 font-medium">
+            <span role="status" className="text-[11px] text-sky-400 font-medium">
               {copyFeedback}
             </span>
           )}
@@ -372,20 +372,20 @@ export const DiagnosticsView: React.FC<DiagnosticsViewProps> = ({
                 type="button"
                 id="btn-clear-diagnostic-history"
                 onClick={() => setShowClearConfirm(true)}
-                className="px-3 py-1.5 text-[11px] font-medium text-rose-300 hover:text-rose-100 bg-rose-950/30 hover:bg-rose-900/40 rounded border border-rose-500/30 transition-colors"
+                className="px-3 py-1.5 text-[11px] font-medium text-sky-300 hover:text-sky-100 bg-sky-950/30 hover:bg-sky-900/40 rounded border border-sky-500/30 transition-colors"
               >
                 Clear Diagnostic History
               </button>
             ) : (
               <div className="flex items-center gap-2">
-                <span className="text-[10px] text-amber-300">Clear diagnostics only?</span>
+                <span className="text-[10px] text-sky-300">Clear diagnostics only?</span>
                 <button
                   type="button"
                   onClick={() => {
                     onClearDiagnostics();
                     setShowClearConfirm(false);
                   }}
-                  className="px-2 py-1 text-[10px] font-bold text-rose-100 bg-rose-700 hover:bg-rose-600 rounded"
+                  className="px-2 py-1 text-[10px] font-bold text-sky-100 bg-sky-700 hover:bg-sky-600 rounded"
                 >
                   Yes, Clear
                 </button>

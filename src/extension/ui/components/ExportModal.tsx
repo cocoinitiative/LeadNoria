@@ -83,20 +83,20 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               <span className="text-[10px] uppercase text-slate-500 block mb-0.5">Selected Records</span>
               <span className="text-base font-bold text-slate-200">{preview.totalSelectedRecords}</span>
             </div>
-            <div className="p-2.5 bg-emerald-950/30 rounded border border-emerald-500/30">
-              <span className="text-[10px] uppercase text-emerald-400 block mb-0.5">Eligible for Export</span>
-              <span className="text-base font-bold text-emerald-300">{preview.exportableRecordsCount}</span>
+            <div className="p-2.5 bg-sky-950/30 rounded border border-sky-500/30">
+              <span className="text-[10px] uppercase text-sky-400 block mb-0.5">Eligible for Export</span>
+              <span className="text-base font-bold text-sky-300">{preview.exportableRecordsCount}</span>
             </div>
           </div>
 
           {/* Eligibility Breakdown Summary */}
           {preview.restrictedRecordsCount > 0 ? (
-            <div className="p-2.5 bg-purple-950/40 border border-purple-500/40 rounded text-[11px] text-purple-200">
-              <span className="font-semibold text-purple-300 block mb-0.5">⊘ Partial Export Eligibility:</span>
+            <div className="p-2.5 bg-sky-950/40 border border-sky-500/40 rounded text-[11px] text-sky-200">
+              <span className="font-semibold text-sky-300 block mb-0.5">⊘ Partial Export Eligibility:</span>
               You selected {preview.totalSelectedRecords} records. {preview.restrictedRecordsCount} are unavailable for export due to source restrictions. {preview.exportableRecordsCount} are eligible.
             </div>
           ) : (
-            <div className="p-2 bg-emerald-950/20 border border-emerald-500/30 rounded text-[11px] text-emerald-300">
+            <div className="p-2 bg-sky-950/20 border border-sky-500/30 rounded text-[11px] text-sky-300">
               ✓ All {preview.totalSelectedRecords} selected records satisfy export policy requirements.
             </div>
           )}
@@ -107,7 +107,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               type="checkbox"
               checked={qualifiedOnly}
               onChange={e => setQualifiedOnly(e.target.checked)}
-              className="rounded border-slate-700 bg-slate-950 text-emerald-500 focus:ring-0 cursor-pointer"
+              className="rounded border-slate-700 bg-slate-950 text-sky-500 focus:ring-0 cursor-pointer"
             />
             <div>
               <span className="font-semibold text-slate-100 block">Strict Qualified Export</span>
@@ -160,9 +160,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             type="button"
             disabled={!preview.isExportReady || isExporting}
             onClick={() => onConfirmExport(qualifiedOnly)}
-            className={`px-4 py-1.5 text-xs font-semibold rounded transition-colors flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer ${
+            className={`px-4 py-1.5 text-xs font-semibold rounded transition-colors flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-sky-400 cursor-pointer ${
               preview.isExportReady && !isExporting
-                ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                ? 'bg-sky-600 hover:bg-sky-500 text-white'
                 : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed opacity-50'
             }`}
           >

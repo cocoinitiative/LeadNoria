@@ -30,6 +30,21 @@
   var init_presetCatalogue = __esm({
     "src/data/presetCatalogue.ts"() {
       RESEARCH_PRESETS = [
+        {
+          preset_id: "retail_furniture_home",
+          name: "Furniture & Home Decor",
+          industry: "Home & Living",
+          sub_industry: "Furniture",
+          description: "Furniture shops, makers, and home decor businesses.",
+          primary_keywords: ["furniture", "sofa", "home decor", "\u09AB\u09BE\u09B0\u09CD\u09A8\u09BF\u099A\u09BE\u09B0"],
+          secondary_keywords: ["dining table", "bedroom furniture", "custom furniture"],
+          default_location_behavior: { defaultLocationCode: "BD", allowsGlobal: true },
+          website_required: false,
+          default_result_limit: 200,
+          version: "v2.2.0",
+          status: "ACTIVE",
+          aliases: ["Furniture", "Home Decor", "\u09AB\u09BE\u09B0\u09CD\u09A8\u09BF\u099A\u09BE\u09B0"]
+        },
         // ==========================================
         // 1. TECHNOLOGY & SOFTWARE
         // ==========================================

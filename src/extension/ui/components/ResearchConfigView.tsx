@@ -14,7 +14,6 @@
 
 import React, { useState } from 'react';
 import { SourceType, ExecutionMode } from '../../pipeline/pipelineTypes.ts';
-import { SourceSelector } from './SourceSelector.tsx';
 import { RESEARCH_PRESETS } from '../../../data/presetCatalogue.ts';
 import { META_AD_LIBRARY_LOCATIONS } from '../../../data/locationCatalogue.ts';
 
@@ -45,7 +44,7 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
   onNavigateToImport,
   disabled = false
 }) => {
-  const [modeType, setModeType] = useState<'PRESET' | 'CUSTOM'>('PRESET');
+  const [modeType, setModeType] = useState<'PRESET' | 'CUSTOM'>('CUSTOM');
   const [presetId, setPresetId] = useState<string>(RESEARCH_PRESETS[0]?.preset_id || '');
   const [customKeywords, setCustomKeywords] = useState<string>('Furniture, Home Decor');
   const [countryCode, setCountryCode] = useState<string>('BD');
@@ -54,6 +53,8 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
   const [requiredCta, setRequiredCta] = useState<string>('ANY');
   const [requiredDestination, setRequiredDestination] = useState<string>('ANY');
   const [websiteRequirement, setWebsiteRequirement] = useState<string>('ANY');
+  const [presetSearch, setPresetSearch] = useState('');
+  const [presetKeywords, setPresetKeywords] = useState(RESEARCH_PRESETS[0]?.primary_keywords.join(', ') || '');
 
   const selectedPreset = RESEARCH_PRESETS.find(p => p.preset_id === presetId) || RESEARCH_PRESETS[0];
 
@@ -62,7 +63,7 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
     let presetName: string | undefined;
 
     if (modeType === 'PRESET' && selectedPreset) {
-      keywords = selectedPreset.primary_keywords;
+      keywords = presetKeywords.split(/[,;\n]/).map(k => k.trim()).filter(Boolean);
       presetName = selectedPreset.name;
     } else {
       keywords = customKeywords
@@ -92,17 +93,14 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
 
   return (
     <div className="flex flex-col gap-4 p-4 bg-slate-900 border border-slate-800 rounded-xl">
-      {/* 1. Source Selector (Approved Production Source) */}
-      <SourceSelector
-        selectedSource={selectedSource}
-        onSelectSource={onSelectSource}
-        disabled={disabled}
-      />
+      {/* Search essentials */}
+      <div><h2 className="text-lg font-semibold text-slate-100">Find business leads</h2>
+      <p className="text-xs text-slate-400 mt-1">Choose a country and the businesses you want to find.</p></div>
 
       {/* 2. Geographic Scope */}
       <div className="p-3 bg-slate-950/60 rounded-lg border border-slate-800 flex flex-col gap-2">
         <label htmlFor="geo-country-select" className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-          Geographic Scope
+          Country
         </label>
         <select
           id="geo-country-select"
@@ -123,7 +121,7 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
       <div className="p-3 bg-slate-950/60 rounded-lg border border-slate-800 flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-            Category &amp; Query Scope
+            Keywords
           </span>
           <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded border border-slate-800">
             <button
@@ -133,7 +131,7 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
                 modeType === 'PRESET' ? 'bg-sky-600 text-white' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              Industry Preset
+              Use a preset
             </button>
             <button
               type="button"
@@ -142,30 +140,34 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
                 modeType === 'CUSTOM' ? 'bg-sky-600 text-white' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              Custom Keywords
+              Your keywords
             </button>
           </div>
         </div>
 
         {modeType === 'PRESET' ? (
           <div>
+            <input aria-label="Find a preset" placeholder="Find a preset, e.g. furniture"
+              value={presetSearch} onChange={e => setPresetSearch(e.target.value)} disabled={disabled}
+              className="w-full p-2 mb-2 rounded bg-slate-950 border border-slate-700 text-slate-200 text-xs" />
             <select
               value={presetId}
-              onChange={e => setPresetId(e.target.value)}
+              onChange={e => { setPresetId(e.target.value); setPresetKeywords(RESEARCH_PRESETS.find(p => p.preset_id === e.target.value)?.primary_keywords.join(', ') || ''); }}
               disabled={disabled}
               className="w-full px-3 py-1.5 text-xs bg-slate-950 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-400 mb-1"
               aria-label="Select industry research preset"
             >
-              {RESEARCH_PRESETS.map(p => (
+              {RESEARCH_PRESETS.filter(p => p.preset_id === presetId || [p.name, p.industry, ...(p.aliases || []), ...p.primary_keywords].join(' ').toLowerCase().includes(presetSearch.toLowerCase())).map(p => (
                 <option key={p.preset_id} value={p.preset_id}>
                   {p.name} ({p.industry})
                 </option>
               ))}
             </select>
             {selectedPreset && (
-              <p className="text-[11px] text-slate-400">
-                Keywords: <span className="text-slate-300 font-mono">{selectedPreset.primary_keywords.join(', ')}</span>
-              </p>
+              <label className="text-xs text-slate-400">Edit preset keywords
+                <textarea aria-label="Preset keywords" rows={3} value={presetKeywords} onChange={e => setPresetKeywords(e.target.value)} disabled={disabled}
+                  className="w-full mt-1 p-2 rounded bg-slate-950 border border-slate-700 text-slate-200" />
+              </label>
             )}
           </div>
         ) : (
@@ -184,11 +186,26 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
         )}
       </div>
 
+          <div>
+            <label htmlFor="required-website-select" className="text-[10px] uppercase text-slate-400 block mb-0.5">
+              Website
+            </label>
+            <select
+              id="required-website-select"
+              value={websiteRequirement}
+              onChange={e => setWebsiteRequirement(e.target.value)}
+              disabled={disabled}
+              className="w-full px-2 py-1 text-xs bg-slate-950 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-1 focus:ring-sky-400"
+            >
+              <option value="ANY">All leads (default)</option>
+              <option value="WITH_WEBSITE">With a website</option>
+              <option value="WITHOUT_OBSERVED_WEBSITE">No website seen</option>
+            </select>
+          </div>
       {/* 4. Qualification Criteria & Filters */}
-      <div className="p-3 bg-slate-950/60 rounded-lg border border-slate-800 flex flex-col gap-2.5">
-        <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-          Qualification Rules
-        </span>
+      <details className="p-3 bg-slate-950/60 rounded-lg border border-slate-800">
+        <summary className="text-xs text-slate-300 cursor-pointer">More search options</summary>
+        <div className="flex flex-col gap-2.5 mt-3">
         <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
           <input
             type="checkbox"
@@ -202,7 +219,7 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
           </span>
         </label>
 
-        <div className="grid grid-cols-3 gap-2 text-xs">
+        <div className="grid grid-cols-2 gap-2 text-xs">
           <div>
             <label htmlFor="required-cta-select" className="text-[10px] uppercase text-slate-400 block mb-0.5">
               Required CTA
@@ -246,24 +263,10 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
               <option value="OTHER">Other Destination</option>
             </select>
           </div>
-          <div>
-            <label htmlFor="required-website-select" className="text-[10px] uppercase text-slate-400 block mb-0.5">
-              Website Requirement
-            </label>
-            <select
-              id="required-website-select"
-              value={websiteRequirement}
-              onChange={e => setWebsiteRequirement(e.target.value)}
-              disabled={disabled}
-              className="w-full px-2 py-1 text-xs bg-slate-950 border border-slate-700 rounded text-slate-200 focus:outline-none focus:ring-1 focus:ring-sky-400"
-            >
-              <option value="ANY">Any Website Status</option>
-              <option value="WITH_WEBSITE">External Website Observed</option>
-              <option value="WITHOUT_WEBSITE">No Website Destination Observed (Not Proof of Absence)</option>
-            </select>
-          </div>
+
         </div>
-      </div>
+        </div>
+
 
       {/* 5. Research Scope Limit */}
       <div className="p-3 bg-slate-950/60 rounded-lg border border-slate-800 flex flex-col gap-2">
@@ -285,10 +288,11 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
         </div>
       </div>
 
+      </details>
       {/* 5. Review & Launch Trigger */}
       <button
         type="button"
-        disabled={disabled}
+        disabled={disabled || !(modeType === 'PRESET' ? presetKeywords : customKeywords).split(/[,;\n]/).some(k => k.trim())}
         onClick={handleReviewClick}
         className="w-full py-2.5 px-4 bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-sm shadow-sky-600/20 focus:outline-none focus:ring-2 focus:ring-sky-400 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
       >

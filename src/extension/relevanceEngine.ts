@@ -62,7 +62,7 @@ export interface ResearchIntent {
   requiredCtaTypes?: CtaType[];
   requiredDestinationTypes?: DestinationType[];
   requireWebsiteFound?: boolean;
-  websiteRequirement?: 'WITH_WEBSITE' | 'WITHOUT_WEBSITE' | 'BOTH' | 'ANY' | 'WITH' | 'WITHOUT';
+  websiteRequirement?: 'WITH_WEBSITE' | 'WITHOUT_OBSERVED_WEBSITE' | 'WITHOUT_WEBSITE' | 'BOTH' | 'ANY' | 'WITH' | 'WITHOUT';
 }
 
 export interface CandidateEvidence {
@@ -508,7 +508,7 @@ export function compileResearchIntent(
     requiredCtaTypes?: CtaType[];
     requiredDestinationTypes?: DestinationType[];
     requireWebsiteFound?: boolean;
-    websiteRequirement?: 'WITH_WEBSITE' | 'WITHOUT_WEBSITE' | 'BOTH' | 'ANY' | 'WITH' | 'WITHOUT';
+    websiteRequirement?: 'WITH_WEBSITE' | 'WITHOUT_OBSERVED_WEBSITE' | 'WITHOUT_WEBSITE' | 'BOTH' | 'ANY' | 'WITH' | 'WITHOUT';
   },
   keywords: string[] = [],
   presetId?: string,
@@ -519,7 +519,7 @@ export function compileResearchIntent(
     requiredCtaTypes?: CtaType[];
     requiredDestinationTypes?: DestinationType[];
     requireWebsiteFound?: boolean;
-    websiteRequirement?: 'WITH_WEBSITE' | 'WITHOUT_WEBSITE' | 'BOTH' | 'ANY' | 'WITH' | 'WITHOUT';
+    websiteRequirement?: 'WITH_WEBSITE' | 'WITHOUT_OBSERVED_WEBSITE' | 'WITHOUT_WEBSITE' | 'BOTH' | 'ANY' | 'WITH' | 'WITHOUT';
   }
 ): ResearchIntent {
   let mode: ResearchMode = 'CUSTOM';

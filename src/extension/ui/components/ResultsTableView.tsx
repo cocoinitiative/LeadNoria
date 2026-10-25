@@ -16,7 +16,8 @@ import { ResultRowViewModel } from '../types.ts';
 import { StatusBadge } from './StatusBadge.tsx';
 import { toFriendlyStatus } from '../humanLabels.ts';
 import { getSafeExternalUrl } from '../security.ts';
-import { metaResultsToTsv, writeClipboardText } from '../../clipboard/index.ts';
+import { writeClipboardText } from '../../clipboard/index.ts';
+import { leadResultsToSheets } from '../../clipboard/leadSheets.ts';
 
 export type SortOption =
   | 'NAME_ASC'
@@ -37,6 +38,7 @@ interface ResultsTableViewProps {
   onInspectRecord: (recordId: string) => void;
   onOpenExportModal: () => void;
   onDownloadCsv?: (recordIds: string[]) => void;
+  initialWebsitePreference?: string;
 }
 
 export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
@@ -47,9 +49,11 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
   onClearSelection,
   onInspectRecord,
   onOpenExportModal,
-  onDownloadCsv
+  onDownloadCsv,
+  initialWebsitePreference = 'ANY'
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [websitePreference, setWebsitePreference] = useState(initialWebsitePreference);
   const [sourceFilter, setSourceFilter] = useState<string>('ALL');
   const [qualificationFilter, setQualificationFilter] = useState<string>('ALL');
   const [targetCountryFilter, setTargetCountryFilter] = useState<string>('ALL');
@@ -154,6 +158,8 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
   // Filter & Search Logic
   const filteredResults = useMemo(() => {
     return results.filter(r => {
+      if ((websitePreference === 'WITH_WEBSITE' || websitePreference === 'WITH') && !r.websiteUrl) return false;
+      if ((websitePreference === 'WITHOUT_OBSERVED_WEBSITE' || websitePreference === 'WITHOUT_WEBSITE' || websitePreference === 'WITHOUT') && r.websiteUrl) return false;
       // Local text search
       if (searchTerm.trim() !== '') {
         const q = searchTerm.toLowerCase();
@@ -278,7 +284,7 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
     categoryFilter,
     requirePhone,
     requireEmail,
-    requireWebsite,
+    requireWebsite, websitePreference,
     requirePerson
   ]);
 
@@ -354,19 +360,19 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
 
   // Copy All Handler
   const handleCopyAll = async () => {
-    if (filteredResults.length === 0 || isCopying) return;
+    if (csvRows.length === 0 || isCopying) return;
     setIsCopying(true);
     setCopyFeedback(null);
 
     try {
       // Consume active structured results through Meta clipboard projection
-      const tsv = metaResultsToTsv(filteredResults);
+      const tsv = leadResultsToSheets(csvRows);
       const result = await writeClipboardText(tsv);
 
       if (result.success) {
         setCopyFeedback({
           type: 'success',
-          message: `${filteredResults.length} results copied`
+          message: `${csvRows.length} leads copied. Paste into Google Sheets.`
         });
         setTimeout(() => {
           setCopyFeedback(prev => prev?.type === 'success' ? null : prev);
@@ -391,7 +397,13 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
     <div className="flex flex-col gap-3">
       {/* Controls Bar: Search, Filters, Export */}
       <div className="p-3 bg-slate-900 border border-slate-800 rounded-lg flex flex-col gap-2.5">
-        <div className="flex items-center gap-2">
+        <label className="text-xs text-slate-300">Show leads
+          <select aria-label="Website filter" value={websitePreference} onChange={e => { setWebsitePreference(e.target.value); setPage(1); }} className="ml-2 p-2 bg-slate-950 border border-slate-700 rounded">
+            <option value="ANY">All leads</option><option value="WITH_WEBSITE">With a website</option><option value="WITHOUT_OBSERVED_WEBSITE">No website seen</option>
+          </select>
+        </label>
+        {websitePreference === 'WITHOUT_OBSERVED_WEBSITE' && <p className="text-xs text-slate-400">No website was visible in the ad. The business may still have one.</p>}
+        <div className="flex flex-wrap items-center gap-2">
           {/* Search Input */}
           <div className="relative flex-1">
             <span className="absolute left-2.5 top-2.5 text-xs text-slate-500" aria-hidden="true">🔍</span>
@@ -410,23 +422,24 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
             type="button"
             id="meta-copy-all-btn"
             onClick={handleCopyAll}
-            disabled={filteredResults.length === 0 || isCopying}
+            disabled={csvRows.length === 0 || isCopying}
             className={`px-3 py-1.5 text-xs font-semibold rounded transition-colors flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-sky-400 cursor-pointer ${
-              filteredResults.length > 0 && !isCopying
+              csvRows.length > 0 && !isCopying
                 ? 'bg-slate-800 hover:bg-slate-700 text-sky-400 border border-slate-700'
                 : 'bg-slate-900 text-slate-600 cursor-not-allowed border border-slate-800'
             }`}
-            aria-label={`Copy all ${filteredResults.length} results to clipboard`}
+            aria-label={`Copy ${csvRows.length} leads for Google Sheets`}
           >
-            <span>📋</span> {isCopying ? 'Copying...' : `Copy All (${filteredResults.length})`}
+            <span>📋</span> {isCopying ? 'Copying...' : `Copy for Sheets (${csvRows.length})`}
           </button>
 
           {onDownloadCsv && <button type="button" disabled={csvRows.length === 0}
             onClick={() => onDownloadCsv(csvRows.map(row => row.recordId))}
-            className="px-3 py-2 text-xs font-semibold rounded-lg bg-emerald-700 text-white disabled:opacity-50">
+            className="px-3 py-2 text-xs font-semibold rounded-lg bg-sky-700 text-white disabled:opacity-50">
             Download CSV ({csvRows.length})
           </button>}
           {/* Export Button */}
+          <details className="text-xs text-slate-400"><summary className="cursor-pointer">Export options</summary>
           <button
             type="button"
             onClick={onOpenExportModal}
@@ -439,6 +452,7 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
           >
             <span>⭳</span> Export ({selectedRecordIds.size > 0 ? selectedRecordIds.size : results.length})
           </button>
+          </details>
         </div>
 
         {/* Copy All Feedback Notification */}
@@ -448,8 +462,8 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
             aria-live="polite"
             className={`px-3 py-1.5 rounded text-xs flex items-center justify-between transition-all ${
               copyFeedback.type === 'success'
-                ? 'bg-emerald-950/80 border border-emerald-800/80 text-emerald-200'
-                : 'bg-rose-950/80 border border-rose-800/80 text-rose-200'
+                ? 'bg-sky-950/80 border border-sky-800/80 text-sky-200'
+                : 'bg-sky-950/80 border border-sky-800/80 text-sky-200'
             }`}
           >
             <div className="flex items-center gap-1.5">
@@ -467,6 +481,7 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
           </div>
         )}
 
+        <details><summary className="text-xs text-slate-300 cursor-pointer">Filter and sort leads</summary>
         {/* Filter & Sort Row */}
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
           <div className="flex flex-wrap items-center gap-1.5">
@@ -680,7 +695,7 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
               <button
                 type="button"
                 onClick={handleClearFilters}
-                className="px-2 py-0.5 text-[11px] font-semibold bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/80 rounded cursor-pointer transition-colors"
+                className="px-2 py-0.5 text-[11px] font-semibold bg-sky-950/60 hover:bg-sky-900 text-sky-300 border border-sky-800/80 rounded cursor-pointer transition-colors"
                 aria-label="Clear all applied filters"
               >
                 ✕ Clear Filters
@@ -708,6 +723,7 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
             </select>
           </div>
         </div>
+        </details>
       </div>
 
       {/* Selection & Pagination Status Bar */}
@@ -764,6 +780,21 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
       )}
 
       {/* Results List */}
+      {paginatedResults.length > 0 && <div className="overflow-x-auto rounded-lg border border-slate-800">
+        <table className="w-full text-left text-xs" aria-label="Lead table">
+          <thead className="bg-slate-900 text-slate-300"><tr>
+            <th className="p-3">Select</th><th className="p-3">Business</th><th className="p-3">Country</th><th className="p-3">Website</th><th className="p-3">Contact</th>
+          </tr></thead>
+          <tbody>{paginatedResults.map(row => <tr key={row.recordId} className="border-t border-slate-800">
+            <td className="p-3"><input type="checkbox" aria-label={`Select ${row.displayName}`} checked={selectedRecordIds.has(row.entityId) || selectedRecordIds.has(row.recordId)} onChange={() => onToggleSelect(row.entityId || row.recordId)} /></td>
+            <td className="p-3"><button onClick={() => onInspectRecord(row.recordId)} className="text-sky-300 underline text-left">{row.displayName}</button></td>
+            <td className="p-3 text-slate-300">{row.businessCountryCode || 'Unknown'}</td>
+            <td className="p-3">{getSafeExternalUrl(row.websiteUrl) ? <a className="text-sky-300 underline" href={getSafeExternalUrl(row.websiteUrl)!} target="_blank" rel="noopener noreferrer">Open website</a> : <span className="text-slate-400">Not seen</span>}</td>
+            <td className="p-3 text-slate-300">{row.contactSummary.phoneText || row.contactSummary.emailText || 'Not seen'}</td>
+          </tr>)}</tbody>
+        </table>
+      </div>}
+      <details><summary className="text-xs text-slate-400 cursor-pointer">Detailed lead cards</summary>
       <div className="flex flex-col gap-2" role="list" aria-label="Research results list">
         {paginatedResults.map(r => {
           const isSelected = selectedRecordIds.has(r.entityId) || selectedRecordIds.has(r.recordId);
@@ -806,10 +837,10 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
                           <span className="text-slate-600">•</span>
                           <span className={`text-[10px] font-medium ${
                             r.geographicClassification === 'LOCAL_VERIFIED'
-                              ? 'text-emerald-400'
+                              ? 'text-sky-400'
                               : (r.geographicClassification === 'FOREIGN_VERIFIED'
-                                  ? 'text-rose-400'
-                                  : 'text-amber-400')
+                                  ? 'text-sky-400'
+                                  : 'text-sky-400')
                           }`}>
                             {r.geographicClassification === 'LOCAL_VERIFIED' ? '📍' : (r.geographicClassification === 'FOREIGN_VERIFIED' ? '🌐' : '❓')} {toFriendlyStatus(r.geographicClassification)}
                             {r.businessCountryCode ? ` [${r.businessCountryCode}]` : ''}
@@ -832,9 +863,9 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
                               key={bIdx}
                               className={`px-1.5 py-0.2 text-[9px] font-semibold rounded border ${
                                 badge.isRestricted
-                                  ? 'text-purple-300 bg-purple-950/60 border-purple-500/40'
+                                  ? 'text-sky-300 bg-sky-950/60 border-sky-500/40'
                                   : (badge.sourceType === 'WEBSITE'
-                                      ? 'text-emerald-300 bg-emerald-950/60 border-emerald-500/40'
+                                      ? 'text-sky-300 bg-sky-950/60 border-sky-500/40'
                                       : 'text-sky-300 bg-sky-950/60 border-sky-500/40')
                               }`}
                             >
@@ -855,11 +886,11 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
                     <span
                       className={`px-1.5 py-0.5 text-[9px] font-bold rounded border ${
                         r.prioritizationTier === 'HIGH'
-                          ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/50'
+                          ? 'bg-sky-950/70 text-sky-300 border-sky-500/50'
                           : r.prioritizationTier === 'MEDIUM'
                           ? 'bg-sky-950/70 text-sky-300 border-sky-500/50'
                           : r.prioritizationTier === 'LOW'
-                          ? 'bg-amber-950/70 text-amber-300 border-amber-500/50'
+                          ? 'bg-sky-950/70 text-sky-300 border-sky-500/50'
                           : 'bg-slate-900 text-slate-400 border-slate-700'
                       }`}
                       title={`Prioritization Tier: ${r.prioritizationTier}`}
@@ -885,7 +916,7 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
                   />
                   {r.isRestricted && (
                     <span 
-                      className="px-1.5 py-0.5 text-[10px] font-semibold text-purple-300 bg-purple-950/60 border border-purple-500/40 rounded"
+                      className="px-1.5 py-0.5 text-[10px] font-semibold text-sky-300 bg-sky-950/60 border border-sky-500/40 rounded"
                       title="Restricted by source policy (Not exportable or persistable)"
                     >
                       ⊘ RESTRICTED
@@ -921,7 +952,7 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
                       <span>🌐</span>
                       <span className="truncate max-w-[150px]">{safeWeb.replace(/^https?:\/\//, '')}</span>
                       {r.dataSignals?.websiteVerified && (
-                        <span className="text-emerald-400 font-bold" title="Verified business website">✓</span>
+                        <span className="text-sky-400 font-bold" title="Verified business website">✓</span>
                       )}
                     </span>
                   ) : (
@@ -940,7 +971,7 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
                     <span className={`px-1.5 py-0.2 text-[9px] rounded font-medium ${
                       r.dataSignals.freshness === 'CURRENT'
                         ? 'bg-slate-800 text-slate-400'
-                        : 'bg-amber-950/50 text-amber-300 border border-amber-500/30'
+                        : 'bg-sky-950/50 text-sky-300 border border-sky-500/30'
                     }`}>
                       {r.dataSignals.freshnessLabel}
                     </span>
@@ -960,7 +991,7 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
 
                   {/* Contact Conflict Warning */}
                   {(r.phoneConflictState === 'PHONE_CONFLICT' || r.emailConflictState === 'EMAIL_CONFLICT' || r.canonicalRecord?.contactProfile?.phoneConflict || r.canonicalRecord?.contactProfile?.emailConflict) && (
-                    <span className="px-1.5 py-0.2 text-[9px] bg-rose-950/60 text-rose-300 border border-rose-500/40 rounded font-semibold" title="Conflicting contact observations recorded across ads">
+                    <span className="px-1.5 py-0.2 text-[9px] bg-sky-950/60 text-sky-300 border border-sky-500/40 rounded font-semibold" title="Conflicting contact observations recorded across ads">
                       ⚠️ Contact Conflict
                     </span>
                   )}
@@ -974,7 +1005,7 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
                       <span className="text-sky-400 font-semibold">{r.qualityMetrics.corroborationCount} sources</span>
                     )}
                     {r.qualityMetrics.contradictionCount > 0 && (
-                      <span className="text-amber-400 font-semibold">⚠️ {r.qualityMetrics.contradictionCount} conflict</span>
+                      <span className="text-sky-400 font-semibold">⚠️ {r.qualityMetrics.contradictionCount} conflict</span>
                     )}
                   </div>
                 )}
@@ -982,10 +1013,10 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
 
               {/* Actionable Review Reasons for Review-Required candidates */}
               {r.qualificationState === 'REVIEW_REQUIRED' && (
-                <div className="w-full mt-0.5 p-1.5 bg-amber-950/30 border border-amber-500/30 rounded text-[10px] text-amber-200 flex items-start gap-1.5">
-                  <span className="text-amber-400 font-bold mt-0.5" aria-hidden="true">⚠</span>
+                <div className="w-full mt-0.5 p-1.5 bg-sky-950/30 border border-sky-500/30 rounded text-[10px] text-sky-200 flex items-start gap-1.5">
+                  <span className="text-sky-400 font-bold mt-0.5" aria-hidden="true">⚠</span>
                   <div className="flex-1">
-                    <span className="font-semibold text-amber-300 block mb-0.5">Review Required:</span>
+                    <span className="font-semibold text-sky-300 block mb-0.5">Review Required:</span>
                     <span>
                       {r.qualificationReasons && r.qualificationReasons.length > 0
                         ? r.qualificationReasons.join('. ')
@@ -1000,6 +1031,7 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
       </div>
 
       {/* Pagination Controls */}
+      </details>
       {totalPages > 1 && (
         <div className="flex items-center justify-between p-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-400">
           <button

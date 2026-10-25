@@ -47,7 +47,7 @@ class ExtensionErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundary
     if (this.state.hasError) {
       return (
         <div className="min-w-[360px] w-full h-full min-h-[500px] flex flex-col items-center justify-center p-6 bg-slate-950 text-slate-100 font-sans select-none text-center">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center text-white font-bold text-base shadow-lg mb-4">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-sky-500 to-sky-600 flex items-center justify-center text-white font-bold text-base shadow-lg mb-4">
             LN
           </div>
           <h2 className="text-base font-bold text-slate-100 mb-1">LeadNoria Workspace Recovery</h2>
@@ -55,7 +55,7 @@ class ExtensionErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundary
             The user interface encountered an unexpected state error. Your settings and research parameters remain protected.
           </p>
           {this.state.error && (
-            <div className="w-full max-w-[340px] p-2.5 mb-4 text-[11px] font-mono text-rose-300 bg-rose-950/40 border border-rose-800/60 rounded-lg text-left overflow-auto max-h-24">
+            <div className="w-full max-w-[340px] p-2.5 mb-4 text-[11px] font-mono text-sky-300 bg-sky-950/40 border border-sky-800/60 rounded-lg text-left overflow-auto max-h-24">
               {this.state.error.message}
             </div>
           )}

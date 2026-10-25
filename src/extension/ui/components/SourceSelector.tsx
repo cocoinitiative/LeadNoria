@@ -51,7 +51,7 @@ export const SourceSelector: React.FC<SourceSelectorProps> = ({
               <span className="text-sky-400" aria-hidden="true">⦿</span>
               From Meta Ad Library
             </span>
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-500/40 rounded">
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold text-sky-400 bg-sky-950/60 border border-sky-500/40 rounded">
               <span aria-hidden="true">✓</span> APPROVED PRODUCTION SOURCE
             </span>
           </div>
@@ -68,7 +68,7 @@ export const SourceSelector: React.FC<SourceSelectorProps> = ({
         aria-label="Source contract status"
       >
         <span>Production signals: Meta Ad Library</span>
-        <span className="font-mono text-emerald-400">Dedicated Source Active</span>
+        <span className="font-mono text-sky-400">Dedicated Source Active</span>
       </div>
     </div>
   );

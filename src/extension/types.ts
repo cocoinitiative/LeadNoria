@@ -584,7 +584,7 @@ export interface ExtensionResearchRun {
   allowProbableLocal?: boolean;
   requiredCtaTypes?: string[];
   requiredDestinationTypes?: string[];
-  websiteRequirement?: 'WITH_WEBSITE' | 'WITHOUT_WEBSITE' | 'BOTH' | 'ANY' | 'WITH' | 'WITHOUT';
+  websiteRequirement?: 'WITH_WEBSITE' | 'WITHOUT_OBSERVED_WEBSITE' | 'WITHOUT_WEBSITE' | 'BOTH' | 'ANY' | 'WITH' | 'WITHOUT';
   researchIntent?: any;
   // Auto-Discovery fields (Phase 1)
   researchMode?: 'AUTO_DISCOVERY';
@@ -644,7 +644,7 @@ export interface StartResearchPayload {
   allowProbableLocal?: boolean;
   requiredCtaTypes?: string[];
   requiredDestinationTypes?: string[];
-  websiteRequirement?: 'WITH_WEBSITE' | 'WITHOUT_WEBSITE' | 'BOTH' | 'ANY' | 'WITH' | 'WITHOUT';
+  websiteRequirement?: 'WITH_WEBSITE' | 'WITHOUT_OBSERVED_WEBSITE' | 'WITHOUT_WEBSITE' | 'BOTH' | 'ANY' | 'WITH' | 'WITHOUT';
 }
 
 export interface ExtensionMessage {

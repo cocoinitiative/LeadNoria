@@ -109,8 +109,8 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({
 
           {/* Blocked operations notice */}
           {diagnostics.blockedOperationsCount > 0 && (
-            <div className="p-2.5 bg-purple-950/30 border border-purple-500/30 rounded text-[11px] text-purple-200">
-              <strong className="block text-purple-300">Policy Blocked Operations:</strong>
+            <div className="p-2.5 bg-sky-950/30 border border-sky-500/30 rounded text-[11px] text-sky-200">
+              <strong className="block text-sky-300">Policy Blocked Operations:</strong>
               {diagnostics.blockedOperationsCount} operations gated by source capability or compliance rules.
             </div>
           )}

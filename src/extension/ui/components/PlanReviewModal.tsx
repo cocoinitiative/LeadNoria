@@ -64,10 +64,10 @@ export const PlanReviewModal: React.FC<PlanReviewModalProps> = ({
         <div className="p-4 border-b border-slate-800 flex items-center justify-between">
           <div>
             <h2 id="plan-review-title" className="text-base font-semibold text-slate-100 flex items-center gap-2">
-              <span>📋</span> Research Plan Review
+              <span>📋</span> Review your search
             </h2>
             <p className="text-xs text-slate-400">
-              Review planned parameters before starting execution
+              Check your choices before continuing.
             </p>
           </div>
           <button
@@ -82,6 +82,12 @@ export const PlanReviewModal: React.FC<PlanReviewModalProps> = ({
 
         {/* Content */}
         <div className="p-4 overflow-y-auto flex flex-col gap-4 text-xs text-slate-300">
+          <dl className="grid grid-cols-[auto_1fr] gap-3">
+            <dt>Country</dt><dd>{plan.locationName || plan.countryCode || 'Not selected'}</dd>
+            <dt>Keywords</dt><dd>{plan.keywords?.join(', ') || 'Not selected'}</dd>
+            <dt>Website</dt><dd>{['WITH_WEBSITE', 'WITH'].includes(plan.websiteRequirement || '') ? 'With a website' : ['WITHOUT_OBSERVED_WEBSITE', 'WITHOUT_WEBSITE', 'WITHOUT'].includes(plan.websiteRequirement || '') ? 'No website seen in the ad' : 'All leads'}</dd>
+          </dl>
+          <details><summary className="cursor-pointer text-slate-400">More details</summary>
           {/* Source & Mode */}
           <div className="grid grid-cols-2 gap-3 p-3 bg-slate-950/60 rounded-lg border border-slate-800">
             <div>
@@ -144,7 +150,7 @@ export const PlanReviewModal: React.FC<PlanReviewModalProps> = ({
             <span className="text-slate-400 font-semibold uppercase tracking-wider text-[10px]">Configured Qualification Rules:</span>
             <div className="flex items-center justify-between">
               <span className="text-slate-400">Strict-Local Verification:</span>
-              <span className={`font-medium ${plan.strictLocal !== false ? 'text-emerald-400' : 'text-amber-400'}`}>
+              <span className={`font-medium ${plan.strictLocal !== false ? 'text-sky-400' : 'text-sky-400'}`}>
                 {plan.strictLocal !== false ? 'Enabled (Foreign/Unknown fails)' : 'Disabled'}
               </span>
             </div>
@@ -169,25 +175,26 @@ export const PlanReviewModal: React.FC<PlanReviewModalProps> = ({
           </div>
 
           {/* Safety Warnings & Blocks */}
+          </details>
           {!plan.canExecuteLive && (
             <div 
-              className="p-3 rounded-lg bg-rose-950/40 border border-rose-500/40 text-rose-300 text-xs flex items-start gap-2"
+              className="p-3 rounded-lg bg-sky-950/40 border border-sky-500/40 text-sky-300 text-xs flex items-start gap-2"
               role="alert"
             >
-              <span className="text-rose-400 text-sm font-bold">⊘</span>
+              <span className="text-sky-400 text-sm font-bold">⊘</span>
               <div>
-                <strong className="block font-semibold">Execution Blocked:</strong>
-                {plan.blockedReason || 'Execution blocked by configuration policy.'}
+                <strong className="block font-semibold">Automatic collection is unavailable</strong>
+                {plan.blockedReason || 'You can still import ads and manage saved lead lists.'}
               </div>
             </div>
           )}
 
           {plan.safetyWarnings.length > 0 && (
-            <div className="p-3 rounded-lg bg-amber-950/30 border border-amber-500/30 text-amber-300 text-xs flex flex-col gap-1">
+            <div className="p-3 rounded-lg bg-sky-950/30 border border-sky-500/30 text-sky-300 text-xs flex flex-col gap-1">
               <strong className="font-semibold flex items-center gap-1">
                 <span>⚠️</span> Plan Safety Advisories:
               </strong>
-              <ul className="list-disc list-inside space-y-0.5 text-[11px] text-amber-200">
+              <ul className="list-disc list-inside space-y-0.5 text-[11px] text-sky-200">
                 {plan.safetyWarnings.map((w, idx) => (
                   <li key={idx}>{w}</li>
                 ))}

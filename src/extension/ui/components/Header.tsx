@@ -26,13 +26,9 @@ export const Header: React.FC<HeaderProps> = ({
   isRunning = false
 }) => {
   const tabs: Array<{ id: NavigationTab; label: string; badge?: string | number }> = [
-    { id: 'RESEARCH', label: 'Research' },
-    { id: 'IMPORT', label: 'Import Signals' },
-    { id: 'RUN_STATUS', label: 'Run Status', badge: isRunning ? 'LIVE' : undefined },
-    { id: 'RESULTS', label: 'Results', badge: resultsCount > 0 ? resultsCount : undefined },
-    { id: 'ANALYTICS', label: 'Analytics' },
-    { id: 'HISTORY', label: 'History' },
-    { id: 'SETTINGS', label: 'Settings' }
+    { id: 'RESEARCH', label: 'Search' },
+    { id: 'RESULTS', label: 'Leads', badge: resultsCount > 0 ? resultsCount : undefined },
+    { id: 'HISTORY', label: 'Saved lists' }
   ];
 
   return (
@@ -40,16 +36,15 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Brand & Descriptor Bar */}
       <div className="px-4 py-2.5 flex items-center justify-between border-b border-slate-900">
         <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-md bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center text-white font-bold text-xs shadow-sm">
+          <div className="w-6 h-6 rounded-md bg-gradient-to-tr from-sky-500 to-sky-600 flex items-center justify-center text-white font-bold text-xs shadow-sm">
             LN
           </div>
           <div>
             <h1 className="text-sm font-bold text-slate-100 tracking-tight flex items-center gap-1.5 leading-none">
               LeadNoria
-              <span className="text-[10px] font-normal text-slate-500">• Discover. Verify. Connect.</span>
             </h1>
             <p className="text-[10px] text-slate-400 mt-0.5 leading-none">
-              Meta Ad Library research from public commercial signals.
+              Find leads. Keep them organised.
             </p>
           </div>
         </div>
@@ -93,6 +88,18 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           );
         })}
+        <select
+          aria-label="More tools"
+          value={tabs.some(tab => tab.id === activeTab) ? '' : activeTab}
+          onChange={event => event.target.value && onSelectTab(event.target.value as NavigationTab)}
+          className="ml-auto bg-slate-950 text-slate-400 rounded px-2 py-2 text-xs max-w-28"
+        >
+          <option value="" disabled>More</option>
+          <option value="IMPORT">Import leads</option>
+          <option value="RUN_STATUS">Search progress</option>
+          <option value="ANALYTICS">Summary</option>
+          <option value="SETTINGS">Settings</option>
+        </select>
       </nav>
     </header>
   );

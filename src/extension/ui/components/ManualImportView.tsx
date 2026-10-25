@@ -132,8 +132,8 @@ export const ManualImportView: React.FC<ManualImportViewProps> = ({
               Manually import and qualify Meta Ad Library advertising signals without network scraping.
             </p>
           </div>
-          <span className="px-2.5 py-1 text-[11px] font-medium bg-emerald-950/60 text-emerald-400 border border-emerald-500/30 rounded-full flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+          <span className="px-2.5 py-1 text-[11px] font-medium bg-sky-950/60 text-sky-400 border border-sky-500/30 rounded-full flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-sky-400"></span>
             100% Offline Processing
           </span>
         </div>
@@ -295,7 +295,7 @@ export const ManualImportView: React.FC<ManualImportViewProps> = ({
                 {parseResult.totalDetected} Signals Detected
               </span>
               {parseResult.candidates.filter(c => (c.observedPhones?.length || 0) > 0 || (c.observedEmails?.length || 0) > 0).length > 0 && (
-                <span className="px-2 py-0.5 text-[11px] font-medium bg-emerald-950 text-emerald-400 border border-emerald-800 rounded-full">
+                <span className="px-2 py-0.5 text-[11px] font-medium bg-sky-950 text-sky-400 border border-sky-800 rounded-full">
                   {parseResult.candidates.filter(c => (c.observedPhones?.length || 0) > 0 || (c.observedEmails?.length || 0) > 0).length} With Contacts
                 </span>
               )}
@@ -336,10 +336,10 @@ export const ManualImportView: React.FC<ManualImportViewProps> = ({
                     <span className="truncate max-w-[200px] text-slate-500 font-mono">{cand.destinationUrl}</span>
                   )}
                   {cand.observedPhones && cand.observedPhones.length > 0 && (
-                    <span className="text-emerald-400">📞 {cand.observedPhones[0].normalizedValue || cand.observedPhones[0].rawValue}</span>
+                    <span className="text-sky-400">📞 {cand.observedPhones[0].normalizedValue || cand.observedPhones[0].rawValue}</span>
                   )}
                   {cand.observedEmails && cand.observedEmails.length > 0 && (
-                    <span className="text-emerald-400">✉️ {cand.observedEmails[0].normalizedValue || cand.observedEmails[0].rawValue}</span>
+                    <span className="text-sky-400">✉️ {cand.observedEmails[0].normalizedValue || cand.observedEmails[0].rawValue}</span>
                   )}
                 </div>
               </div>
@@ -353,9 +353,9 @@ export const ManualImportView: React.FC<ManualImportViewProps> = ({
 
           {/* Warnings */}
           {parseResult.warnings.length > 0 && (
-            <div className="p-2 bg-amber-950/40 border border-amber-800/60 rounded text-[11px] text-amber-300 flex flex-col gap-0.5">
+            <div className="p-2 bg-sky-950/40 border border-sky-800/60 rounded text-[11px] text-sky-300 flex flex-col gap-0.5">
               <span className="font-semibold flex items-center gap-1">⚠️ Input Warnings ({parseResult.warnings.length}):</span>
-              <ul className="list-disc pl-4 text-[10px] text-amber-200/90">
+              <ul className="list-disc pl-4 text-[10px] text-sky-200/90">
                 {parseResult.warnings.slice(0, 3).map((w, i) => (
                   <li key={i}>{w}</li>
                 ))}
@@ -368,31 +368,31 @@ export const ManualImportView: React.FC<ManualImportViewProps> = ({
         </div>
       )}
 
-      {importError && <div role="alert" className="p-3 rounded-lg border border-rose-700 bg-rose-950 text-rose-200 text-sm">{importError}</div>}
+      {importError && <div role="alert" className="p-3 rounded-lg border border-sky-700 bg-sky-950 text-sky-200 text-sm">{importError}</div>}
       {/* Post-Import Summary Banner / Modal */}
       {importSummary && (
         <div className="p-4 bg-slate-900 border border-sky-800/80 rounded-xl flex flex-col gap-3 shadow-lg">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold text-slate-100 flex items-center gap-1.5">
-              <span className="text-emerald-400">✓</span> Import & Qualification Complete
+              <span className="text-sky-400">✓</span> Import & Qualification Complete
             </h3>
             <span className="text-[11px] font-mono text-slate-400">Run ID: {importSummary.runId}</span>
           </div>
 
-          {importSummary.warnings.map((warning, index) => <p key={index} role="status" className="text-xs text-amber-300">{warning}</p>)}
+          {importSummary.warnings.map((warning, index) => <p key={index} role="status" className="text-xs text-sky-300">{warning}</p>)}
           {/* Metric Counts */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
-            <div className="p-2 bg-emerald-950/40 border border-emerald-800/60 rounded-lg">
-              <span className="text-lg font-bold text-emerald-400 block">{importSummary.acceptedCount}</span>
-              <span className="text-[10px] uppercase font-semibold text-emerald-300">Accepted Leads</span>
+            <div className="p-2 bg-sky-950/40 border border-sky-800/60 rounded-lg">
+              <span className="text-lg font-bold text-sky-400 block">{importSummary.acceptedCount}</span>
+              <span className="text-[10px] uppercase font-semibold text-sky-300">Accepted Leads</span>
             </div>
-            <div className="p-2 bg-amber-950/40 border border-amber-800/60 rounded-lg">
-              <span className="text-lg font-bold text-amber-400 block">{importSummary.incompleteCount}</span>
-              <span className="text-[10px] uppercase font-semibold text-amber-300">Incomplete (Uncertain)</span>
+            <div className="p-2 bg-sky-950/40 border border-sky-800/60 rounded-lg">
+              <span className="text-lg font-bold text-sky-400 block">{importSummary.incompleteCount}</span>
+              <span className="text-[10px] uppercase font-semibold text-sky-300">Incomplete (Uncertain)</span>
             </div>
-            <div className="p-2 bg-rose-950/40 border border-rose-800/60 rounded-lg">
-              <span className="text-lg font-bold text-rose-400 block">{importSummary.rejectedCount}</span>
-              <span className="text-[10px] uppercase font-semibold text-rose-300">Rejected (Non-Local)</span>
+            <div className="p-2 bg-sky-950/40 border border-sky-800/60 rounded-lg">
+              <span className="text-lg font-bold text-sky-400 block">{importSummary.rejectedCount}</span>
+              <span className="text-[10px] uppercase font-semibold text-sky-300">Rejected (Non-Local)</span>
             </div>
             <div className="p-2 bg-slate-950/60 border border-slate-800 rounded-lg">
               <span className="text-lg font-bold text-slate-300 block">{importSummary.duplicateCount}</span>

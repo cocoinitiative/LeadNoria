@@ -109,7 +109,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             >
               <span>{sec.label}</span>
               {sec.badge && (
-                <span className="px-1.5 py-0.2 text-[9px] font-bold rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                <span className="px-1.5 py-0.2 text-[9px] font-bold rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/40">
                   {sec.badge}
                 </span>
               )}
@@ -158,14 +158,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </h3>
           <ul className="space-y-2 text-[11px]">
             <li className="flex items-start gap-2">
-              <span className="text-emerald-400 font-bold">✓</span>
+              <span className="text-sky-400 font-bold">✓</span>
               <div>
                 <strong className="text-slate-200">Meta Ad Library:</strong> Public UI advertiser search, creative signals, and domain pointers.
               </div>
             </li>
 
             <li className="flex items-start gap-2">
-              <span className="text-emerald-400 font-bold">✓</span>
+              <span className="text-sky-400 font-bold">✓</span>
               <div>
                 <strong className="text-slate-200">Public Websites:</strong> Bounded same-origin verification and contact discovery.
               </div>
@@ -186,7 +186,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <button
                 type="button"
                 onClick={onClearLocalHistory}
-                className="px-3 py-1 text-xs font-medium text-rose-300 hover:text-rose-100 bg-rose-950/40 hover:bg-rose-900/40 rounded border border-rose-500/40 transition-colors focus:outline-none"
+                className="px-3 py-1 text-xs font-medium text-sky-300 hover:text-sky-100 bg-sky-950/40 hover:bg-sky-900/40 rounded border border-sky-500/40 transition-colors focus:outline-none"
               >
                 Clear Research History
               </button>

@@ -107,7 +107,7 @@ export const ExportSafeLeadWorkspaceView: React.FC<ExportSafeLeadWorkspaceViewPr
         <div>
           <h2 className="text-base font-bold tracking-tight text-white flex items-center gap-2">
             <span>Export-Safe Lead Workspace</span>
-            <span className="text-xs px-2 py-0.5 rounded font-mono font-medium bg-emerald-950 text-emerald-300 border border-emerald-800">
+            <span className="text-xs px-2 py-0.5 rounded font-mono font-medium bg-sky-950 text-sky-300 border border-sky-800">
               Part 8 Boundary
             </span>
           </h2>
@@ -136,7 +136,7 @@ export const ExportSafeLeadWorkspaceView: React.FC<ExportSafeLeadWorkspaceViewPr
             id="btn-export-csv"
             onClick={handleExportCsv}
             disabled={eligibleLeads.length === 0}
-            className="px-3 py-1.5 rounded text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white font-bold disabled:opacity-50"
+            className="px-3 py-1.5 rounded text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white font-bold disabled:opacity-50"
           >
             Export CSV ({eligibleLeads.length})
           </button>
@@ -153,9 +153,9 @@ export const ExportSafeLeadWorkspaceView: React.FC<ExportSafeLeadWorkspaceViewPr
 
       {/* Export Feedback Notice */}
       {exportNotice && (
-        <div className="bg-emerald-950/80 border-b border-emerald-800/80 px-4 py-2 text-xs text-emerald-300 flex justify-between items-center">
+        <div className="bg-sky-950/80 border-b border-sky-800/80 px-4 py-2 text-xs text-sky-300 flex justify-between items-center">
           <span>{exportNotice}</span>
-          <button onClick={() => setExportNotice(null)} className="text-emerald-400 hover:text-white">✕</button>
+          <button onClick={() => setExportNotice(null)} className="text-sky-400 hover:text-white">✕</button>
         </div>
       )}
 
@@ -180,7 +180,7 @@ export const ExportSafeLeadWorkspaceView: React.FC<ExportSafeLeadWorkspaceViewPr
         <button
           onClick={() => setActiveTab('EXPORT_SAFE')}
           className={`px-3 py-1.5 rounded-md font-medium whitespace-nowrap transition-colors ${
-            activeTab === 'EXPORT_SAFE' ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-800 font-semibold' : 'text-slate-400 hover:text-slate-200'
+            activeTab === 'EXPORT_SAFE' ? 'bg-sky-950/80 text-sky-400 border border-sky-800 font-semibold' : 'text-slate-400 hover:text-slate-200'
           }`}
         >
           3. Export-Safe Leads ({eligibleLeads.length})
@@ -188,7 +188,7 @@ export const ExportSafeLeadWorkspaceView: React.FC<ExportSafeLeadWorkspaceViewPr
         <button
           onClick={() => setActiveTab('BLOCKED')}
           className={`px-3 py-1.5 rounded-md font-medium whitespace-nowrap transition-colors ${
-            activeTab === 'BLOCKED' ? 'bg-rose-950/80 text-rose-400 border border-rose-800 font-semibold' : 'text-slate-400 hover:text-slate-200'
+            activeTab === 'BLOCKED' ? 'bg-sky-950/80 text-sky-400 border border-sky-800 font-semibold' : 'text-slate-400 hover:text-slate-200'
           }`}
         >
           4. Blocked / Restricted ({blockedLeads.length + candidateCounts.blockedGoogleCount})
@@ -250,17 +250,17 @@ export const ExportSafeLeadWorkspaceView: React.FC<ExportSafeLeadWorkspaceViewPr
                     key={lead.leadId}
                     onClick={() => setSelectedLeadId(lead.leadId)}
                     className={`p-3.5 cursor-pointer transition-colors ${
-                      isSelected ? 'bg-slate-800/80 border-l-2 border-emerald-500' : 'hover:bg-slate-800/40'
+                      isSelected ? 'bg-slate-800/80 border-l-2 border-sky-500' : 'hover:bg-slate-800/40'
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="font-semibold text-white truncate">{lead.identity.businessName}</div>
                       {isEligible ? (
-                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800 whitespace-nowrap">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-950 text-sky-400 border border-sky-800 whitespace-nowrap">
                           EXPORT ELIGIBLE
                         </span>
                       ) : (
-                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-950 text-rose-400 border border-rose-800 whitespace-nowrap">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-950 text-sky-400 border border-sky-800 whitespace-nowrap">
                           BLOCKED
                         </span>
                       )}
@@ -290,11 +290,11 @@ export const ExportSafeLeadWorkspaceView: React.FC<ExportSafeLeadWorkspaceViewPr
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-mono text-slate-400">ID: {selectedLead.leadId}</span>
                     {selectedLead.exportEligibility === 'ELIGIBLE' ? (
-                      <span id="badge-independent-public" className="px-2.5 py-0.5 rounded text-xs font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">
+                      <span id="badge-independent-public" className="px-2.5 py-0.5 rounded text-xs font-bold bg-sky-950 text-sky-400 border border-sky-800">
                         INDEPENDENT PUBLIC SOURCE [EXPORT ELIGIBLE]
                       </span>
                     ) : (
-                      <span id="badge-google-restricted" className="px-2.5 py-0.5 rounded text-xs font-bold bg-rose-950 text-rose-400 border border-rose-800">
+                      <span id="badge-google-restricted" className="px-2.5 py-0.5 rounded text-xs font-bold bg-sky-950 text-sky-400 border border-sky-800">
                         GOOGLE RESTRICTED [NOT EXPORTABLE]
                       </span>
                     )}
@@ -313,14 +313,14 @@ export const ExportSafeLeadWorkspaceView: React.FC<ExportSafeLeadWorkspaceViewPr
                   {selectedLead.exportEligibility === 'ELIGIBLE' ? (
                     <button
                       onClick={() => onBlockExport?.(selectedLead.leadId, 'Manual researcher block')}
-                      className="px-3 py-1.5 rounded text-xs font-medium bg-rose-950 hover:bg-rose-900 text-rose-300 border border-rose-800"
+                      className="px-3 py-1.5 rounded text-xs font-medium bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800"
                     >
                       Block Export
                     </button>
                   ) : (
                     <button
                       onClick={() => onUnblockExport?.(selectedLead.leadId)}
-                      className="px-3 py-1.5 rounded text-xs font-medium bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800"
+                      className="px-3 py-1.5 rounded text-xs font-medium bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800"
                     >
                       Unblock Export
                     </button>
@@ -355,7 +355,7 @@ export const ExportSafeLeadWorkspaceView: React.FC<ExportSafeLeadWorkspaceViewPr
                     <span className="text-slate-500">Emails ({selectedLead.contact.publicEmails.length}):</span>
                     <div className="mt-1 flex flex-wrap gap-1.5">
                       {selectedLead.contact.publicEmails.map((em, idx) => (
-                        <span key={idx} className="px-2 py-0.5 rounded bg-slate-800 font-mono text-emerald-400 border border-slate-700">
+                        <span key={idx} className="px-2 py-0.5 rounded bg-slate-800 font-mono text-sky-400 border border-slate-700">
                           {em.email} ({em.classification})
                         </span>
                       ))}
@@ -385,7 +385,7 @@ export const ExportSafeLeadWorkspaceView: React.FC<ExportSafeLeadWorkspaceViewPr
                       <div key={idx} className="flex items-center justify-between p-2 rounded bg-slate-800/60 border border-slate-800">
                         <span className="font-semibold text-white">{p.fullName}</span>
                         <span className="text-slate-400">{p.jobTitle}</span>
-                        {p.email && <span className="text-emerald-400 font-mono">{p.email}</span>}
+                        {p.email && <span className="text-sky-400 font-mono">{p.email}</span>}
                       </div>
                     ))
                   )}
@@ -401,8 +401,8 @@ export const ExportSafeLeadWorkspaceView: React.FC<ExportSafeLeadWorkspaceViewPr
                       key={idx}
                       className={`px-2 py-0.5 rounded font-mono text-[11px] border ${
                         rc.includes('PRESENT') || rc.includes('SOURCE')
-                          ? 'bg-emerald-950/70 text-emerald-300 border-emerald-800'
-                          : 'bg-rose-950/70 text-rose-300 border-rose-800'
+                          ? 'bg-sky-950/70 text-sky-300 border-sky-800'
+                          : 'bg-sky-950/70 text-sky-300 border-sky-800'
                       }`}
                     >
                       {rc}

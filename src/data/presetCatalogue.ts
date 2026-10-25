@@ -31,6 +31,21 @@ export interface ResearchPreset {
 export const PRESET_CATALOGUE_VERSION = 'v2.1.0';
 
 export const RESEARCH_PRESETS: ResearchPreset[] = [
+  {
+    preset_id: 'retail_furniture_home',
+    name: 'Furniture & Home Decor',
+    industry: 'Home & Living',
+    sub_industry: 'Furniture',
+    description: 'Furniture shops, makers, and home decor businesses.',
+    primary_keywords: ['furniture', 'sofa', 'home decor', 'ফার্নিচার'],
+    secondary_keywords: ['dining table', 'bedroom furniture', 'custom furniture'],
+    default_location_behavior: { defaultLocationCode: 'BD', allowsGlobal: true },
+    website_required: false,
+    default_result_limit: 200,
+    version: 'v2.2.0',
+    status: 'ACTIVE',
+    aliases: ['Furniture', 'Home Decor', 'ফার্নিচার']
+  },
   // ==========================================
   // 1. TECHNOLOGY & SOFTWARE
   // ==========================================

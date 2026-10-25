@@ -171,8 +171,8 @@ const createHtml = (isSidepanel = false) => `<!DOCTYPE html>
     html, body {
       margin: 0;
       padding: 0;
-      background-color: #0f172a;
-      color: #f8fafc;
+      background-color: #19171c;
+      color: #eeebf0;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       /* overflow-x:hidden prevents horizontal scroll at document level;
          overflow-y must NOT be hidden — the internal flex scroll container handles vertical scroll */
@@ -193,9 +193,9 @@ const createHtml = (isSidepanel = false) => `<!DOCTYPE html>
 </head>
 <body>
   <div id="root">
-    <div id="leadnoria-boot-skeleton" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;background:#0f172a;color:#94a3b8;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;gap:12px;user-select:none;">
-      <div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#3b82f6,#2563eb);display:flex;align-items:center;justify-content:center;font-weight:bold;color:#ffffff;font-size:20px;box-shadow:0 0 15px rgba(59,130,246,0.3);">L</div>
-      <div style="font-size:14px;font-weight:600;color:#f8fafc;letter-spacing:0.02em;">LeadNoria</div>
+    <div id="leadnoria-boot-skeleton" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;background:#19171c;color:#aaa1b2;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;gap:12px;user-select:none;">
+      <div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#9678aa,#2563eb);display:flex;align-items:center;justify-content:center;font-weight:bold;color:#ffffff;font-size:20px;box-shadow:0 0 15px rgba(59,130,246,0.3);">L</div>
+      <div style="font-size:14px;font-weight:600;color:#eeebf0;letter-spacing:0.02em;">LeadNoria</div>
       <div style="font-size:11px;color:#64748b;">Loading workspace...</div>
     </div>
   </div>
@@ -254,7 +254,9 @@ console.log('[build-extension] Bundled app.js');
 let compiledTailwind = '';
 const distAssetsDir = path.join(rootDir, 'dist/assets');
 if (fs.existsSync(distAssetsDir)) {
-  const cssFiles = fs.readdirSync(distAssetsDir).filter(f => f.endsWith('.css'));
+  // Repeated builds can leave old hashes behind. Use the CSS linked by this build.
+  const distIndex = fs.readFileSync(path.join(rootDir, 'dist', 'index.html'), 'utf-8');
+  const cssFiles = [...distIndex.matchAll(/href="[^\"]*\/assets\/([^"/]+\.css)"/g)].map(match => match[1]);
   if (cssFiles.length > 0) {
     compiledTailwind = fs.readFileSync(path.join(distAssetsDir, cssFiles[0]), 'utf-8');
     console.log(`[build-extension] Injected compiled Tailwind CSS (${Math.round(compiledTailwind.length / 1024)} KB) from ${cssFiles[0]}`);
@@ -266,10 +268,10 @@ ${compiledTailwind}
 
 /* Extension-specific UI resets */
 * { box-sizing: border-box; }
-body { margin: 0; padding: 0; background: #0f172a; color: #f8fafc; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+body { margin: 0; padding: 0; background: #19171c; color: #eeebf0; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
 button, input, select, textarea { font-family: inherit; }
 ::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: #0f172a; }
+::-webkit-scrollbar-track { background: #19171c; }
 ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #475569; }
 `;

@@ -28,6 +28,7 @@ import type { ResearchIntent } from './relevanceEngine.ts';
 export type WebsiteRequirementMode =
   | 'WITH_WEBSITE'
   | 'WITHOUT_WEBSITE'
+  | 'WITHOUT_OBSERVED_WEBSITE'
   | 'BOTH'
   | 'ANY'
   | 'WITH'
@@ -148,6 +149,14 @@ export function evaluateLeadQualificationGates(
       reasons.push('Configured website requirement (WITH_WEBSITE) failed: external website destination is unobserved, missing, or unverified.');
     } else {
       passedGates.push('GATE_WEBSITE');
+    }
+  } else if (reqWebMode === 'WITHOUT_OBSERVED_WEBSITE') {
+    if (lead.websiteState === 'found') {
+      failedGates.push('GATE_WEBSITE');
+      reasons.push('An external website was observed in this ad.');
+    } else {
+      passedGates.push('GATE_WEBSITE');
+      reasons.push('No external website was observed; the business may still have one.');
     }
   } else if (reqWebMode === 'WITHOUT_WEBSITE' || reqWebMode === 'WITHOUT') {
     if (lead.websiteState === 'found' || Boolean(lead.destinationUrl || lead.destinationDomain)) {

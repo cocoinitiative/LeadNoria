@@ -98,7 +98,7 @@ export const RunStatusView: React.FC<RunStatusViewProps> = ({
               type="button"
               onClick={onStop}
               disabled={!runStatus.isStoppable}
-              className="px-2.5 py-1 text-xs font-medium text-rose-300 bg-rose-950/40 hover:bg-rose-900/40 rounded border border-rose-500/40 focus:outline-none focus:ring-2 focus:ring-rose-400"
+              className="px-2.5 py-1 text-xs font-medium text-sky-300 bg-sky-950/40 hover:bg-sky-900/40 rounded border border-sky-500/40 focus:outline-none focus:ring-2 focus:ring-sky-400"
               aria-label="Stop research run"
             >
               ⏹ Stop
@@ -109,7 +109,7 @@ export const RunStatusView: React.FC<RunStatusViewProps> = ({
             <button
               type="button"
               onClick={onViewResults}
-              className="px-3 py-1 text-xs font-semibold text-emerald-300 bg-emerald-950/60 hover:bg-emerald-900/60 rounded border border-emerald-500/40 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+              className="px-3 py-1 text-xs font-semibold text-sky-300 bg-sky-950/60 hover:bg-sky-900/60 rounded border border-sky-500/40 focus:outline-none focus:ring-2 focus:ring-sky-400"
               aria-label="View research results"
             >
               View Results →
@@ -138,9 +138,9 @@ export const RunStatusView: React.FC<RunStatusViewProps> = ({
 
       {/* Warnings & Diagnostics notices */}
       {runStatus.hasWarnings && (
-        <div className="p-2.5 bg-amber-950/30 border border-amber-500/30 rounded text-xs text-amber-200">
+        <div className="p-2.5 bg-sky-950/30 border border-sky-500/30 rounded text-xs text-sky-200">
           <strong className="block font-semibold mb-0.5">Run Completed With Warnings:</strong>
-          <ul className="list-disc list-inside text-[11px] text-amber-300/90 space-y-0.5">
+          <ul className="list-disc list-inside text-[11px] text-sky-300/90 space-y-0.5">
             {runStatus.warningMessages.map((msg, i) => (
               <li key={i}>{msg}</li>
             ))}
@@ -175,11 +175,11 @@ export const RunStatusView: React.FC<RunStatusViewProps> = ({
                   : stage.isCompleted
                   ? 'bg-slate-950/50 border-slate-800 text-slate-300'
                   : stage.isBlocked
-                  ? 'bg-purple-950/30 border-purple-500/40 text-purple-300'
+                  ? 'bg-sky-950/30 border-sky-500/40 text-sky-300'
                   : stage.isSkipped
                   ? 'bg-slate-950/30 border-slate-800/80 text-slate-500'
                   : stage.isFailed
-                  ? 'bg-rose-950/30 border-rose-500/40 text-rose-300'
+                  ? 'bg-sky-950/30 border-sky-500/40 text-sky-300'
                   : 'bg-slate-950/20 border-slate-900 text-slate-600'
               }`}
             >
