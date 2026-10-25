@@ -35,7 +35,8 @@ import {
   QueryFrontier,
   MAX_QUERIES_PER_RESEARCH_RUN
 } from './queryPlanner.ts';
-import { isLiveCollectionPermitted, isExternalWebsiteCrawlingPermitted } from '../config/collectionGate.ts';
+import { isExternalWebsiteCrawlingPermitted } from '../config/collectionGate.ts';
+import { canStartExtensionCollection } from './collectionAvailability.ts';
 import {
   evaluateLeadQualification,
   buildBusinessIntelligenceProfile,
@@ -276,8 +277,8 @@ export async function executeResearchPipeline(
     : Math.min(Math.max(1, requestedLimit || MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH), MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH);
   const targetLeadCount = isAutoDiscovery ? undefined : effectiveCeiling;
 
-  // Fail-Closed Safety Gate (Phase 0.1): Live Meta scraping is disabled and unauthorized
-  if (!isLiveCollectionPermitted()) {
+  // Require the installed extension runtime before opening collection tabs.
+  if (!canStartExtensionCollection()) {
     const blockedRun: ExtensionResearchRun = providedRun || {
       runId,
       researchName: payload.researchName || `${payload.mode === 'PRESET' ? payload.presetName || 'Preset' : keywords[0]} in ${payload.locationName}`,
@@ -310,7 +311,7 @@ export async function executeResearchPipeline(
       logs: [
         {
           timestamp: new Date().toLocaleTimeString(),
-          message: 'Live automated collection from Meta Ad Library is disabled and unauthorized (Phase 0A gate: NO-GO).',
+          message: 'Collection needs the installed Chrome extension runtime.',
           stage: 'SAFETY_GATE'
         }
       ],
@@ -322,7 +323,7 @@ export async function executeResearchPipeline(
     blockedRun.status = 'BLOCKED';
     blockedRun.stopReason = 'COLLECTION_NOT_AUTHORIZED';
     await saveActiveRun(blockedRun);
-    broadcastProgress(blockedRun, 'BLOCKED', 'Live automated collection is disabled and unauthorized.');
+    broadcastProgress(blockedRun, 'BLOCKED', 'Collection needs the installed Chrome extension runtime.');
     return blockedRun;
   }
 
@@ -336,6 +337,7 @@ export async function executeResearchPipeline(
       allowProbableLocal: payload.allowProbableLocal,
       requiredCtaTypes: payload.requiredCtaTypes as any,
       requiredDestinationTypes: payload.requiredDestinationTypes as any,
+      exclusions: payload.exclusions,
       websiteRequirement: payload.websiteRequirement
     }
   );
@@ -353,7 +355,8 @@ export async function executeResearchPipeline(
     allowProbableLocal: payload.allowProbableLocal,
     requiredCtaTypes: payload.requiredCtaTypes,
     requiredDestinationTypes: payload.requiredDestinationTypes,
-    websiteRequirement: payload.websiteRequirement,
+    exclusions: payload.exclusions,
+      websiteRequirement: payload.websiteRequirement,
     researchIntent: researchIntent,
     researchMode: isAutoDiscovery ? 'AUTO_DISCOVERY' : undefined,
     maxFinalUniqueRelevantLeads: isAutoDiscovery ? MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH : undefined,
@@ -510,7 +513,7 @@ export async function executeResearchPipeline(
       // In Auto-Discovery mode, scroll through accessible results for currentKeyword until source exhaustion or stall
       const maxScrolls = isAutoDiscovery ? 60 : Math.max(25, Math.ceil((targetLeadCount || 10) * 3));
 
-      while (scrollAttempts < maxScrolls && !cancelledRuns.has(runId)) {
+      while (scrollAttempts < maxScrolls && !cancelledRuns.has(runId) && !pausedRuns.has(runId)) {
         const liveCount = initialRun.counters?.finalUniqueRelevantLeads ?? initialRun.counters?.finalUniqueLeads ?? existingEntitiesMap.size;
         if (liveCount >= effectiveCeiling) break;
 
@@ -744,6 +747,12 @@ export async function executeResearchPipeline(
             break;
           }
         } else {
+          consecutiveNoNewCards++;
+          if (response?.payload?.status === 'END_OF_RESULTS' || consecutiveNoNewCards >= 3) {
+            isStalled = response?.payload?.status !== 'END_OF_RESULTS';
+            broadcastProgress(initialRun, 'COLLECTING', 'No additional ad cards were returned. Moving to the next query.');
+            break;
+          }
           broadcastProgress(initialRun, 'COLLECTING', `Waiting for ad cards to render (attempt ${scrollAttempts})...`);
           await wait(2000);
         }
@@ -774,6 +783,10 @@ export async function executeResearchPipeline(
       initialRun.status = 'CANCELLED';
       initialRun.stopReason = 'USER_CANCELLED';
       broadcastProgress(initialRun, 'CANCELLED', `Research was explicitly cancelled by user.`);
+    } else if (pausedRuns.has(runId)) {
+      initialRun.status = 'PAUSED';
+      initialRun.stopReason = 'USER_PAUSED';
+      broadcastProgress(initialRun, 'PAUSED', 'Research paused by user.');
     } else if (initialRun.stopReason === 'BROWSER_TAB_CLOSED' || initialRun.status === 'BROWSER_TAB_CLOSED') {
       initialRun.status = 'BROWSER_TAB_CLOSED';
       initialRun.stopReason = 'BROWSER_TAB_CLOSED';
@@ -909,6 +922,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
             allowProbableLocal: message.payload.allowProbableLocal,
             requiredCtaTypes: message.payload.requiredCtaTypes as any,
             requiredDestinationTypes: message.payload.requiredDestinationTypes as any,
+            exclusions: message.payload.exclusions,
             websiteRequirement: message.payload.websiteRequirement
           }
         );
@@ -926,7 +940,8 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
           allowProbableLocal: message.payload.allowProbableLocal,
           requiredCtaTypes: message.payload.requiredCtaTypes,
           requiredDestinationTypes: message.payload.requiredDestinationTypes,
-          websiteRequirement: message.payload.websiteRequirement,
+          exclusions: message.payload.exclusions,
+            websiteRequirement: message.payload.websiteRequirement,
           researchIntent: researchIntent,
           researchMode: isAutoDiscovery ? 'AUTO_DISCOVERY' : undefined,
           maxFinalUniqueRelevantLeads: isAutoDiscovery ? MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH : undefined,
@@ -954,18 +969,18 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
           totalAdsInspected: 0
         };
 
-        // Fail-Closed Safety Gate (Phase 0.1): Live Meta scraping is disabled and unauthorized
-        if (!isLiveCollectionPermitted()) {
+        // Require the installed extension runtime before opening collection tabs.
+        if (!canStartExtensionCollection()) {
           initialRun.status = 'BLOCKED';
           initialRun.stopReason = 'COLLECTION_NOT_AUTHORIZED';
           initialRun.logs.push({
             timestamp: new Date().toLocaleTimeString(),
-            message: 'Live automated collection from Meta Ad Library is disabled and unauthorized (Phase 0A gate: NO-GO).',
+            message: 'Collection needs the installed Chrome extension runtime.',
             stage: 'SAFETY_GATE'
           });
           saveActiveRun(initialRun).catch(() => {});
-          broadcastProgress(initialRun, 'BLOCKED', 'Live automated collection is disabled and unauthorized.');
-          sendResponse({ success: false, runId, run: initialRun, error: 'COLLECTION_NOT_AUTHORIZED: Live automated collection is disabled and unauthorized.' });
+          broadcastProgress(initialRun, 'BLOCKED', 'Collection needs the installed Chrome extension runtime.');
+          sendResponse({ success: false, runId, run: initialRun, error: 'COLLECTION_NOT_AUTHORIZED: Collection needs the installed Chrome extension runtime.' });
           return false;
         }
 
@@ -973,8 +988,14 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
         saveActiveRun(initialRun).catch(() => {});
 
         // Launch async pipeline in background
-        executeResearchPipeline(message.payload, runId, initialRun).catch(err => {
+        executeResearchPipeline(message.payload, runId, initialRun).catch(async err => {
           console.error('[service-worker] Background pipeline error:', err);
+          initialRun.status = 'FAILED';
+          initialRun.stopReason = 'FAILED';
+          initialRun.challengeReason = err?.message || 'The search could not start or save its results.';
+          initialRun.completedAt = new Date().toISOString();
+          broadcastProgress(initialRun, 'FAILED', initialRun.challengeReason);
+          await saveActiveRun(initialRun).catch(() => {});
         });
 
         // Respond immediately with created run and runId
@@ -1090,7 +1111,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
     if (message.type === 'RESUME_RESEARCH') {
       sendResponse({
         success: false,
-        error: 'COLLECTION_NOT_AUTHORIZED: Live automated collection is disabled and unauthorized.'
+        error: 'COLLECTION_NOT_AUTHORIZED: Collection needs the installed Chrome extension runtime.'
       });
       return false;
     }

@@ -17,7 +17,10 @@ import { StatusBadge } from './StatusBadge.tsx';
 import { toFriendlyStatus } from '../humanLabels.ts';
 import { getSafeExternalUrl } from '../security.ts';
 import { writeClipboardText } from '../../clipboard/index.ts';
-import { leadResultsToSheets } from '../../clipboard/leadSheets.ts';
+import { leadResultsToSheets, LEAD_EXPORT_COLUMNS, type LeadExportColumn } from '../../clipboard/leadSheets.ts';
+import { isNewToSavedLists } from '../../localBusinessHistory.ts';
+
+const EMPTY_BUSINESS_HISTORY: ReadonlySet<string> = new Set();
 
 export type SortOption =
   | 'NAME_ASC'
@@ -37,8 +40,9 @@ interface ResultsTableViewProps {
   onClearSelection: () => void;
   onInspectRecord: (recordId: string) => void;
   onOpenExportModal: () => void;
-  onDownloadCsv?: (recordIds: string[]) => void;
+  onDownloadCsv?: (recordIds: string[], columns?: LeadExportColumn[]) => void;
   initialWebsitePreference?: string;
+  seenBusinessKeys?: ReadonlySet<string>;
 }
 
 export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
@@ -50,10 +54,14 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
   onInspectRecord,
   onOpenExportModal,
   onDownloadCsv,
-  initialWebsitePreference = 'ANY'
+  initialWebsitePreference = 'ANY',
+  seenBusinessKeys = EMPTY_BUSINESS_HISTORY
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [websitePreference, setWebsitePreference] = useState(initialWebsitePreference);
+  const [newBusinessesOnly, setNewBusinessesOnly] = useState(false);
+  const [customColumns, setCustomColumns] = useState(false);
+  const [exportColumns, setExportColumns] = useState<LeadExportColumn[]>([...LEAD_EXPORT_COLUMNS]);
   const [sourceFilter, setSourceFilter] = useState<string>('ALL');
   const [qualificationFilter, setQualificationFilter] = useState<string>('ALL');
   const [targetCountryFilter, setTargetCountryFilter] = useState<string>('ALL');
@@ -115,7 +123,7 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
   }, [results]);
 
   const hasActiveFilters = Boolean(
-    searchTerm.trim() !== '' ||
+    newBusinessesOnly || searchTerm.trim() !== '' ||
     sourceFilter !== 'ALL' ||
     qualificationFilter !== 'ALL' ||
     targetCountryFilter !== 'ALL' ||
@@ -135,6 +143,7 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
   );
 
   const handleClearFilters = () => {
+    setNewBusinessesOnly(false);
     setSearchTerm('');
     setSourceFilter('ALL');
     setQualificationFilter('ALL');
@@ -158,6 +167,7 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
   // Filter & Search Logic
   const filteredResults = useMemo(() => {
     return results.filter(r => {
+      if (newBusinessesOnly && !isNewToSavedLists(r.canonicalRecord || r, seenBusinessKeys)) return false;
       if ((websitePreference === 'WITH_WEBSITE' || websitePreference === 'WITH') && !r.websiteUrl) return false;
       if ((websitePreference === 'WITHOUT_OBSERVED_WEBSITE' || websitePreference === 'WITHOUT_WEBSITE' || websitePreference === 'WITHOUT') && r.websiteUrl) return false;
       // Local text search
@@ -284,7 +294,7 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
     categoryFilter,
     requirePhone,
     requireEmail,
-    requireWebsite, websitePreference,
+    requireWebsite, websitePreference, newBusinessesOnly, seenBusinessKeys,
     requirePerson
   ]);
 
@@ -366,7 +376,7 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
 
     try {
       // Consume active structured results through Meta clipboard projection
-      const tsv = leadResultsToSheets(csvRows);
+      const tsv = leadResultsToSheets(csvRows, customColumns ? exportColumns : undefined);
       const result = await writeClipboardText(tsv);
 
       if (result.success) {
@@ -402,6 +412,8 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
             <option value="ANY">All leads</option><option value="WITH_WEBSITE">With a website</option><option value="WITHOUT_OBSERVED_WEBSITE">No website seen</option>
           </select>
         </label>
+        <label className="text-xs text-slate-300 flex items-center gap-2"><input type="checkbox" checked={newBusinessesOnly} onChange={e => { setNewBusinessesOnly(e.target.checked); setPage(1); }} />Only new businesses in my saved lists</label>
+        {newBusinessesOnly && <p className="text-xs text-slate-400">Compared with older lists on this device. Businesses without a usable identity are left out.</p>}
         {websitePreference === 'WITHOUT_OBSERVED_WEBSITE' && <p className="text-xs text-slate-400">No website was visible in the ad. The business may still have one.</p>}
         <div className="flex flex-wrap items-center gap-2">
           {/* Search Input */}
@@ -422,7 +434,7 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
             type="button"
             id="meta-copy-all-btn"
             onClick={handleCopyAll}
-            disabled={csvRows.length === 0 || isCopying}
+            disabled={csvRows.length === 0 || isCopying || (customColumns && exportColumns.length === 0)}
             className={`px-3 py-1.5 text-xs font-semibold rounded transition-colors flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-sky-400 cursor-pointer ${
               csvRows.length > 0 && !isCopying
                 ? 'bg-slate-800 hover:bg-slate-700 text-sky-400 border border-slate-700'
@@ -433,13 +445,15 @@ export const ResultsTableView: React.FC<ResultsTableViewProps> = ({
             <span>📋</span> {isCopying ? 'Copying...' : `Copy for Sheets (${csvRows.length})`}
           </button>
 
-          {onDownloadCsv && <button type="button" disabled={csvRows.length === 0}
-            onClick={() => onDownloadCsv(csvRows.map(row => row.recordId))}
+          {onDownloadCsv && <button type="button" disabled={csvRows.length === 0 || (customColumns && exportColumns.length === 0)}
+            onClick={() => onDownloadCsv(csvRows.map(row => row.recordId), customColumns ? exportColumns : undefined)}
             className="px-3 py-2 text-xs font-semibold rounded-lg bg-sky-700 text-white disabled:opacity-50">
             Download CSV ({csvRows.length})
           </button>}
           {/* Export Button */}
           <details className="text-xs text-slate-400"><summary className="cursor-pointer">Export options</summary>
+          <label className="flex items-center gap-2 my-2"><input type="checkbox" checked={customColumns} onChange={e => setCustomColumns(e.target.checked)} />Choose columns for CSV and Sheets</label>
+          {customColumns && <fieldset className="grid grid-cols-2 gap-2 my-2"><legend>Export columns</legend>{LEAD_EXPORT_COLUMNS.map(column => <label key={column} className="flex gap-2 items-center"><input type="checkbox" checked={exportColumns.includes(column)} onChange={e => setExportColumns(columns => e.target.checked ? LEAD_EXPORT_COLUMNS.filter(value => value === column || columns.includes(value)) : columns.filter(value => value !== column))} />{column}</label>)}{!exportColumns.length && <p role="alert">Choose at least one column.</p>}</fieldset>}
           <button
             type="button"
             onClick={onOpenExportModal}

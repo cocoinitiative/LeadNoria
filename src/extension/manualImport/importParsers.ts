@@ -16,7 +16,7 @@
 
 import type { ScrapedAdCandidate, ContactObservation } from '../types.ts';
 import { extractContactsFromText, normalizeContactPhone, normalizeContactEmail } from '../contactQuality.ts';
-import { classifyCta, classifyDestination } from '../destinationClassifier.ts';
+import { classifyCta, classifyDestination, resolveObservedDestinationUrl } from '../destinationClassifier.ts';
 
 export interface ParseResult {
   candidates: ScrapedAdCandidate[];
@@ -195,18 +195,20 @@ export function parseManualAdText(rawText: string, defaultCountry: string = 'BD'
     const urls = block.match(/https?:\/\/[^\s"'<>]+/gi) || [];
     for (const u of urls) {
       try {
-        const parsed = new URL(u);
+        const resolved = resolveObservedDestinationUrl(u);
+        if (!resolved) continue;
+        const parsed = new URL(resolved);
         const host = parsed.hostname.toLowerCase();
-        if (host.includes('facebook.com') || host.includes('fb.com')) {
+        if (host === 'facebook.com' || host.endsWith('.facebook.com') || host === 'fb.com' || host.endsWith('.fb.com')) {
           if (parsed.pathname.includes('/ads/library')) {
             // Meta Ad Library internal link, skip as destination
             continue;
           }
           if (!facebookPageUrl) {
-            facebookPageUrl = u;
+            facebookPageUrl = resolved;
           }
         } else if (!destinationUrl) {
-          destinationUrl = u;
+          destinationUrl = resolved;
           destinationDomain = host.replace(/^www\./, '');
         }
       } catch {
@@ -224,6 +226,7 @@ export function parseManualAdText(rawText: string, defaultCountry: string = 'BD'
       if (/^(?:CTA|Call\s*to\s*Action|Button|Page|Advertiser)\s*[:=]/i.test(line)) return false;
       if (destinationUrl && line.includes(destinationUrl)) return false;
       if (facebookPageUrl && line.includes(facebookPageUrl)) return false;
+      if (urls.some(url => line === url)) return false;
       return true;
     });
     const bodyCopy = bodyLines.join('\n').trim();
@@ -299,7 +302,7 @@ export function parseMetaAdLibraryUrls(urlInput: string, defaultCountry: string 
     try {
       const u = new URL(urlStr.startsWith('http') ? urlStr : `https://${urlStr}`);
       const host = u.hostname.toLowerCase();
-      if (!host.includes('facebook.com') && !host.includes('meta.com')) {
+      if (!['facebook.com', 'meta.com'].some(domain => host === domain || host.endsWith(`.${domain}`))) {
         warnings.push(`Line #${idx + 1}: "${urlStr.substring(0, 50)}" is not a recognized Meta Ad Library URL.`);
         continue;
       }
@@ -525,7 +528,8 @@ export function parseUserSuppliedCsv(csvContent: string, defaultCountry: string 
     const pageName = getVal(pageNameCol);
     const bodyCopy = getVal(copyCol);
     const ctaText = getVal(ctaCol);
-    const destinationUrl = getVal(destCol);
+    const rawDestinationUrl = getVal(destCol);
+    const destinationUrl = resolveObservedDestinationUrl(rawDestinationUrl) || rawDestinationUrl;
     const explicitPhone = getVal(phoneCol);
     const explicitEmail = getVal(emailCol);
     const statusVal = getVal(statusCol);

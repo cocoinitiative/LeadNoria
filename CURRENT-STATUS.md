@@ -1,33 +1,25 @@
 # Current project status — 25 October 2026
 
-This repository preserves the original MIT-licensed LeadNoria history and adds the current local review changes.
+## Current extension
 
-## Implemented and tested
+- User-requested Meta Ad Library collection now checks installed Chrome extension capabilities instead of the permanently false server gate. UI and background worker use the same check. Hosted previews cannot start collection.
+- Search uses country and All Ads URL parameters. Preset identity survives plan review. Empty scans terminate; pause remains paused. Startup failures are visible rather than silently leaving a running screen.
+- Existing login/challenge and rate-limit stops remain. No challenge bypass, paid API, external website crawling, or server collection was added.
+- Local URL-wrapper decoding, messaging/short-link classification, conservative business history, only-new-business filter, local follow-up notes/status, excluded keywords and configurable CSV/Sheets columns are included.
+- Country inference remains evidence-based; missing evidence is unknown. An observed website link is not proof of reachability or ownership.
 
-- Simplified Search / Leads / Saved lists navigation, editable searchable presets, website preferences, compact lead table and a muted purple/black/white palette.
-- Google Sheets copy uses separate columns, respects selected/filtered exportable rows, preserves Unicode and escapes spreadsheet formulas.
-- Saved manual lists now recover from IndexedDB in the hosted browser without Chrome storage APIs; reload and list opening were verified.
+## Verification
 
-- Separate ad target country from inferred business origin; strict local qualification retains unknown/probable states.
-- Distinguish CTA wording, external websites, messaging, phone and unknown destinations.
-- Atomic manual-import persistence, visible save failures and snapshot warnings, and persisted ad-ID deduplication within matching country/research criteria.
-- Stable result identities and direct selected/filtered CSV downloads with Unicode and review evidence preserved.
-- TypeScript, build, 110 existing scoped regression checks, a new offline end-to-end flow, and nine fault-injection cases passed.
-- Browser-hosted extension UI was exercised for import, reload/dedup and CSV downloads. One real public Meta ad was manually processed and exported; this was not automated extension scraping.
+`npm test` runs TypeScript, the unpacked build, and 27 current offline suites. The new mocked Chrome pipeline exercises startup, country/All Ads URLs, empty results, persistence, pause and challenge stop. Mock tests make no live Meta requests.
 
-## Still unverified or blocked
+Previous hosted-browser checks covered imports, reload, business history, local notes, Sheets columns and a downloaded CSV. They do not prove MV3 runtime behavior.
 
-- Actual Chrome MV3 install, service-worker/content-script integration and automatic scrolling/scraping are unverified. The in-app test browser cannot load extensions; personal Chrome testing was stopped at the user's request.
-- The live Meta collection and external crawling gates remain disabled.
-- `npm test` currently stops because historical v1.7.5/v1.7.6 archives referenced by the test runner are absent. This is not an all-tests-passing production release.
-- Older README sections, release metadata and historical archives remain inherited snapshots. The local `extension/` directory was regenerated for the simplified UI. Run `npm ci` then `npm run build` to regenerate it from source. The earlier uploaded review build predates this UI update.
+Historical release-archive tests remain separate (`npm run verify:legacy`); older missing archives have not been fabricated. No claim that every historical test passes is made.
 
-## Review material
+## Remaining limits
 
-The latest simplified-UI package is `extension.zip` at the repository root; `extension/` contains the matching unpacked runtime. The ZIP under `review/` is an older audit artifact. See `docs/current-review/simple-ui-bn.md` for the UI verification scope.
+Real installed Chrome MV3 integration, current Meta DOM compatibility, automatic scrolling on live ads, service-worker suspension/resumption and full live collection remain unverified. The user will perform the live test. A passing offline test does not establish production readiness.
 
-See `docs/current-review/` for Bengali audit and verification reports. Review artifacts, when uploaded, are in `review/`. They contain local test samples, not a licensed lead database.
+`extension.zip` is the current distributable; extract and load its manifest folder. `extension/` is the matching unpacked runtime. Older `review/` packages are historical.
 
 Original upstream: https://github.com/nafiz-pranto/LeadNoria
-
-No claim of Meta authorization, Chrome Web Store approval, guaranteed country attribution or profitable production readiness is made.

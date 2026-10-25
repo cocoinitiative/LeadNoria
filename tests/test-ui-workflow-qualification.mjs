@@ -345,7 +345,7 @@ console.log('===================================================================
 
   const row = toResultRowViewModel(webLead);
   check(13, 'External website destination classified as EXTERNAL_WEBSITE', row.destinationType === 'EXTERNAL_WEBSITE');
-  check(13, 'Website state marked found', row.websiteState === 'found');
+  check(13, 'Observed website is shown without claiming live verification', row.websiteState === 'WEBSITE_PRESENT_UNVERIFIED' && row.dataSignals.websiteVerified === false);
 }
 
 // -----------------------------------------------------------------------------

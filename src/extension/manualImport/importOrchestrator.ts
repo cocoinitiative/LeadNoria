@@ -23,7 +23,7 @@ import type {
   CheckpointRecord
 } from '../types.ts';
 import { processBatch } from '../bulkProcessor.ts';
-import { compileResearchIntent } from '../relevanceEngine.ts';
+import { compileResearchIntent, LeadRelevanceEngine } from '../relevanceEngine.ts';
 import { getManualImportRuns, saveManualImportAtomically } from '../bulkStore.ts';
 import { evaluateLeadQualificationGates } from '../qualificationGate.ts';
 import { evaluateGeographicOrigin } from '../geographicClassifier.ts';
@@ -39,6 +39,7 @@ export interface ManualImportOptions {
   presetName?: string;
   runId?: string;
   runName?: string;
+  exclusions?: string[];
 }
 
 export interface ManualImportSummary {
@@ -61,7 +62,8 @@ function sameImportScope(run: ExtensionResearchRun, options: ManualImportOptions
   return run.countryCode === countryCode && normalize(run.keywords || []) === normalize(keywords)
     && (run.presetId || '') === (options.presetId || '')
     && (run.strictLocalMode !== false) === (options.strictLocalMode !== false)
-    && (run.allowProbableLocal === true) === (options.allowProbableLocal === true);
+    && (run.allowProbableLocal === true) === (options.allowProbableLocal === true)
+    && normalize(run.exclusions || []) === normalize(options.exclusions || []);
 }
 
 function chromeStorageCall<T>(operation: (done: (result: T) => void) => void): Promise<T> {
@@ -122,7 +124,8 @@ async function executeImport(
     countryCode,
     {
       strictLocalMode,
-      allowProbableLocal
+      allowProbableLocal,
+      exclusions: options.exclusions
     }
   );
 
@@ -210,6 +213,8 @@ async function executeImport(
     }, countryCode);
 
     const isForeign = geoEval.classification === 'FOREIGN_VERIFIED';
+    const relevance = LeadRelevanceEngine.evaluateCandidate(cand, intent);
+    const isExcluded = relevance.reasonCode === 'REJECT_PRESET_EXCLUSION';
     const cta = classifyCta(cand.ctaText);
     const destination = classifyDestination({ destinationUrl: cand.destinationUrl,
       destinationDomain: cand.destinationDomain, ctaType: cta.ctaType, bodyCopy: cand.bodyCopy });
@@ -252,10 +257,11 @@ async function executeImport(
       businessLocationEvidence: geoEval.evidence,
       businessLocationReason: geoEval.reason,
       businessLocationReasonCode: geoEval.reasonCode,
-      relevanceDecision: isForeign ? 'NOT_RELEVANT' : 'UNCERTAIN',
-      status: isForeign ? 'REVIEW_REQUIRED' : 'NEEDS_DATA',
-      evaluationStatus: isForeign ? 'REJECTED' : 'UNCERTAIN',
-      relevanceReasons: [geoEval.reason || (isForeign ? 'Foreign business entity' : 'Incomplete signal evidence')],
+      relevanceDecision: isForeign || isExcluded ? 'NOT_RELEVANT' : 'UNCERTAIN',
+      status: isForeign || isExcluded ? 'REVIEW_REQUIRED' : 'NEEDS_DATA',
+      evaluationStatus: isForeign || isExcluded ? 'REJECTED' : 'UNCERTAIN',
+      relevanceReasonCode: isExcluded ? relevance.reasonCode : undefined,
+      relevanceReasons: isExcluded ? relevance.reasons : [geoEval.reason || (isForeign ? 'Foreign business entity' : 'Incomplete signal evidence')],
       contactProfile: {
         observedPhones: cand.observedPhones || [],
         observedEmails: cand.observedEmails || [],
@@ -282,9 +288,9 @@ async function executeImport(
   for (const lead of leads) {
     const gateRes = evaluateLeadQualificationGates(lead, intent);
     lead.qualificationFailedGates = gateRes.failedGates;
-    lead.qualificationReasons = gateRes.reasons;
+    lead.qualificationReasons = [...gateRes.reasons, ...(lead.relevanceReasonCode === 'REJECT_PRESET_EXCLUSION' ? lead.relevanceReasons || [] : [])];
     const gateReason = (gateRes.reasons && gateRes.reasons.length > 0)
-      ? gateRes.reasons.join('; ')
+      ? lead.qualificationReasons.join('; ')
       : (gateRes.failedGates && gateRes.failedGates.length > 0)
       ? `Failed gates: ${gateRes.failedGates.join(', ')}`
       : 'Incomplete evidence (pending verification)';
@@ -316,6 +322,7 @@ async function executeImport(
     presetId: options.presetId,
     presetName: options.presetName,
     keywords,
+    exclusions: options.exclusions,
     countryCode,
     locationName,
     strictLocalMode,

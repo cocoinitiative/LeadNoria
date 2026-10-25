@@ -478,6 +478,7 @@ export interface ExtensionLead {
   relevanceDecision?: RelevanceDecision;
   relevanceConfidence?: RelevanceConfidence;
   relevanceReasons?: string[];
+  relevanceReasonCode?: string;
   relevanceMatchedTerms?: string[];
   relevanceEvidence?: StructuredEvidence[];
   relevanceStrategyVersion?: number;
@@ -585,6 +586,7 @@ export interface ExtensionResearchRun {
   requiredCtaTypes?: string[];
   requiredDestinationTypes?: string[];
   websiteRequirement?: 'WITH_WEBSITE' | 'WITHOUT_OBSERVED_WEBSITE' | 'WITHOUT_WEBSITE' | 'BOTH' | 'ANY' | 'WITH' | 'WITHOUT';
+  exclusions?: string[];
   researchIntent?: any;
   // Auto-Discovery fields (Phase 1)
   researchMode?: 'AUTO_DISCOVERY';
@@ -645,6 +647,7 @@ export interface StartResearchPayload {
   requiredCtaTypes?: string[];
   requiredDestinationTypes?: string[];
   websiteRequirement?: 'WITH_WEBSITE' | 'WITHOUT_OBSERVED_WEBSITE' | 'WITHOUT_WEBSITE' | 'BOTH' | 'ANY' | 'WITH' | 'WITHOUT';
+  exclusions?: string[];
 }
 
 export interface ExtensionMessage {

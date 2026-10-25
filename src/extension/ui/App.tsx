@@ -19,7 +19,9 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { isLiveCollectionPermitted } from '../../config/collectionGate.ts';
+import { canStartExtensionCollection } from '../collectionAvailability.ts';
+import { previouslySeenBusinessKeys } from '../localBusinessHistory.ts';
+import { leadResultsToCsv, type LeadExportColumn } from '../clipboard/leadSheets.ts';
 import {
   NavigationTab,
   ResultRowViewModel,
@@ -90,6 +92,7 @@ export const ExtensionApp: React.FC = () => {
 
   // History & Storage State
   const [historyRuns, setHistoryRuns] = useState<ExtensionResearchRun[]>([]);
+  const seenBusinessKeys = useMemo(() => previouslySeenBusinessKeys(historyRuns, activeRun), [historyRuns, activeRun]);
   const [recoveryInfo, setRecoveryInfo] = useState<CheckpointRecoveryViewModel | null>(null);
 
   // Technical Diagnostics State
@@ -366,12 +369,18 @@ export const ExtensionApp: React.FC = () => {
     locationName?: string;
     maxCandidates: number;
     presetName?: string;
+    presetId?: string;
+    mode?: 'CUSTOM' | 'PRESET';
     strictLocal?: boolean;
     requiredCta?: string;
     requiredDestination?: string;
     websiteRequirement?: string;
+    exclusions?: string[];
   }) => {
     const planVM: PlanReviewViewModel = {
+      mode: config.mode,
+      presetId: config.presetId,
+      presetName: config.presetName,
       sourceType: config.sourceType,
       executionMode: config.executionMode,
       plannedSearchUnitsCount: config.keywords.length,
@@ -389,14 +398,16 @@ export const ExtensionApp: React.FC = () => {
       timeoutSeconds: 30,
       checkpointEnabled: true,
       safetyWarnings: [],
-      canExecuteLive: isLiveCollectionPermitted(),
+      canExecuteLive: canStartExtensionCollection(),
+      blockedReason: 'Open the installed LeadNoria extension in Chrome to collect ads. Web previews support import only.',
       keywords: config.keywords,
       countryCode: config.countryCode,
       locationName: config.locationName,
       strictLocal: config.strictLocal,
       requiredCta: config.requiredCta,
       requiredDestination: config.requiredDestination,
-      websiteRequirement: config.websiteRequirement
+      websiteRequirement: config.websiteRequirement,
+      exclusions: config.exclusions
     };
 
     setPendingPlan(planVM);
@@ -418,7 +429,9 @@ export const ExtensionApp: React.FC = () => {
     const userLocation = pendingPlan.locationName || userCountry;
 
     const payload: StartResearchPayload = {
-      mode: 'CUSTOM',
+      mode: pendingPlan.mode || 'CUSTOM',
+      presetId: pendingPlan.presetId,
+      presetName: pendingPlan.presetName,
       researchMode: 'AUTO_DISCOVERY',
       keywords: userKeywords,
       countryCode: userCountry,
@@ -427,13 +440,19 @@ export const ExtensionApp: React.FC = () => {
       strictLocalMode: pendingPlan.strictLocal !== false,
       requiredCtaTypes: pendingPlan.requiredCta ? [pendingPlan.requiredCta] : undefined,
       requiredDestinationTypes: pendingPlan.requiredDestination ? [pendingPlan.requiredDestination] : undefined,
-      websiteRequirement: (pendingPlan.websiteRequirement as any) || undefined
+      websiteRequirement: (pendingPlan.websiteRequirement as any) || undefined,
+      exclusions: pendingPlan.exclusions
     };
 
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
       chrome.runtime.sendMessage({ type: 'START_RESEARCH', payload }, (res) => {
+        const startError = chrome.runtime.lastError?.message || (!res?.success ? res?.error || 'The extension did not start the search. Reload the extension and retry.' : undefined);
         if (res && res.run) {
           handleRunUpdate(res.run);
+        }
+        if (startError) {
+          setActiveTab('RESEARCH');
+          alert(startError);
         }
         setIsSubmitting(false);
       });
@@ -599,7 +618,7 @@ export const ExtensionApp: React.FC = () => {
     }
   }, [rawLeads, historyRuns, activeRun]);
 
-  const handleConfirmExport = (qualifiedOnly: boolean = true, recordIds?: string[]) => {
+  const handleConfirmExport = (qualifiedOnly: boolean = true, recordIds?: string[], columns?: LeadExportColumn[]) => {
     if (isExporting) return;
     setIsExporting(true);
 
@@ -614,7 +633,7 @@ export const ExtensionApp: React.FC = () => {
     });
 
     if (eligibleLeads.length > 0) {
-      const csv = exportLeadsToCsv(eligibleLeads as ExtensionLead[], { qualifiedOnly });
+      const csv = columns ? leadResultsToCsv(resultsVM.filter(row => recordIds?.includes(row.recordId)), columns) : exportLeadsToCsv(eligibleLeads as ExtensionLead[], { qualifiedOnly });
       const blob = new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -749,6 +768,7 @@ export const ExtensionApp: React.FC = () => {
             <ResultsTableView
               key={activeRun?.runId || 'current'}
               initialWebsitePreference={activeRun?.websiteRequirement}
+              seenBusinessKeys={seenBusinessKeys}
               results={resultsVM}
               selectedRecordIds={selectedRecordIds}
               onToggleSelect={id => {
@@ -762,7 +782,7 @@ export const ExtensionApp: React.FC = () => {
               }}
               onClearSelection={() => setSelectedRecordIds(new Set())}
               onInspectRecord={handleInspectRecord}
-              onDownloadCsv={(recordIds) => handleConfirmExport(false, recordIds)}
+              onDownloadCsv={(recordIds, columns) => handleConfirmExport(false, recordIds, columns)}
               onOpenExportModal={() => setIsExportModalOpen(true)}
             />
           </div>

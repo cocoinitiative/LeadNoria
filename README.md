@@ -4,9 +4,9 @@
 
 Download [extension.zip](extension.zip), extract it, then choose **Load unpacked** on Chrome's Extensions page with Developer mode enabled. Select the extracted folder containing `manifest.json`. Alternatively, use the current `extension/` folder from this repository.
 
-This build includes the simplified muted-purple UI, website filters, saved lead lists, CSV download and Google Sheets copy. **Automatic live Meta collection remains disabled, and Chrome MV3 runtime is unverified.** See [UI verification](docs/current-review/simple-ui-bn.md).
+This build includes the simplified muted-purple UI, website filters, saved lead lists, CSV download and Google Sheets copy. User-started collection is enabled in the installed Chrome extension; hosted previews support import only. **Real Chrome MV3 collection remains unverified.** See [current status](CURRENT-STATUS.md).
 
-> **Current review status:** See [CURRENT-STATUS.md](CURRENT-STATUS.md) for the latest implementation, tests and remaining limits. Older release claims below are historical. Live automated collection is disabled; Chrome MV3 runtime testing is incomplete.
+> **Current review status:** See [CURRENT-STATUS.md](CURRENT-STATUS.md) for the latest implementation, tests and remaining limits. Older release claims below are historical. Chrome MV3 runtime testing is incomplete.
 
 > **Discover. Verify. Connect.**  
 > Business lead research from real public signals — built as a Manifest V3 Chrome Extension.

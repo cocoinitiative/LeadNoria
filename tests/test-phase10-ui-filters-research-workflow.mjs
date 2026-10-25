@@ -323,7 +323,7 @@ function filterResults(results, filters) {
     // 11. Signal checkboxes
     if (requirePhone && !r.contactSummary.hasPhone) return false;
     if (requireEmail && !r.contactSummary.hasEmail) return false;
-    if (requireWebsite && !r.dataSignals?.websiteVerified) return false;
+    if (requireWebsite && !r.websiteUrl) return false;
 
     return true;
   });
@@ -463,7 +463,7 @@ runTest('extensionLeadToResultRowViewModel maps score, tier, syntax, and conflic
   assert.strictEqual(vm.phoneSyntaxState, 'SYNTAX_VALID');
   assert.strictEqual(vm.emailSyntaxState, 'SYNTAX_VALID');
   assert.strictEqual(vm.phoneConflictState, 'NO_CONFLICT');
-  assert.strictEqual(vm.dataSignals.websiteVerified, true);
+  assert.strictEqual(vm.dataSignals.websiteVerified, false); // Observed ad URL is not a live website verification.
 });
 
 runTest('extensionLeadToResultDetailViewModel surfaces why reasons and actionable review issues', () => {

@@ -18,6 +18,7 @@ import { ResultDetailViewModel } from '../types.ts';
 import { StatusBadge } from './StatusBadge.tsx';
 import { getSafeExternalUrl } from '../security.ts';
 import { toFriendlyStatus } from '../humanLabels.ts';
+import { LeadFollowupPanel } from './LeadFollowupPanel.tsx';
 
 interface ResultDetailDrawerProps {
   isOpen: boolean;
@@ -252,6 +253,7 @@ export const ResultDetailDrawer: React.FC<ResultDetailDrawerProps> = ({
 
         {/* Drawer Body: 10 Inspection Sections */}
         <div className="p-4 overflow-y-auto flex flex-col gap-4 text-xs text-slate-300">
+          <LeadFollowupPanel key={lead.recordId} record={lead.canonicalRecord || lead} recordId={lead.recordId} />
           
           {/* Section 1: IDENTITY */}
           <div className="p-3 bg-slate-950/60 rounded-lg border border-slate-800 flex flex-col gap-1.5">

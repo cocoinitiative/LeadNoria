@@ -28,10 +28,13 @@ interface ResearchConfigViewProps {
     locationName?: string;
     maxCandidates: number;
     presetName?: string;
+    presetId?: string;
+    mode?: 'CUSTOM' | 'PRESET';
     strictLocal?: boolean;
     requiredCta?: string;
     requiredDestination?: string;
     websiteRequirement?: string;
+    exclusions?: string[];
   }) => void;
   onNavigateToImport?: () => void;
   disabled?: boolean;
@@ -53,6 +56,7 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
   const [requiredCta, setRequiredCta] = useState<string>('ANY');
   const [requiredDestination, setRequiredDestination] = useState<string>('ANY');
   const [websiteRequirement, setWebsiteRequirement] = useState<string>('ANY');
+  const [excludedKeywords, setExcludedKeywords] = useState('');
   const [presetSearch, setPresetSearch] = useState('');
   const [presetKeywords, setPresetKeywords] = useState(RESEARCH_PRESETS[0]?.primary_keywords.join(', ') || '');
 
@@ -82,12 +86,15 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
       locationName: selectedLoc?.displayName || countryCode,
       maxCandidates,
       presetName,
+      presetId: modeType === 'PRESET' ? selectedPreset?.preset_id : undefined,
+      mode: modeType,
       strictLocal,
       requiredCta: requiredCta !== 'ANY' ? requiredCta : undefined,
       requiredDestination: (requiredDestination === 'APP_STORE' ? 'APP' : requiredDestination) !== 'ANY'
         ? (requiredDestination === 'APP_STORE' ? 'APP' : requiredDestination)
         : undefined,
-      websiteRequirement: websiteRequirement !== 'ANY' ? websiteRequirement : undefined
+      websiteRequirement: websiteRequirement !== 'ANY' ? websiteRequirement : undefined,
+      exclusions: excludedKeywords.split(/[,;\n]/).map(value => value.trim()).filter(Boolean)
     });
   };
 
@@ -206,6 +213,9 @@ export const ResearchConfigView: React.FC<ResearchConfigViewProps> = ({
       <details className="p-3 bg-slate-950/60 rounded-lg border border-slate-800">
         <summary className="text-xs text-slate-300 cursor-pointer">More search options</summary>
         <div className="flex flex-col gap-2.5 mt-3">
+        <label className="text-xs text-slate-300">Exclude keywords
+          <input aria-label="Exclude search keywords" value={excludedKeywords} onChange={e => setExcludedKeywords(e.target.value)} placeholder="e.g. jobs, training" disabled={disabled} className="w-full mt-1 p-2 rounded border border-slate-700 bg-slate-950" />
+        </label>
         <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
           <input
             type="checkbox"

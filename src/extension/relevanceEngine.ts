@@ -509,6 +509,7 @@ export function compileResearchIntent(
     requiredDestinationTypes?: DestinationType[];
     requireWebsiteFound?: boolean;
     websiteRequirement?: 'WITH_WEBSITE' | 'WITHOUT_OBSERVED_WEBSITE' | 'WITHOUT_WEBSITE' | 'BOTH' | 'ANY' | 'WITH' | 'WITHOUT';
+    exclusions?: string[];
   },
   keywords: string[] = [],
   presetId?: string,
@@ -520,6 +521,7 @@ export function compileResearchIntent(
     requiredDestinationTypes?: DestinationType[];
     requireWebsiteFound?: boolean;
     websiteRequirement?: 'WITH_WEBSITE' | 'WITHOUT_OBSERVED_WEBSITE' | 'WITHOUT_WEBSITE' | 'BOTH' | 'ANY' | 'WITH' | 'WITHOUT';
+    exclusions?: string[];
   }
 ): ResearchIntent {
   let mode: ResearchMode = 'CUSTOM';
@@ -543,6 +545,7 @@ export function compileResearchIntent(
       requiredDestinationTypes: modeOrConfig.requiredDestinationTypes,
       requireWebsiteFound: modeOrConfig.requireWebsiteFound,
       websiteRequirement: modeOrConfig.websiteRequirement,
+      exclusions: modeOrConfig.exclusions,
       ...options
     };
   }
@@ -560,7 +563,7 @@ export function compileResearchIntent(
         targetSubIndustry: preset.sub_industry,
         primaryKeywords: preset.primary_keywords,
         secondaryKeywords: preset.secondary_keywords,
-        exclusions: preset.optional_exclusions || [],
+        exclusions: [...new Set([...(preset.optional_exclusions || []), ...(opts?.exclusions || [])])],
         locationCode: loc,
         strictLocalMode: opts?.strictLocalMode,
         allowProbableLocal: opts?.allowProbableLocal,
@@ -577,7 +580,7 @@ export function compileResearchIntent(
     keywords: cleanKeywords,
     primaryKeywords: cleanKeywords,
     secondaryKeywords: [],
-    exclusions: [],
+    exclusions: opts?.exclusions || [],
     locationCode: loc,
     strictLocalMode: opts?.strictLocalMode,
     allowProbableLocal: opts?.allowProbableLocal,

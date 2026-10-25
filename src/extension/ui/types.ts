@@ -62,6 +62,9 @@ export interface ResearchConfigViewModel {
 }
 
 export interface PlanReviewViewModel {
+  mode?: 'CUSTOM' | 'PRESET';
+  presetId?: string;
+  presetName?: string;
   sourceType: SourceType;
   executionMode: ExecutionMode;
   plannedSearchUnitsCount: number;
@@ -81,6 +84,7 @@ export interface PlanReviewViewModel {
   requiredCta?: string;
   requiredDestination?: string;
   websiteRequirement?: string;
+  exclusions?: string[];
 }
 
 export interface StageStatusViewModel {

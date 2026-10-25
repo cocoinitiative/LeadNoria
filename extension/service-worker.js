@@ -1544,6 +1544,7 @@ function compileResearchIntent(modeOrConfig, keywords = [], presetId, locationCo
       requiredDestinationTypes: modeOrConfig.requiredDestinationTypes,
       requireWebsiteFound: modeOrConfig.requireWebsiteFound,
       websiteRequirement: modeOrConfig.websiteRequirement,
+      exclusions: modeOrConfig.exclusions,
       ...options
     };
   }
@@ -1560,7 +1561,7 @@ function compileResearchIntent(modeOrConfig, keywords = [], presetId, locationCo
         targetSubIndustry: preset.sub_industry,
         primaryKeywords: preset.primary_keywords,
         secondaryKeywords: preset.secondary_keywords,
-        exclusions: preset.optional_exclusions || [],
+        exclusions: [.../* @__PURE__ */ new Set([...preset.optional_exclusions || [], ...opts?.exclusions || []])],
         locationCode: loc,
         strictLocalMode: opts?.strictLocalMode,
         allowProbableLocal: opts?.allowProbableLocal,
@@ -1576,7 +1577,7 @@ function compileResearchIntent(modeOrConfig, keywords = [], presetId, locationCo
     keywords: cleanKeywords,
     primaryKeywords: cleanKeywords,
     secondaryKeywords: [],
-    exclusions: [],
+    exclusions: opts?.exclusions || [],
     locationCode: loc,
     strictLocalMode: opts?.strictLocalMode,
     allowProbableLocal: opts?.allowProbableLocal,
@@ -4296,6 +4297,26 @@ function evaluateGeographicOrigin(inputs, targetCountryCode = "BD") {
 }
 
 // src/extension/destinationClassifier.ts
+function resolveObservedDestinationUrl(raw) {
+  if (!raw?.trim()) return void 0;
+  let value = raw.trim();
+  for (let depth = 0; depth < 5; depth++) {
+    try {
+      if (!/^[a-z][a-z\d+.-]*:/i.test(value)) value = `https://${value}`;
+      const url = new URL(value);
+      if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) return void 0;
+      const host = url.hostname.toLowerCase();
+      const wrapper = (host === "facebook.com" || host.endsWith(".facebook.com")) && url.pathname === "/l.php" || host === "l.instagram.com";
+      if (!wrapper) return url.href;
+      const next = url.searchParams.get("u");
+      if (!next || next === value) return void 0;
+      value = next;
+    } catch {
+      return void 0;
+    }
+  }
+  return void 0;
+}
 function observedWebsiteState(destinationUrl, destinationDomain) {
   return classifyDestination({ destinationUrl, destinationDomain }).destinationType === "EXTERNAL_WEBSITE" && Boolean(destinationUrl || destinationDomain) ? "found" : "unknown";
 }
@@ -4561,21 +4582,13 @@ function classifyDestination(inputs) {
         reason: `Direct email destination URI observed: "${rawUrl}".`
       };
     }
-    let resolvedUrl = lowerUrl;
-    if (lowerUrl.includes("facebook.com/l.php")) {
+    const resolved = resolveObservedDestinationUrl(rawUrl);
+    let domain = "";
+    const resolvedUrl = (resolved || "").toLowerCase();
+    {
       try {
-        const u = new URL(rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`);
-        const shimmed = u.searchParams.get("u");
-        if (shimmed) {
-          resolvedUrl = decodeURIComponent(shimmed).toLowerCase();
-        }
-      } catch {
-      }
-    }
-    let domain = (inputs.destinationDomain || "").toLowerCase().trim();
-    if (!domain) {
-      try {
-        const u = new URL(resolvedUrl.startsWith("http") ? resolvedUrl : `https://${resolvedUrl}`);
+        if (!resolved) throw new Error("Invalid destination");
+        const u = new URL(resolved);
         const host = u.hostname.toLowerCase();
         domain = host === "m.me" ? "m.me" : host.replace(/^(?:www\.|m\.|l\.)/, "");
       } catch {
@@ -4604,7 +4617,7 @@ function classifyDestination(inputs) {
         reason: "Conflicting destination signals detected between action URL (App) and CTA intent."
       };
     }
-    if (domain === "wa.me" || domain === "api.whatsapp.com" || domain === "whatsapp.com" || domain === "m.me" || domain === "messenger.com" || domain === "t.me" || domain === "telegram.me" || resolvedUrl.includes("facebook.com/messages")) {
+    if (domain === "wa.me" || domain === "api.whatsapp.com" || domain === "whatsapp.com" || domain === "m.me" || domain === "messenger.com" || domain === "t.me" || domain === "telegram.me" || domain.endsWith(".whatsapp.com") || domain.endsWith(".messenger.com") || domain === "facebook.com" && new URL(resolved).pathname.toLowerCase().startsWith("/messages")) {
       if (targetCtaType === "CALL_NOW") {
         return {
           destinationType: "OTHER",
@@ -4630,7 +4643,7 @@ function classifyDestination(inputs) {
         reason: "Verified native application marketplace destination."
       };
     }
-    if (resolvedUrl.includes("/lead_gen/") || resolvedUrl.includes("fb.com/lead_gen") || resolvedUrl.includes("/canvas_doc/") || resolvedUrl.includes("instant_form")) {
+    if ((domain === "facebook.com" || domain === "fb.com") && (resolvedUrl.includes("/lead_gen/") || resolvedUrl.includes("fb.com/lead_gen") || resolvedUrl.includes("/canvas_doc/") || resolvedUrl.includes("instant_form"))) {
       return {
         destinationType: "INSTANT_FORM",
         destinationDomain: domain || void 0,
@@ -4639,7 +4652,16 @@ function classifyDestination(inputs) {
         reason: "Verified Meta on-platform instant lead generation form."
       };
     }
-    const isInternalSocialDomain = domain === "facebook.com" || domain === "web.facebook.com" || domain === "m.facebook.com" || domain === "fb.com" || domain === "instagram.com" || domain === "meta.com";
+    if (["bit.ly", "tinyurl.com", "t.co", "shorturl.at", "fb.me"].includes(domain)) {
+      return {
+        destinationType: "UNKNOWN",
+        destinationDomain: domain,
+        confidence: "LOW",
+        reasonCode: "UNRESOLVED_SHORT_LINK",
+        reason: "A short link was observed; its final destination cannot be confirmed offline."
+      };
+    }
+    const isInternalSocialDomain = domain === "facebook.com" || domain === "web.facebook.com" || domain === "m.facebook.com" || domain === "fb.com" || domain === "instagram.com" || domain === "meta.com" || ["facebook.com", "fb.com", "instagram.com", "meta.com"].some((suffix) => domain.endsWith(`.${suffix}`));
     if (!isInternalSocialDomain && domain.length > 3 && domain.includes(".")) {
       return {
         destinationType: "EXTERNAL_WEBSITE",
@@ -7898,9 +7920,9 @@ var QueryFrontier = class _QueryFrontier {
   }
 };
 
-// src/config/collectionGate.ts
-function isLiveCollectionPermitted() {
-  return false;
+// src/extension/collectionAvailability.ts
+function canStartExtensionCollection() {
+  return typeof chrome !== "undefined" && Boolean(chrome.runtime?.id) && typeof chrome.runtime?.sendMessage === "function" && typeof chrome.tabs?.create === "function" && typeof chrome.tabs?.sendMessage === "function" && typeof chrome.storage?.local?.get === "function";
 }
 
 // src/extension/qualification/qualificationProfile.ts
@@ -11773,7 +11795,7 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
   const isAutoDiscovery = payload.researchMode === "AUTO_DISCOVERY" && requestedLimit === void 0;
   const effectiveCeiling = isAutoDiscovery ? MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH : Math.min(Math.max(1, requestedLimit || MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH), MAX_FINAL_UNIQUE_RELEVANT_LEADS_PER_RESEARCH);
   const targetLeadCount = isAutoDiscovery ? void 0 : effectiveCeiling;
-  if (!isLiveCollectionPermitted()) {
+  if (!canStartExtensionCollection()) {
     const blockedRun = providedRun || {
       runId,
       researchName: payload.researchName || `${payload.mode === "PRESET" ? payload.presetName || "Preset" : keywords[0]} in ${payload.locationName}`,
@@ -11806,7 +11828,7 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
       logs: [
         {
           timestamp: (/* @__PURE__ */ new Date()).toLocaleTimeString(),
-          message: "Live automated collection from Meta Ad Library is disabled and unauthorized (Phase 0A gate: NO-GO).",
+          message: "Collection needs the installed Chrome extension runtime.",
           stage: "SAFETY_GATE"
         }
       ],
@@ -11818,7 +11840,7 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
     blockedRun.status = "BLOCKED";
     blockedRun.stopReason = "COLLECTION_NOT_AUTHORIZED";
     await saveActiveRun(blockedRun);
-    broadcastProgress(blockedRun, "BLOCKED", "Live automated collection is disabled and unauthorized.");
+    broadcastProgress(blockedRun, "BLOCKED", "Collection needs the installed Chrome extension runtime.");
     return blockedRun;
   }
   const researchIntent = compileResearchIntent(
@@ -11831,6 +11853,7 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
       allowProbableLocal: payload.allowProbableLocal,
       requiredCtaTypes: payload.requiredCtaTypes,
       requiredDestinationTypes: payload.requiredDestinationTypes,
+      exclusions: payload.exclusions,
       websiteRequirement: payload.websiteRequirement
     }
   );
@@ -11847,6 +11870,7 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
     allowProbableLocal: payload.allowProbableLocal,
     requiredCtaTypes: payload.requiredCtaTypes,
     requiredDestinationTypes: payload.requiredDestinationTypes,
+    exclusions: payload.exclusions,
     websiteRequirement: payload.websiteRequirement,
     researchIntent,
     researchMode: isAutoDiscovery ? "AUTO_DISCOVERY" : void 0,
@@ -11974,7 +11998,7 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
       let consecutiveNoNewCards = 0;
       let scrollAttempts = 0;
       const maxScrolls = isAutoDiscovery ? 60 : Math.max(25, Math.ceil((targetLeadCount || 10) * 3));
-      while (scrollAttempts < maxScrolls && !cancelledRuns.has(runId)) {
+      while (scrollAttempts < maxScrolls && !cancelledRuns.has(runId) && !pausedRuns.has(runId)) {
         const liveCount = initialRun.counters?.finalUniqueRelevantLeads ?? initialRun.counters?.finalUniqueLeads ?? existingEntitiesMap.size;
         if (liveCount >= effectiveCeiling) break;
         scrollAttempts++;
@@ -12183,6 +12207,12 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
             break;
           }
         } else {
+          consecutiveNoNewCards++;
+          if (response?.payload?.status === "END_OF_RESULTS" || consecutiveNoNewCards >= 3) {
+            isStalled = response?.payload?.status !== "END_OF_RESULTS";
+            broadcastProgress(initialRun, "COLLECTING", "No additional ad cards were returned. Moving to the next query.");
+            break;
+          }
           broadcastProgress(initialRun, "COLLECTING", `Waiting for ad cards to render (attempt ${scrollAttempts})...`);
           await wait(2e3);
         }
@@ -12207,6 +12237,10 @@ async function executeResearchPipeline(payload, providedRunId, providedRun) {
       initialRun.status = "CANCELLED";
       initialRun.stopReason = "USER_CANCELLED";
       broadcastProgress(initialRun, "CANCELLED", `Research was explicitly cancelled by user.`);
+    } else if (pausedRuns.has(runId)) {
+      initialRun.status = "PAUSED";
+      initialRun.stopReason = "USER_PAUSED";
+      broadcastProgress(initialRun, "PAUSED", "Research paused by user.");
     } else if (initialRun.stopReason === "BROWSER_TAB_CLOSED" || initialRun.status === "BROWSER_TAB_CLOSED") {
       initialRun.status = "BROWSER_TAB_CLOSED";
       initialRun.stopReason = "BROWSER_TAB_CLOSED";
@@ -12328,6 +12362,7 @@ if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage)
             allowProbableLocal: message.payload.allowProbableLocal,
             requiredCtaTypes: message.payload.requiredCtaTypes,
             requiredDestinationTypes: message.payload.requiredDestinationTypes,
+            exclusions: message.payload.exclusions,
             websiteRequirement: message.payload.websiteRequirement
           }
         );
@@ -12344,6 +12379,7 @@ if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage)
           allowProbableLocal: message.payload.allowProbableLocal,
           requiredCtaTypes: message.payload.requiredCtaTypes,
           requiredDestinationTypes: message.payload.requiredDestinationTypes,
+          exclusions: message.payload.exclusions,
           websiteRequirement: message.payload.websiteRequirement,
           researchIntent,
           researchMode: isAutoDiscovery ? "AUTO_DISCOVERY" : void 0,
@@ -12371,24 +12407,31 @@ if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage)
           schemaVersion: SCHEMA_VERSION,
           totalAdsInspected: 0
         };
-        if (!isLiveCollectionPermitted()) {
+        if (!canStartExtensionCollection()) {
           initialRun.status = "BLOCKED";
           initialRun.stopReason = "COLLECTION_NOT_AUTHORIZED";
           initialRun.logs.push({
             timestamp: (/* @__PURE__ */ new Date()).toLocaleTimeString(),
-            message: "Live automated collection from Meta Ad Library is disabled and unauthorized (Phase 0A gate: NO-GO).",
+            message: "Collection needs the installed Chrome extension runtime.",
             stage: "SAFETY_GATE"
           });
           saveActiveRun(initialRun).catch(() => {
           });
-          broadcastProgress(initialRun, "BLOCKED", "Live automated collection is disabled and unauthorized.");
-          sendResponse({ success: false, runId, run: initialRun, error: "COLLECTION_NOT_AUTHORIZED: Live automated collection is disabled and unauthorized." });
+          broadcastProgress(initialRun, "BLOCKED", "Collection needs the installed Chrome extension runtime.");
+          sendResponse({ success: false, runId, run: initialRun, error: "COLLECTION_NOT_AUTHORIZED: Collection needs the installed Chrome extension runtime." });
           return false;
         }
         saveActiveRun(initialRun).catch(() => {
         });
-        executeResearchPipeline(message.payload, runId, initialRun).catch((err) => {
+        executeResearchPipeline(message.payload, runId, initialRun).catch(async (err) => {
           console.error("[service-worker] Background pipeline error:", err);
+          initialRun.status = "FAILED";
+          initialRun.stopReason = "FAILED";
+          initialRun.challengeReason = err?.message || "The search could not start or save its results.";
+          initialRun.completedAt = (/* @__PURE__ */ new Date()).toISOString();
+          broadcastProgress(initialRun, "FAILED", initialRun.challengeReason);
+          await saveActiveRun(initialRun).catch(() => {
+          });
         });
         sendResponse({ success: true, runId, run: initialRun });
       });
@@ -12494,7 +12537,7 @@ if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage)
     if (message.type === "RESUME_RESEARCH") {
       sendResponse({
         success: false,
-        error: "COLLECTION_NOT_AUTHORIZED: Live automated collection is disabled and unauthorized."
+        error: "COLLECTION_NOT_AUTHORIZED: Collection needs the installed Chrome extension runtime."
       });
       return false;
     }

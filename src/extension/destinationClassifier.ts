@@ -63,6 +63,27 @@ export interface AggregatedDestinationSummary {
   destinationReasonCode: string;
 }
 
+/** Decode only known public link wrappers, locally. Never fetch a redirect. */
+export function resolveObservedDestinationUrl(raw?: string): string | undefined {
+  if (!raw?.trim()) return undefined;
+  let value = raw.trim();
+  for (let depth = 0; depth < 5; depth++) {
+    try {
+      if (!/^[a-z][a-z\d+.-]*:/i.test(value)) value = `https://${value}`;
+      const url = new URL(value);
+      if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) return undefined;
+      const host = url.hostname.toLowerCase();
+      const wrapper = ((host === 'facebook.com' || host.endsWith('.facebook.com')) && url.pathname === '/l.php')
+        || host === 'l.instagram.com';
+      if (!wrapper) return url.href;
+      const next = url.searchParams.get('u');
+      if (!next || next === value) return undefined;
+      value = next;
+    } catch { return undefined; }
+  }
+  return undefined;
+}
+
 /** Website presence requires an observed external URL, never CTA wording alone. */
 export function observedWebsiteState(destinationUrl?: string, destinationDomain?: string): 'found' | 'unknown' {
   return classifyDestination({ destinationUrl, destinationDomain }).destinationType === 'EXTERNAL_WEBSITE'
@@ -386,22 +407,13 @@ export function classifyDestination(inputs: DestinationClassifierInputs): Destin
       };
     }
 
-    // Decode Facebook shim if needed (facebook.com/l.php?u=...)
-    let resolvedUrl = lowerUrl;
-    if (lowerUrl.includes('facebook.com/l.php')) {
+    const resolved = resolveObservedDestinationUrl(rawUrl);
+    let domain = '';
+    const resolvedUrl = (resolved || '').toLowerCase();
+    {
       try {
-        const u = new URL(rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`);
-        const shimmed = u.searchParams.get('u');
-        if (shimmed) {
-          resolvedUrl = decodeURIComponent(shimmed).toLowerCase();
-        }
-      } catch {}
-    }
-
-    let domain = (inputs.destinationDomain || '').toLowerCase().trim();
-    if (!domain) {
-      try {
-        const u = new URL(resolvedUrl.startsWith('http') ? resolvedUrl : `https://${resolvedUrl}`);
+        if (!resolved) throw new Error('Invalid destination');
+        const u = new URL(resolved);
         const host = u.hostname.toLowerCase();
         domain = host === 'm.me' ? 'm.me' : host.replace(/^(?:www\.|m\.|l\.)/, '');
       } catch {
@@ -450,7 +462,9 @@ export function classifyDestination(inputs: DestinationClassifierInputs): Destin
       domain === 'messenger.com' ||
       domain === 't.me' ||
       domain === 'telegram.me' ||
-      resolvedUrl.includes('facebook.com/messages')
+      domain.endsWith('.whatsapp.com') ||
+      domain.endsWith('.messenger.com') ||
+      (domain === 'facebook.com' && new URL(resolved!).pathname.toLowerCase().startsWith('/messages'))
     ) {
       if (targetCtaType === 'CALL_NOW') {
         return {
@@ -485,12 +499,12 @@ export function classifyDestination(inputs: DestinationClassifierInputs): Destin
     }
 
     // Instant Form / Lead Gen flow
-    if (
+    if ((domain === 'facebook.com' || domain === 'fb.com') && (
       resolvedUrl.includes('/lead_gen/') ||
       resolvedUrl.includes('fb.com/lead_gen') ||
       resolvedUrl.includes('/canvas_doc/') ||
       resolvedUrl.includes('instant_form')
-    ) {
+    )) {
       return {
         destinationType: 'INSTANT_FORM',
         destinationDomain: domain || undefined,
@@ -501,13 +515,18 @@ export function classifyDestination(inputs: DestinationClassifierInputs): Destin
     }
 
     // External Website flow
+    if (['bit.ly', 'tinyurl.com', 't.co', 'shorturl.at', 'fb.me'].includes(domain)) {
+      return { destinationType: 'UNKNOWN', destinationDomain: domain, confidence: 'LOW',
+        reasonCode: 'UNRESOLVED_SHORT_LINK', reason: 'A short link was observed; its final destination cannot be confirmed offline.' };
+    }
     const isInternalSocialDomain =
       domain === 'facebook.com' ||
       domain === 'web.facebook.com' ||
       domain === 'm.facebook.com' ||
       domain === 'fb.com' ||
       domain === 'instagram.com' ||
-      domain === 'meta.com';
+      domain === 'meta.com' ||
+      ['facebook.com', 'fb.com', 'instagram.com', 'meta.com'].some(suffix => domain.endsWith(`.${suffix}`));
 
     if (!isInternalSocialDomain && domain.length > 3 && domain.includes('.')) {
       return {

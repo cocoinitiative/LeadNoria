@@ -1545,6 +1545,7 @@
         requiredDestinationTypes: modeOrConfig.requiredDestinationTypes,
         requireWebsiteFound: modeOrConfig.requireWebsiteFound,
         websiteRequirement: modeOrConfig.websiteRequirement,
+        exclusions: modeOrConfig.exclusions,
         ...options
       };
     }
@@ -1561,7 +1562,7 @@
           targetSubIndustry: preset.sub_industry,
           primaryKeywords: preset.primary_keywords,
           secondaryKeywords: preset.secondary_keywords,
-          exclusions: preset.optional_exclusions || [],
+          exclusions: [.../* @__PURE__ */ new Set([...preset.optional_exclusions || [], ...opts?.exclusions || []])],
           locationCode: loc,
           strictLocalMode: opts?.strictLocalMode,
           allowProbableLocal: opts?.allowProbableLocal,
@@ -1577,7 +1578,7 @@
       keywords: cleanKeywords,
       primaryKeywords: cleanKeywords,
       secondaryKeywords: [],
-      exclusions: [],
+      exclusions: opts?.exclusions || [],
       locationCode: loc,
       strictLocalMode: opts?.strictLocalMode,
       allowProbableLocal: opts?.allowProbableLocal,

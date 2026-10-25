@@ -34,6 +34,7 @@ export const ManualImportView: React.FC<ManualImportViewProps> = ({
   const [mode, setMode] = useState<ImportMode>('TEXT_PASTE');
   const [countryCode, setCountryCode] = useState<string>('BD');
   const [targetKeywords, setTargetKeywords] = useState<string>('Furniture, Commercial, Retail');
+  const [excludedKeywords, setExcludedKeywords] = useState('');
   const [strictLocal, setStrictLocal] = useState<boolean>(true);
   const [rawText, setRawText] = useState<string>('');
   const [csvFileName, setCsvFileName] = useState<string>('');
@@ -97,6 +98,7 @@ export const ManualImportView: React.FC<ManualImportViewProps> = ({
         locationName: countryCode === 'BD' ? 'Bangladesh' : countryCode,
         strictLocalMode: strictLocal,
         keywords: activeKeywords,
+        exclusions: excludedKeywords.split(/[,;\n]/).map(value => value.trim()).filter(Boolean),
         runName: `Manual Import: ${mode === 'TEXT_PASTE' ? 'Ad Copy' : mode === 'URL_REFERENCE' ? 'Ad URLs' : 'CSV'}`
       });
 
@@ -231,6 +233,12 @@ export const ManualImportView: React.FC<ManualImportViewProps> = ({
       </div>
 
       {/* Main Input Area */}
+      <details className="text-xs text-slate-400"><summary className="cursor-pointer">More import options</summary>
+        <label className="block mt-2">Exclude keywords
+          <input aria-label="Exclude import keywords" value={excludedKeywords} onChange={e => setExcludedKeywords(e.target.value)} placeholder="e.g. jobs, training" disabled={disabled || isProcessing} className="w-full mt-1 p-2 rounded border border-slate-700 bg-slate-950 text-slate-200" />
+        </label>
+        <p className="mt-1">Separate words or phrases with commas. Matching ads will fail relevance checks.</p>
+      </details>
       <div className="flex flex-col gap-2">
         {mode === 'CSV_FILE' ? (
           <div className="p-4 bg-slate-950 border border-dashed border-slate-700 rounded-xl flex flex-col items-center justify-center gap-2 text-center">
@@ -392,7 +400,7 @@ export const ManualImportView: React.FC<ManualImportViewProps> = ({
             </div>
             <div className="p-2 bg-sky-950/40 border border-sky-800/60 rounded-lg">
               <span className="text-lg font-bold text-sky-400 block">{importSummary.rejectedCount}</span>
-              <span className="text-[10px] uppercase font-semibold text-sky-300">Rejected (Non-Local)</span>
+              <span className="text-[10px] uppercase font-semibold text-sky-300">Not qualified</span>
             </div>
             <div className="p-2 bg-slate-950/60 border border-slate-800 rounded-lg">
               <span className="text-lg font-bold text-slate-300 block">{importSummary.duplicateCount}</span>

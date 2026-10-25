@@ -85,6 +85,7 @@ export const PlanReviewModal: React.FC<PlanReviewModalProps> = ({
           <dl className="grid grid-cols-[auto_1fr] gap-3">
             <dt>Country</dt><dd>{plan.locationName || plan.countryCode || 'Not selected'}</dd>
             <dt>Keywords</dt><dd>{plan.keywords?.join(', ') || 'Not selected'}</dd>
+            {!!plan.exclusions?.length && <><dt>Exclude</dt><dd>{plan.exclusions.join(', ')}</dd></>}
             <dt>Website</dt><dd>{['WITH_WEBSITE', 'WITH'].includes(plan.websiteRequirement || '') ? 'With a website' : ['WITHOUT_OBSERVED_WEBSITE', 'WITHOUT_WEBSITE', 'WITHOUT'].includes(plan.websiteRequirement || '') ? 'No website seen in the ad' : 'All leads'}</dd>
           </dl>
           <details><summary className="cursor-pointer text-slate-400">More details</summary>

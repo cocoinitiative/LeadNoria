@@ -37,7 +37,7 @@ export type { LeadResultRowViewModel };
 import { sanitizePassiveText, getSafeExternalUrl } from './security.ts';
 import { CanonicalLeadRecord } from '../leadIntelligence/types.ts';
 import { toFriendlyStatus, getSourceBadgeInfo } from './humanLabels.ts';
-import { observedWebsiteState } from '../destinationClassifier.ts';
+import { observedWebsiteState, resolveObservedDestinationUrl } from '../destinationClassifier.ts';
 
 /**
  * Type guard for CanonicalLeadRecord (Phase 24 schema).
@@ -73,7 +73,7 @@ export function extensionLeadToResultRowViewModel(lead: ExtensionLead): ResultRo
   const category = (lead as any).category || (lead.matchedKeywords && lead.matchedKeywords[0]) || undefined;
 
   const rawUrl = lead.destinationUrl || (lead as any).websiteUrl;
-  const safeWeb = observedWebsiteState(rawUrl, lead.destinationDomain) === 'found' ? getSafeExternalUrl(rawUrl) : undefined;
+  const safeWeb = observedWebsiteState(rawUrl, lead.destinationDomain) === 'found' ? getSafeExternalUrl(resolveObservedDestinationUrl(rawUrl)) : undefined;
 
   const phone = (lead as any).businessPhone || (lead as any).phone || lead.phones?.[0] || lead.contactProfile?.observedPhones?.[0]?.normalizedValue || lead.contactProfile?.observedPhones?.[0]?.rawValue;
   const email = (lead as any).businessEmail || (lead as any).email || lead.emails?.[0] || lead.contactProfile?.observedEmails?.[0]?.normalizedValue || lead.contactProfile?.observedEmails?.[0]?.rawValue;
