@@ -1,0 +1,25 @@
+{
+  "scope": "Real isolated Chromium MV3 runtime; intercepted local HTML fixtures and a 65-row seeded storage fixture, not live Meta",
+  "passed": true,
+  "checks": [
+    "Content-script extraction",
+    "Every advertiser About visited",
+    "Contact-section fallback",
+    "Contacts rendered 3.5 seconds after document load",
+    "Website/email/phone persistence",
+    "Five-column CSV download",
+    "Real clipboard Sheets paste columns",
+    "Reload persistence",
+    "Owned tab cleanup",
+    "All 65 seeded stored rows exported beyond the 50-row summary",
+    "Missing-row export block and Retry recovery"
+  ],
+  "visits": [
+    "/ads/library/?active_status=all&ad_type=all&country=BD&q=Furniture&search_type=keyword_unordered&media_type=all",
+    "/fixtureshop0/about",
+    "/fixtureshop0/about_contact_and_basic_info",
+    "/fixtureshop1/about"
+  ],
+  "realFixturePageCount": 2,
+  "seededStoredRowCount": 65
+}

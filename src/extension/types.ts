@@ -402,6 +402,8 @@ export interface AdLevelEvidence {
 }
 
 export interface BusinessPageEvidence {
+  accessRestricted?: boolean;
+  retryable?: boolean;
   contacts?: ContactObservation[];
   sourceUrl: string;
   checkedAt: string;

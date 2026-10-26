@@ -2,6 +2,8 @@
 
 ## Latest extension build
 
+Public Page enrichment now preserves fields across delayed rendering, retries transient failures, isolates cache by advertiser identity and supports localized phone digits. See the [engineering review](docs/current-review/page-research-hardening.md).
+
 Download [extension.zip](extension.zip), extract it, then choose **Load unpacked** on Chrome's Extensions page with Developer mode enabled. Select the extracted folder containing `manifest.json`. Alternatively, use the current `extension/` folder from this repository.
 
 This build includes the simplified muted-purple UI, website filters, saved lead lists, CSV download and Google Sheets copy. User-started collection is enabled in the installed Chrome extension; hosted previews support import only. Public About/contact enrichment and exact five-column export are included. Isolated MV3 fixture integration passes; current live Meta layouts remain unverified. See [current status](CURRENT-STATUS.md).

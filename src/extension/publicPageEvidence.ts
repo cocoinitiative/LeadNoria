@@ -13,6 +13,20 @@ export interface PublicPageSnapshot {
   businesses: Array<{ name: string; url?: string; country?: string; address?: string; telephone?: string; email?: string }>;
 }
 
+/** Combine observations only after both sections independently pass Page identity checks. */
+export function mergePublicPageEvidence(first:BusinessPageEvidence,next:BusinessPageEvidence):BusinessPageEvidence {
+  if(next.status!=='CHECKED')return first;
+  if(first.status!=='CHECKED')return next;
+  if(businessPageAboutUrl(first.sourceUrl)!==businessPageAboutUrl(next.sourceUrl))return first;
+  const contacts=[...(first.contacts || []),...(next.contacts || [])];
+  return {...first,checkedAt:next.checkedAt,accessRestricted:first.accessRestricted || next.accessRestricted,retryable:first.retryable || next.retryable,
+    contacts:[...new Map(contacts.map(item=>[`${item.type}:${item.normalizedValue || item.rawValue}:${item.sourceUrl}`,item])).values()],
+    websiteUrls:[...new Set([...first.websiteUrls,...next.websiteUrls])],
+    addressCountryCodes:[...new Set([...first.addressCountryCodes,...next.addressCountryCodes])],
+    addressText:[...new Set([first.addressText,next.addressText].filter(Boolean))].join(' | ').slice(0,1000)||undefined,
+    reason:'Matched public Page observations retained across About/contact reads. Missing fields remain unknown; website ownership and contact deliverability are unverified.'};
+}
+
 export function applyPublicPageEvidence(candidate:ScrapedAdCandidate,evidence:BusinessPageEvidence):void {
   candidate.businessPageEvidence=evidence;
   if(evidence.status!=='CHECKED')return;
@@ -23,7 +37,7 @@ export function applyPublicPageEvidence(candidate:ScrapedAdCandidate,evidence:Bu
 export function businessPageAboutUrl(raw?: string): string | undefined {
   try {
     const url = new URL(raw || '');
-    if (url.protocol !== 'https:' || !['www.facebook.com', 'web.facebook.com', 'facebook.com'].includes(url.hostname) || url.username || url.password) return;
+    if (url.protocol !== 'https:' || !['www.facebook.com', 'web.facebook.com', 'm.facebook.com', 'facebook.com'].includes(url.hostname) || url.username || url.password) return;
     if (url.pathname === '/profile.php') {
       const id = url.searchParams.get('id');
       return id && /^\d+$/.test(id) ? `https://www.facebook.com/profile.php?id=${id}&sk=about` : undefined;
@@ -75,17 +89,20 @@ export function interpretPublicPage(snapshot: PublicPageSnapshot, expectedUrl: s
 
 /** Serialized into an owned Page tab. Reads public About content; does not click or bypass access restrictions. */
 export function readPublicPageSnapshot(): PublicPageSnapshot {
-  const main = Array.from(document.querySelectorAll('[role=main],main')).find(element=>element.getClientRects().length>0);
-  const heading = main?.querySelector('h1,[role=heading][aria-level="1"]')?.textContent?.trim() || '';
+  const visibility={test(element:Element){return element.getClientRects().length>0 && (element.checkVisibility?.({checkOpacity:true,checkVisibilityCSS:true}) ?? getComputedStyle(element).visibility!=='hidden');}};
+  const excluded='[role=article],article,nav,[role=navigation],form';
+  const main = Array.from(document.querySelectorAll('[role=main],main')).find(visibility.test);
+  const heading = Array.from(main?.querySelectorAll('h1,[role=heading][aria-level="1"]') || []).find(visibility.test)?.textContent?.trim() || '';
   const text=(main?.textContent || '').slice(0,12000);
-  const blocked=/\/login|checkpoint|challenge/i.test(location.pathname) || /^(log (?:in|into)|login|লগ ইন)/i.test(heading) || (!heading && /log in|login|captcha|temporarily blocked|rate limit|লগ ইন/i.test(text));
+  const loginOverlay=Array.from(document.querySelectorAll('[role=dialog] input[type=password]')).some(visibility.test);
+  const blocked=loginOverlay || /\/login|checkpoint|challenge/i.test(location.pathname) || /^(log (?:in|into)|login|লগ ইন)/i.test(heading) || (!heading && /log in|login|captcha|temporarily blocked|rate limit|লগ ইন/i.test(text));
   const links: string[]=[];
   const addressTexts:string[]=[];
   const contactItems:NonNullable<PublicPageSnapshot['contactItems']>=[];
   if (main && !blocked) {
     for (const anchor of Array.from(main.querySelectorAll<HTMLAnchorElement>('a[href]'))) {
       const label=(anchor.textContent || '').trim();
-      if(anchor.closest('[role=article]') || !anchor.getClientRects().length)continue;
+      if(anchor.closest(excluded) || !visibility.test(anchor))continue;
       if(/^(tel:|mailto:)/i.test(anchor.href)){
         try { const type=anchor.href.toLowerCase().startsWith('tel:')?'PHONE':'EMAIL';const value=decodeURIComponent(anchor.href.slice(type==='PHONE'?4:7).split('?')[0]);contactItems.push({type,value}); }catch{}
         continue;
@@ -95,12 +112,15 @@ export function readPublicPageSnapshot(): PublicPageSnapshot {
       if(!anchor.closest('[role=article]') && anchor.getClientRects().length && /maps\.google\.|google\.[^/]+\/maps|maps\.app\.goo\.gl|goo\.gl\/maps/i.test(addressHref)){if(label)addressTexts.push(label.slice(0,500));continue;}
       if (!anchor.closest('[role=article]') && anchor.getClientRects().length && (/^https?:|^www\.|\.[a-z]{2,}(?:\/|$)/i.test(label) || /website|visit site|ওয়েবসাইট/i.test(anchor.getAttribute('aria-label') || '') || /\/l\.php\?/.test(anchor.href))) links.push(anchor.href);
     }
-    for(const element of Array.from(main.querySelectorAll<HTMLElement>('span,[dir=auto]'))){
-      if(element.children.length || !element.getClientRects().length || element.closest('[role=article],nav,[role=navigation],form'))continue;
-      const value=(element.innerText || '').trim();
+    for(const element of Array.from(main.querySelectorAll<HTMLElement>('span,[dir=auto],p,li,dd'))){
+      if(element.children.length || !visibility.test(element) || element.closest(excluded))continue;
+      const value=(element.innerText || '').trim().replace(/^(?:email|e-mail|phone|telephone|mobile|ইমেইল|ফোন|মোবাইল)\s*[:：]\s*/i,'');
       if(value.length>150)continue;
       if(/^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(value))contactItems.push({type:'EMAIL',value});
-      else if(/^(?:\+[\d ().-]{7,24}|0\d{8,12}|\(?\d{2,4}\)?[ -]\d[\d ().-]{5,22})$/.test(value))contactItems.push({type:'PHONE',value});
+      else {
+        const digits=value.normalize('NFKC').replace(/[০-৯०-९٠-٩۰-۹]/g,digit=>{const code=digit.charCodeAt(0);return String(code-(code>=0x09e6?0x09e6:code>=0x0966?0x0966:code>=0x06f0?0x06f0:0x0660));});
+        if(/^(?:\+[\d ().-]{7,24}|0\d{8,12}|\(?\d{2,4}\)?[ -]\d[\d ().-]{5,22})$/.test(digits))contactItems.push({type:'PHONE',value});
+      }
     }
   }
   const businesses: PublicPageSnapshot['businesses']=[];

@@ -17,6 +17,15 @@ try{
  assert(evidence.contacts.some(item=>item.type==='EMAIL' && item.normalizedValue==='support@dhakafurniture.test'));
  assert(evidence.contacts.some(item=>item.type==='PHONE'));
  assert(!evidence.contacts.some(item=>item.rawValue.includes('unrelated') || item.rawValue.includes('hidden')));
+ await page.setContent('<main style="display:none"><h1>Wrong Hidden Page</h1></main><main><h1 style="visibility:hidden">Wrong Hidden Heading</h1><h1>Dhaka Furniture</h1><p>ফোন: +৮৮০১৭১২৩৪৫৬৭৮</p><p>Email: public@fixture.test</p><nav><a href="mailto:nav@wrong.test">Email</a></nav><article><a href="tel:+12025550123">Call unrelated post</a></article><span style="visibility:hidden">hidden@wrong.test</span><a style="opacity:0" href="mailto:invisible@wrong.test">Email</a></main>');
+ const visibleSnapshot=await page.evaluate(readPublicPageSnapshot);
+ assert.equal(visibleSnapshot.heading,'Dhaka Furniture');
+ const visibleEvidence=interpretPublicPage({...visibleSnapshot,url:source},source,'Dhaka Furniture');
+ assert.equal(visibleEvidence.contacts.length,2);
+ assert(visibleEvidence.contacts.some(c=>c.normalizedValue==='+8801712345678'));
+ assert(visibleEvidence.contacts.some(c=>c.normalizedValue==='public@fixture.test'));
+ await page.setContent('<main><h1>Dhaka Furniture</h1><span>public@fixture.test</span></main><div role="dialog"><input type="password"></div>');
+ assert.equal((await page.evaluate(readPublicPageSnapshot)).blocked,true);
  await page.setContent('<main role="main"><h1>Log into Facebook</h1><form><input type="password"></form></main>');
  assert.equal((await page.evaluate(readPublicPageSnapshot)).blocked,true);
  console.log('PASS isolated DOM extraction: visible About website, post-link exclusion, matching structured address, unrelated organization exclusion, login wall. Local HTML only.');

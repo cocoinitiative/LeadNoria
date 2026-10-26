@@ -3978,7 +3978,11 @@ function normalizeContactPhone(rawPhone, countryHint) {
       reason: "No phone number observed in ad creative or links."
     };
   }
-  const cleaned = sanitizeText(rawPhone, 100);
+  const cleaned = sanitizeText(rawPhone, 100).normalize("NFKC").replace(/[০-৯०-९٠-٩۰-۹]/g, (digit) => {
+    const code = digit.charCodeAt(0);
+    const zero = code >= 2534 ? 2534 : code >= 2406 ? 2406 : code >= 1776 ? 1776 : 1632;
+    return String(code - zero);
+  });
   const digitsOnly = cleaned.replace(/[^0-9]/g, "");
   if (digitsOnly.length < 7 || digitsOnly.length > 15) {
     return {
@@ -4149,6 +4153,23 @@ function mergeContactObservations(existingProfile, incoming) {
 }
 
 // src/extension/publicPageEvidence.ts
+function mergePublicPageEvidence(first, next) {
+  if (next.status !== "CHECKED") return first;
+  if (first.status !== "CHECKED") return next;
+  if (businessPageAboutUrl(first.sourceUrl) !== businessPageAboutUrl(next.sourceUrl)) return first;
+  const contacts = [...first.contacts || [], ...next.contacts || []];
+  return {
+    ...first,
+    checkedAt: next.checkedAt,
+    accessRestricted: first.accessRestricted || next.accessRestricted,
+    retryable: first.retryable || next.retryable,
+    contacts: [...new Map(contacts.map((item) => [`${item.type}:${item.normalizedValue || item.rawValue}:${item.sourceUrl}`, item])).values()],
+    websiteUrls: [.../* @__PURE__ */ new Set([...first.websiteUrls, ...next.websiteUrls])],
+    addressCountryCodes: [.../* @__PURE__ */ new Set([...first.addressCountryCodes, ...next.addressCountryCodes])],
+    addressText: [...new Set([first.addressText, next.addressText].filter(Boolean))].join(" | ").slice(0, 1e3) || void 0,
+    reason: "Matched public Page observations retained across About/contact reads. Missing fields remain unknown; website ownership and contact deliverability are unverified."
+  };
+}
 function applyPublicPageEvidence(candidate, evidence) {
   candidate.businessPageEvidence = evidence;
   if (evidence.status !== "CHECKED") return;
@@ -4158,7 +4179,7 @@ function applyPublicPageEvidence(candidate, evidence) {
 function businessPageAboutUrl(raw) {
   try {
     const url = new URL(raw || "");
-    if (url.protocol !== "https:" || !["www.facebook.com", "web.facebook.com", "facebook.com"].includes(url.hostname) || url.username || url.password) return;
+    if (url.protocol !== "https:" || !["www.facebook.com", "web.facebook.com", "m.facebook.com", "facebook.com"].includes(url.hostname) || url.username || url.password) return;
     if (url.pathname === "/profile.php") {
       const id = url.searchParams.get("id");
       return id && /^\d+$/.test(id) ? `https://www.facebook.com/profile.php?id=${id}&sk=about` : void 0;
@@ -4209,17 +4230,22 @@ function interpretPublicPage(snapshot, expectedUrl, expectedName) {
   return { ...base, status: "CHECKED", contacts, websiteUrls: [...new Set(websites)].slice(0, 5), addressCountryCodes: countries, addressText: [...businesses.map((b) => b.address), ...visibleAddresses].filter(Boolean).join(" | ").slice(0, 1e3) || void 0, reason: websites.length ? "External website link observed on the matched public Page. Reachability and ownership are unverified." : "No website link was observed in the checked Page details. This does not prove the business has no website." };
 }
 function readPublicPageSnapshot() {
-  const main = Array.from(document.querySelectorAll("[role=main],main")).find((element) => element.getClientRects().length > 0);
-  const heading = main?.querySelector('h1,[role=heading][aria-level="1"]')?.textContent?.trim() || "";
+  const visibility = { test(element) {
+    return element.getClientRects().length > 0 && (element.checkVisibility?.({ checkOpacity: true, checkVisibilityCSS: true }) ?? getComputedStyle(element).visibility !== "hidden");
+  } };
+  const excluded = "[role=article],article,nav,[role=navigation],form";
+  const main = Array.from(document.querySelectorAll("[role=main],main")).find(visibility.test);
+  const heading = Array.from(main?.querySelectorAll('h1,[role=heading][aria-level="1"]') || []).find(visibility.test)?.textContent?.trim() || "";
   const text = (main?.textContent || "").slice(0, 12e3);
-  const blocked = /\/login|checkpoint|challenge/i.test(location.pathname) || /^(log (?:in|into)|login|লগ ইন)/i.test(heading) || !heading && /log in|login|captcha|temporarily blocked|rate limit|লগ ইন/i.test(text);
+  const loginOverlay = Array.from(document.querySelectorAll("[role=dialog] input[type=password]")).some(visibility.test);
+  const blocked = loginOverlay || /\/login|checkpoint|challenge/i.test(location.pathname) || /^(log (?:in|into)|login|লগ ইন)/i.test(heading) || !heading && /log in|login|captcha|temporarily blocked|rate limit|লগ ইন/i.test(text);
   const links = [];
   const addressTexts = [];
   const contactItems = [];
   if (main && !blocked) {
     for (const anchor of Array.from(main.querySelectorAll("a[href]"))) {
       const label = (anchor.textContent || "").trim();
-      if (anchor.closest("[role=article]") || !anchor.getClientRects().length) continue;
+      if (anchor.closest(excluded) || !visibility.test(anchor)) continue;
       if (/^(tel:|mailto:)/i.test(anchor.href)) {
         try {
           const type = anchor.href.toLowerCase().startsWith("tel:") ? "PHONE" : "EMAIL";
@@ -4241,12 +4267,18 @@ function readPublicPageSnapshot() {
       }
       if (!anchor.closest("[role=article]") && anchor.getClientRects().length && (/^https?:|^www\.|\.[a-z]{2,}(?:\/|$)/i.test(label) || /website|visit site|ওয়েবসাইট/i.test(anchor.getAttribute("aria-label") || "") || /\/l\.php\?/.test(anchor.href))) links.push(anchor.href);
     }
-    for (const element of Array.from(main.querySelectorAll("span,[dir=auto]"))) {
-      if (element.children.length || !element.getClientRects().length || element.closest("[role=article],nav,[role=navigation],form")) continue;
-      const value = (element.innerText || "").trim();
+    for (const element of Array.from(main.querySelectorAll("span,[dir=auto],p,li,dd"))) {
+      if (element.children.length || !visibility.test(element) || element.closest(excluded)) continue;
+      const value = (element.innerText || "").trim().replace(/^(?:email|e-mail|phone|telephone|mobile|ইমেইল|ফোন|মোবাইল)\s*[:：]\s*/i, "");
       if (value.length > 150) continue;
       if (/^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(value)) contactItems.push({ type: "EMAIL", value });
-      else if (/^(?:\+[\d ().-]{7,24}|0\d{8,12}|\(?\d{2,4}\)?[ -]\d[\d ().-]{5,22})$/.test(value)) contactItems.push({ type: "PHONE", value });
+      else {
+        const digits = value.normalize("NFKC").replace(/[০-৯०-९٠-٩۰-۹]/g, (digit) => {
+          const code = digit.charCodeAt(0);
+          return String(code - (code >= 2534 ? 2534 : code >= 2406 ? 2406 : code >= 1776 ? 1776 : 1632));
+        });
+        if (/^(?:\+[\d ().-]{7,24}|0\d{8,12}|\(?\d{2,4}\)?[ -]\d[\d ().-]{5,22})$/.test(digits)) contactItems.push({ type: "PHONE", value });
+      }
     }
   }
   const businesses = [];
@@ -8436,15 +8468,23 @@ function canStartExtensionCollection() {
 
 // src/extension/publicPageResearch.ts
 var delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-function withDeadline(operation, ms = 8e3) {
+function withDeadline(operation, ms = 8e3, cancelled = () => false) {
   let timer;
+  let poll;
   return Promise.race([operation, new Promise((_resolve, reject) => {
     timer = setTimeout(() => reject(new Error("Page read timed out")), ms);
-  })]).finally(() => clearTimeout(timer));
+    poll = setInterval(() => {
+      if (cancelled()) reject(new Error("Page checking stopped"));
+    }, 100);
+  })]).finally(() => {
+    clearTimeout(timer);
+    clearInterval(poll);
+  });
 }
 var PublicPageResearch = class {
   constructor() {
     this.cache = /* @__PURE__ */ new Map();
+    this.attempts = /* @__PURE__ */ new Map();
     this.blocked = false;
   }
   apply(candidate, evidence) {
@@ -8463,20 +8503,36 @@ var PublicPageResearch = class {
     }
     if (!loaded || cancelled()) return empty;
     await delay(800);
-    let best = empty, signature = "", stable = 0;
-    for (let attempt = 0; attempt < 8 && !cancelled(); attempt++) {
-      const result = await withDeadline(chrome.scripting.executeScript({ target: { tabId }, func: readPublicPageSnapshot }));
+    let best = empty, signature = "", stable = 0, failures = 0;
+    for (let attempt = 0; attempt < 16 && !cancelled(); attempt++) {
+      let result;
+      try {
+        result = await withDeadline(chrome.scripting.executeScript({ target: { tabId }, func: readPublicPageSnapshot }), 8e3, cancelled);
+      } catch {
+        if (cancelled()) return best;
+        if (++failures >= 2) return { ...best, retryable: true, reason: best.reason + " Page reading ended after two transient execution failures." };
+        await delay(500);
+        continue;
+      }
       const snapshot = result[0]?.result;
-      if (snapshot?.blocked) return interpretPublicPage(snapshot, source, name);
+      if (snapshot?.blocked) return best.status === "CHECKED" ? { ...best, accessRestricted: true, reason: best.reason + " An access restriction interrupted further reads; earlier observations were preserved." } : interpretPublicPage(snapshot, source, name);
       if (snapshot?.heading) {
         const evidence = interpretPublicPage(snapshot, source, name);
-        if (evidence.status === "IDENTITY_MISMATCH") return evidence;
-        best = evidence;
+        if (evidence.status === "IDENTITY_MISMATCH") {
+          best = best.status === "CHECKED" ? best : evidence;
+          await delay(500);
+          continue;
+        }
+        if (evidence.status !== "CHECKED") {
+          await delay(500);
+          continue;
+        }
+        best = mergePublicPageEvidence(best, evidence);
         const next = JSON.stringify([evidence.websiteUrls, evidence.contacts?.map((item) => [item.type, item.normalizedValue || item.rawValue]), evidence.addressCountryCodes, evidence.addressText]);
         stable = next === signature ? stable + 1 : 0;
         signature = next;
-        const complete = evidence.websiteUrls.length && evidence.contacts?.some((item) => item.type === "PHONE") && evidence.contacts?.some((item) => item.type === "EMAIL");
-        if (complete && stable >= 1 || attempt >= 3 && stable >= 2 && (evidence.websiteUrls.length || evidence.contacts?.length)) return evidence;
+        const complete = best.websiteUrls.length && best.contacts?.some((item) => item.type === "PHONE") && best.contacts?.some((item) => item.type === "EMAIL");
+        if (complete && stable >= 1) return best;
       }
       await delay(500);
     }
@@ -8494,8 +8550,10 @@ var PublicPageResearch = class {
         continue;
       }
       if (!candidate.facebookPageUrl) candidate.facebookPageUrl = raw;
-      const cached = this.cache.get(source);
-      if (cached) {
+      const name = candidate.pageName || candidate.advertiserName || "";
+      const key = source + "\n" + name.normalize("NFKC").toLocaleLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, " ").trim();
+      const cached = this.cache.get(key);
+      if (cached && (this.blocked || !cached.retryable || (this.attempts.get(key) || 0) >= 2)) {
         this.apply(candidate, cached);
         continue;
       }
@@ -8503,39 +8561,61 @@ var PublicPageResearch = class {
         this.apply(candidate, { sourceUrl: source, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), status: "BLOCKED", websiteUrls: [], addressCountryCodes: [], reason: "Page checking stopped after an access restriction. This Page was not read." });
         continue;
       }
+      if ((this.attempts.get(key) || 0) >= 2) {
+        this.apply(candidate, { sourceUrl: source, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), status: "UNAVAILABLE", websiteUrls: [], addressCountryCodes: [], reason: "Two attempts could not read this Page during this run. No contacts were invented." });
+        continue;
+      }
       let tabId;
-      let evidence = { sourceUrl: source, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), status: "UNAVAILABLE", websiteUrls: [], addressCountryCodes: [], reason: "The public Page could not be read; missing contact fields remain empty." };
+      let evidence = cached ? { ...cached, retryable: false } : { sourceUrl: source, checkedAt: (/* @__PURE__ */ new Date()).toISOString(), status: "UNAVAILABLE", websiteUrls: [], addressCountryCodes: [], reason: "The public Page could not be read; missing contact fields remain empty." };
       try {
+        this.attempts.set(key, (this.attempts.get(key) || 0) + 1);
         const tab = await chrome.tabs.create({ url: "about:blank", active: false });
         tabId = tab.id;
         if (tabId === void 0) throw new Error("No Page tab");
         await chrome.tabs.update(tabId, { url: source });
-        const name = candidate.pageName || candidate.advertiserName || "";
-        evidence = await this.read(tabId, source, name, cancelled);
+        const observed = await this.read(tabId, source, name, cancelled);
+        if (observed.status === "CHECKED") evidence = mergePublicPageEvidence(evidence, observed);
+        else if (evidence.status === "CHECKED") {
+          evidence.retryable = true;
+          evidence.reason += " The retry could not recheck About; earlier observations were preserved.";
+          if (observed.status === "BLOCKED") {
+            evidence.accessRestricted = true;
+            this.blocked = true;
+          }
+        } else evidence = observed;
         const hasPhone = evidence.contacts?.some((item) => item.type === "PHONE");
         const hasEmail = evidence.contacts?.some((item) => item.type === "EMAIL");
-        if (!cancelled() && evidence.status !== "BLOCKED" && evidence.status !== "IDENTITY_MISMATCH" && (!hasPhone || !hasEmail || !evidence.websiteUrls.length) && typeof chrome.tabs.update === "function") {
+        if (!cancelled() && !evidence.accessRestricted && evidence.status !== "BLOCKED" && evidence.status !== "IDENTITY_MISMATCH" && (!hasPhone || !hasEmail || !evidence.websiteUrls.length) && typeof chrome.tabs.update === "function") {
           const contactUrl = new URL(source);
           if (contactUrl.pathname === "/profile.php") contactUrl.searchParams.set("sk", "about_contact_and_basic_info");
           else contactUrl.pathname = contactUrl.pathname.replace(/\/about\/?$/, "/about_contact_and_basic_info");
           await chrome.tabs.update(tabId, { url: contactUrl.toString() });
           const extra = await this.read(tabId, contactUrl.toString(), name, cancelled);
           if (extra.status === "CHECKED") {
-            if (evidence.status !== "CHECKED") evidence = extra;
-            else evidence = { ...evidence, websiteUrls: [.../* @__PURE__ */ new Set([...evidence.websiteUrls, ...extra.websiteUrls])], addressCountryCodes: [.../* @__PURE__ */ new Set([...evidence.addressCountryCodes, ...extra.addressCountryCodes])], addressText: [evidence.addressText, extra.addressText].filter(Boolean).join(" | ") || void 0, contacts: [...evidence.contacts || [], ...extra.contacts || []], reason: "Public About and contact sections checked. Only observed business fields were retained; missing fields remain unknown." };
+            evidence = mergePublicPageEvidence(evidence, extra);
           } else if (extra.status === "BLOCKED") {
             this.blocked = true;
+            evidence.accessRestricted = true;
             evidence.reason += " The additional contact section was blocked; observed fields were preserved.";
+          } else {
+            evidence.retryable = extra.status === "UNAVAILABLE";
+            evidence.reason += " The additional contact section was unavailable or did not match; earlier observed fields were preserved.";
           }
         }
       } catch {
+        evidence.retryable = true;
+        evidence.reason += " Navigation or browser communication failed.";
       } finally {
         if (tabId !== void 0) await chrome.tabs.remove(tabId).catch(() => {
         });
       }
-      this.cache.set(source, evidence);
+      if (cancelled()) {
+        this.attempts.set(key, Math.max(0, (this.attempts.get(key) || 1) - 1));
+        break;
+      }
+      if (evidence.status === "CHECKED" || evidence.status === "IDENTITY_MISMATCH") this.cache.set(key, evidence);
       this.apply(candidate, evidence);
-      if (evidence.status === "BLOCKED") this.blocked = true;
+      if (evidence.status === "BLOCKED" || evidence.accessRestricted) this.blocked = true;
       if (!cancelled() && !this.blocked) await delay(700);
     }
   }

@@ -10,7 +10,12 @@ const visits=[];
 const names=['Furniture Shop Zero','বাংলা Furniture House'];
 const phones=['+8801712345678','+8801812345678'];
 const card=(i)=>`<div class="ad-card" style="padding:20px;margin:20px;border:1px solid"><span>Library ID: ${991000000000001+i}</span><div>Active</div><a href="https://www.facebook.com/FixtureShop${i}">${names[i]}</a><div>Sponsored</div><div>Handcrafted solid wood furniture, sofas, dining tables, wardrobes and beds. Visit our furniture showroom for custom home furniture.</div><a href="https://m.me/FixtureShop${i}">Send message</a><a href="https://www.facebook.com/ads/library/?id=${991000000000001+i}">See ad details</a></div>`;
-const about=(i,contact)=>`<html><body><main role="main"><h1>${names[i]}</h1><h2>About</h2><a href="https://shop${i}.test/Products?Color=Blue">shop${i}.test</a><a href="https://maps.google.com/?q=Dhaka">House 14, Dhaka, Bangladesh</a>${contact||i===1?`<a href="tel:${phones[i]}">Call</a><a href="mailto:sales@shop${i}.test">Email</a>`:''}</main></body></html>`;
+const about=(i,contact)=>{
+ const fields=`<a href="tel:${phones[i]}">Call</a><a href="mailto:sales@shop${i}.test">Email</a>`;
+ // Hydration fixture: contacts arrive 3.5 seconds after load, beyond the old early-stop window.
+ const delayed=contact?`<script>setTimeout(()=>document.querySelector('main').insertAdjacentHTML('beforeend',${JSON.stringify(fields)}),3500)</script>`:'';
+ return `<html><body><main role="main"><h1>${names[i]}</h1><h2>About</h2><a href="https://shop${i}.test/Products?Color=Blue">shop${i}.test</a><a href="https://maps.google.com/?q=Dhaka">House 14, Dhaka, Bangladesh</a>${i===1?fields:''}</main>${delayed}</body></html>`;
+};
 let context;
 try{
  context=await chromium.launchPersistentContext(profile,{headless:true,executablePath:chromium.executablePath(),args:['--proxy-server=http://127.0.0.1:9',`--disable-extensions-except=${extension}`,`--load-extension=${extension}`],viewport:{width:440,height:800}});
@@ -113,7 +118,7 @@ try{
  assert.equal(await page.getByRole('button',{name:'Download CSV (65)',exact:true}).isEnabled(),true);
  assert.deepEqual(pageErrors,[]);
  assert.equal(context.pages().filter(p=>p.url().startsWith('https://www.facebook.com/')).length,0);
- await fs.writeFile('../outputs/LeadNoria-mv3-workflow-report.json',JSON.stringify({scope:'Real isolated Chromium MV3 runtime; intercepted local HTML fixtures and a 65-row seeded storage fixture, not live Meta',passed:true,checks:['Content-script extraction','Every advertiser About visited','Contact-section fallback','Website/email/phone persistence','Five-column CSV download','Real clipboard Sheets paste columns','Reload persistence','Owned tab cleanup','All 65 seeded stored rows exported beyond the 50-row summary','Missing-row export block and Retry recovery'],visits,realFixturePageCount:2,seededStoredRowCount:65},null,2));
+ await fs.writeFile('../outputs/LeadNoria-mv3-workflow-report.json',JSON.stringify({scope:'Real isolated Chromium MV3 runtime; intercepted local HTML fixtures and a 65-row seeded storage fixture, not live Meta',passed:true,checks:['Content-script extraction','Every advertiser About visited','Contact-section fallback','Contacts rendered 3.5 seconds after document load','Website/email/phone persistence','Five-column CSV download','Real clipboard Sheets paste columns','Reload persistence','Owned tab cleanup','All 65 seeded stored rows exported beyond the 50-row summary','Missing-row export block and Retry recovery'],visits,realFixturePageCount:2,seededStoredRowCount:65},null,2));
  console.log('PASS real isolated MV3 fixture workflow: content script, public Page tabs, email/phone/website, five-column CSV and clipboard, reload and cleanup. No live Meta request.');
 }finally{
  await context?.close();

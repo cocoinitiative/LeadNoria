@@ -25090,7 +25090,11 @@ function normalizeContactPhone(rawPhone, countryHint) {
       reason: "No phone number observed in ad creative or links."
     };
   }
-  const cleaned = sanitizeText(rawPhone, 100);
+  const cleaned = sanitizeText(rawPhone, 100).normalize("NFKC").replace(/[০-৯०-९٠-٩۰-۹]/g, (digit) => {
+    const code = digit.charCodeAt(0);
+    const zero = code >= 2534 ? 2534 : code >= 2406 ? 2406 : code >= 1776 ? 1776 : 1632;
+    return String(code - zero);
+  });
   const digitsOnly = cleaned.replace(/[^0-9]/g, "");
   if (digitsOnly.length < 7 || digitsOnly.length > 15) {
     return {
@@ -25836,7 +25840,7 @@ function applyPublicPageEvidence(candidate, evidence) {
 function businessPageAboutUrl(raw) {
   try {
     const url = new URL(raw || "");
-    if (url.protocol !== "https:" || !["www.facebook.com", "web.facebook.com", "facebook.com"].includes(url.hostname) || url.username || url.password) return;
+    if (url.protocol !== "https:" || !["www.facebook.com", "web.facebook.com", "m.facebook.com", "facebook.com"].includes(url.hostname) || url.username || url.password) return;
     if (url.pathname === "/profile.php") {
       const id = url.searchParams.get("id");
       return id && /^\d+$/.test(id) ? `https://www.facebook.com/profile.php?id=${id}&sk=about` : void 0;

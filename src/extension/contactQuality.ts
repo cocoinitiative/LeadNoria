@@ -127,7 +127,11 @@ export function normalizeContactPhone(
     };
   }
 
-  const cleaned = sanitizeText(rawPhone, 100);
+  const cleaned = sanitizeText(rawPhone, 100).normalize('NFKC').replace(/[০-৯०-९٠-٩۰-۹]/g, digit => {
+    const code=digit.charCodeAt(0);
+    const zero=code>=0x09e6?0x09e6:code>=0x0966?0x0966:code>=0x06f0?0x06f0:0x0660;
+    return String(code-zero);
+  });
   const digitsOnly = cleaned.replace(/[^0-9]/g, '');
 
   if (digitsOnly.length < 7 || digitsOnly.length > 15) {
